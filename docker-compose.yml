@@ -1,0 +1,7 @@
+services:
+  comms:
+    build: ./host/pi/comms
+    volumes:
+      - /dev:/dev
+    privileged: true
+    restart: unless-stopped

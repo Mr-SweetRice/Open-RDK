@@ -1,0 +1,30 @@
+# ESP-IDF build output
+**/build/
+**/sdkconfig
+**/sdkconfig.old
+**/managed_components/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / other
+node_modules/
+
+# VS Code (optional; keep if you don't want to share settings)
+.vscode/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Docker local overrides / env
+.env
+
+# Docker
+*.log
+
+# OS
+.DS_Store

@@ -2,6 +2,7 @@ FROM debian:bookworm
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG IDF_VERSION=v5.2.2
+ARG ARDUINO_CLI_VERSION=1.4.0
 
 RUN apt-get update && apt-get install -y \
   git curl python3 python3-pip python3-venv \
@@ -22,7 +23,7 @@ ENV IDF_PATH=/opt/esp/idf
 WORKDIR /work
 
 # ---- Arduino CLI ----
-ARG ARDUINO_CLI_VERSION=1.4.0
+
 
 # Ensure CA certs are present for HTTPS downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \

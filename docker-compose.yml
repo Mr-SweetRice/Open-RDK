@@ -5,3 +5,4 @@ services:
       - /dev:/dev
     privileged: true
     restart: unless-stopped
+    network_mode: host

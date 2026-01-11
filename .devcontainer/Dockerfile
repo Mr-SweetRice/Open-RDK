@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /opt/esp && cd /opt/esp && \
   git clone -b ${IDF_VERSION} --recursive https://github.com/espressif/esp-idf.git idf && \
   cd idf && \
-  ./install.sh && \
-  python3 -m pip install --no-cache-dir -r requirements.txt
+  ./install.sh
+#took off redundance
 
 ENV IDF_PATH=/opt/esp/idf
 WORKDIR /work

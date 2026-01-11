@@ -13,9 +13,8 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/esp && cd /opt/esp && \
-  git clone --recursive https://github.com/espressif/esp-idf.git idf && \
-  cd idf && git checkout ${IDF_VERSION} && \
-  git submodule update --init --recursive && \
+  git clone -b ${IDF_VERSION} --recursive https://github.com/espressif/esp-idf.git idf && \
+  cd idf && \
   ./install.sh && \
   python3 -m pip install --no-cache-dir -r requirements.txt
 

@@ -5,12 +5,14 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
   "runArgs": [
     "--privileged",
-    "--network=host"
+    "--network=host",
+    "-v", "/dev:/dev"
   ],
   "mounts": [
   "source=esp-idf-tools,target=/root/.espressif,type=volume",
   "source=arduino-cli-data,target=/root/.arduino15,type=volume"
   ],
+  "postStartCommand": "source /opt/esp/idf/export.sh && export PATH=\"$PATH:/work/tools/scripts\"",
   "containerEnv": {
     "IDF_PATH": "/opt/esp/idf"
   },

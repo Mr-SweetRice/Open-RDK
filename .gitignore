@@ -3,6 +3,11 @@
 **/sdkconfig
 **/sdkconfig.old
 **/managed_components/
+# Ignore build outputs
+**/build/
+**/*.elf
+**/*.bin
+**/core.*
 
 # Python
 __pycache__/

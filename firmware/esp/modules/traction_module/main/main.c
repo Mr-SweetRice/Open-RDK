@@ -1,99 +1,62 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/ledc.h"
+#include "esp_log.h"
 
-//Motor associe
-#define driver_sleep_pin      21
-#define drive_enable_pin1    0
-#define drive_enable_pin2    1
-#define motor_enc1_pin   5
-#define motor_enc2_pin   6
+#include "traction_hal.h"
 
-#define a_clock_wise 1
-#define clock_wise 0
-#define motor_max_instant_output 70 //percent
-#define LEDC_MODE       LEDC_LOW_SPEED_MODE
-#define LEDC_TIMER      LEDC_TIMER_0
-#define LEDC_CHANNEL1   LEDC_CHANNEL_1
-#define LEDC_CHANNEL2   LEDC_CHANNEL_2
-#define LEDC_DUTY_RES   LEDC_TIMER_10_BIT   // 0..1023
-#define LEDC_FREQUENCY  20000               // 20 kHz
+// Pinos (como você definiu)
+#define DRIVER_SLEEP_PIN     GPIO_NUM_21
+#define DRIVE_ENABLE_PIN1    GPIO_NUM_0
+#define DRIVE_ENABLE_PIN2    GPIO_NUM_1
 
-static inline uint32_t max_duty(void) {
-    return (1U << LEDC_DUTY_RES) - 1U;
-}
+// PWM config
+#define PWM_FREQ_HZ          20000
+#define PWM_RES              LEDC_TIMER_10_BIT
 
-// Algumas SuperMini têm LED invertido (active-low). Se ficar “ao contrário”, troque para 0.
+// Limites
+#define MOTOR_MAX_OUTPUT_PCT 100
 
-static void ledc_init(){
-    ledc_timer_config_t timer = {
-        .speed_mode       = LEDC_MODE,
-        .timer_num        = LEDC_TIMER,
-        .duty_resolution  = LEDC_DUTY_RES,
-        .freq_hz          = LEDC_FREQUENCY,
-        .clk_cfg          = LEDC_AUTO_CLK,
-    };
-    ledc_timer_config(&timer);
+static const char *TAG = "main";
 
-    ledc_channel_config_t ch1 = {
-        .gpio_num   = drive_enable_pin1,
-        .speed_mode = LEDC_MODE,
-        .channel    = LEDC_CHANNEL1,
-        .intr_type  = LEDC_INTR_DISABLE,
-        .timer_sel  = LEDC_TIMER,
-        .duty       = 0,
-        .hpoint     = 0,
-    };
-    ledc_channel_config(&ch1);
-    ledc_channel_config_t ch2 = {
-        .gpio_num   = drive_enable_pin2,
-        .speed_mode = LEDC_MODE,
-        .channel    = LEDC_CHANNEL2,
-        .intr_type  = LEDC_INTR_DISABLE,
-        .timer_sel  = LEDC_TIMER,
-        .duty       = 0,
-        .hpoint     = 0,
-    };
-    ledc_channel_config(&ch2);
-}
-
-static void motor_control(int percent, int dir){
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
-
-    uint32_t duty = (max_duty() * (uint32_t)percent) / 100U;
-    if(dir == 0){
-        // sentido 1
-        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL1, duty);
-        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL1);
-        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL2, 0);
-        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL2);
-    } else {
-        // sentido 2
-        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL1, 0);
-        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL1);
-        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL2, duty);
-        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL2);
-    }
-}
-
-void app_main(void)
+static void motor_test_task(void *arg)
 {
+    (void)arg;
 
-    ledc_init();
-    gpio_reset_pin(driver_sleep_pin);                          // opcional, mas recomendado
-    gpio_set_direction(driver_sleep_pin, GPIO_MODE_OUTPUT);    // vira saída
+    // garante acordado
+    traction_motor_sleep(false);
 
-    gpio_set_level(driver_sleep_pin, 1);     
-    vTaskDelay(pdMS_TO_TICKS(5000));
     while (1) {
-        motor_control(0, a_clock_wise);
+        ESP_LOGI(TAG, "coast");
+        traction_motor_coast();
         vTaskDelay(pdMS_TO_TICKS(2000));
-        for(int i = 45; i<=100; i++){
-            motor_control(i, a_clock_wise);
+
+        ESP_LOGI(TAG, "ramp CW 45..%d", MOTOR_MAX_OUTPUT_PCT);
+        for (int i = 45; i <= MOTOR_MAX_OUTPUT_PCT; i++) {
+            traction_motor_set(i, TRACTION_DIR_CW);
             vTaskDelay(pdMS_TO_TICKS(50));
         }
 
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
+}
+
+void app_main(void)
+{
+    traction_motor_cfg_t cfg = {
+        .sleep_gpio      = DRIVER_SLEEP_PIN,
+        .pwm_gpio_a      = DRIVE_ENABLE_PIN1,
+        .pwm_gpio_b      = DRIVE_ENABLE_PIN2,
+
+        .speed_mode      = LEDC_LOW_SPEED_MODE,
+        .timer_num       = LEDC_TIMER_0,
+        .channel_a       = LEDC_CHANNEL_1,
+        .channel_b       = LEDC_CHANNEL_2,
+        .duty_resolution = PWM_RES,
+        .pwm_freq_hz     = PWM_FREQ_HZ,
+    };
+
+    ESP_ERROR_CHECK(traction_motor_init(&cfg));
+
+    // Task de teste (depois isso vira traction_control_task)
+    xTaskCreate(motor_test_task, "motor_test", 4096, NULL, 8, NULL);
 }

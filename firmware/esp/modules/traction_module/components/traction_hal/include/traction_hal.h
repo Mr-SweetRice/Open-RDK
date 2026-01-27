@@ -16,6 +16,37 @@ typedef enum {
 } traction_dir_t;
 
 typedef struct {
+    gpio_num_t pin_a;
+    gpio_num_t pin_b;
+    bool pullup;                 // true para pull-up interno
+    bool invert_direction;       // inverte sinal (+/-) caso o sentido fique ao contrário
+    int32_t counts_per_motor_rev; // ex.: 44 (x4)
+    int32_t gear_ratio;           // ex.: 45
+} traction_encoder_cfg_t;
+
+esp_err_t traction_encoder_init(const traction_encoder_cfg_t *cfg);
+void      traction_encoder_reset(int64_t value);
+esp_err_t traction_encoder_get_count(int64_t *out_count);
+
+int32_t   traction_encoder_counts_per_motor_rev(void);
+int32_t   traction_encoder_counts_per_output_rev(void);
+
+// Helpers para posição/velocidade (usam a config carregada)
+static inline float traction_counts_to_output_rev(int64_t counts) {
+    return (float)counts / (float)traction_encoder_counts_per_output_rev();
+}
+
+static inline float traction_counts_to_output_rad(int64_t counts) {
+    const float two_pi = 6.28318530718f;
+    return traction_counts_to_output_rev(counts) * two_pi;
+}
+
+static inline float traction_delta_counts_to_output_rpm(int64_t delta_counts, float dt_s) {
+    // rpm = (counts/s) * (60 / counts_per_rev)
+    return ((float)delta_counts / dt_s) * (60.0f / (float)traction_encoder_counts_per_output_rev());
+}
+
+typedef struct {
     gpio_num_t sleep_gpio;     // pino SLEEP/EN do driver (ex.: DRV8833)
     gpio_num_t pwm_gpio_a;     // IN1 (ou AIN1)
     gpio_num_t pwm_gpio_b;     // IN2 (ou AIN2)

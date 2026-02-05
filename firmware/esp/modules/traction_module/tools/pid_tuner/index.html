@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Traction PID Tuner</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #151b22;
+      --accent: #4cc9f0;
+      --muted: #7a8699;
+      --text: #e6edf3;
+    }
+    body {
+      margin: 0;
+      font-family: "Fira Sans", Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 10% 10%, #1f2a37 0%, var(--bg) 60%);
+      color: var(--text);
+    }
+    header {
+      padding: 16px 20px;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      padding: 0 20px 20px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid #232b36;
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    }
+    canvas {
+      width: 100%;
+      height: 360px;
+      background: #0b1116;
+      border-radius: 10px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .row label {
+      width: 40px;
+      color: var(--muted);
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    input[type="number"] {
+      width: 90px;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 6px;
+      padding: 6px;
+    }
+    button {
+      background: #1f2937;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #071018;
+      border-color: transparent;
+      font-weight: 600;
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status.ok { color: #84cc16; }
+    .status.err { color: #ef4444; }
+    .log {
+      background: #0b1116;
+      border: 1px solid #232b36;
+      border-radius: 8px;
+      padding: 8px;
+      height: 140px;
+      overflow: auto;
+      font-family: "Fira Mono", "Consolas", monospace;
+      font-size: 12px;
+      color: #c7d2fe;
+      white-space: pre-wrap;
+    }
+    .value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>Traction PID Tuner (USB/Serial)</header>
+  <div class="grid">
+    <div class="panel">
+      <canvas id="chart" width="800" height="360"></canvas>
+      <div class="row">
+        <div>Setpoint: <span class="value" id="spVal">0</span> rpm</div>
+        <div style="margin-left:auto;">Velocidade: <span class="value" id="rpmVal">0</span> rpm</div>
+      </div>
+      <div class="row">
+        <div>Saída PID: <span class="value" id="outVal">0</span> %</div>
+        <div style="margin-left:auto;" class="status">Saída não entra no gráfico</div>
+      </div>
+      <div class="row">
+        <div class="status">PID: KP=<span id="kpLegend">0</span> KI=<span id="kiLegend">0</span> KD=<span id="kdLegend">0</span></div>
+      </div>
+      <div class="row">
+        <label>SP</label>
+        <input id="spSlider" type="range" min="-300" max="300" step="1" value="0">
+        <input id="spInput" type="number" min="-300" max="300" step="1" value="0">
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <button id="connectBtn" class="primary">Conectar</button>
+        <button id="getBtn">Ler PID</button>
+        <button id="saveBtn">Salvar NVS</button>
+      </div>
+      <div class="status" id="status">Desconectado</div>
+      <div class="status" id="cmdStatus">Sem comandos</div>
+      <hr style="border-color:#232b36; margin:12px 0;">
+      <div class="row">
+        <label>KP</label>
+        <input id="kpSlider" type="range" min="0" max="100" step="0.01" value="1.00">
+        <input id="kpInput" type="number" min="0" max="100" step="0.01" value="1.00">
+      </div>
+      <div class="row">
+        <label>KI</label>
+        <input id="kiSlider" type="range" min="0" max="100" step="0.01" value="2.20">
+        <input id="kiInput" type="number" min="0" max="100" step="0.01" value="2.20">
+      </div>
+      <div class="row">
+        <label>KD</label>
+        <input id="kdSlider" type="range" min="0" max="100" step="0.01" value="0.00">
+        <input id="kdInput" type="number" min="0" max="100" step="0.01" value="0.00">
+      </div>
+      <hr style="border-color:#232b36; margin:12px 0;">
+      <div class="row">
+        <label>OUT</label>
+        <input id="outSlider" type="range" min="0" max="100" step="1" value="0">
+        <input id="outInput" type="number" min="0" max="100" step="1" value="0">
+      </div>
+      <div class="row">
+        <button id="outEnableBtn">Forçar Saída</button>
+        <button id="outClearBtn">Voltar PID</button>
+      </div>
+      <hr style="border-color:#232b36; margin:12px 0;">
+      <div class="row">
+        <button id="captureBtn">Iniciar Coleta</button>
+        <button id="clearCaptureBtn">Limpar</button>
+      </div>
+      <div class="row">
+        <button id="sweepBtn">Iniciar Varredura</button>
+        <button id="sweepStopBtn">Parar Varredura</button>
+      </div>
+      <div class="status" id="sweepStatus">Varredura: parada</div>
+      <div class="status">Coleta RPM x Saída (%)</div>
+      <canvas id="scatter" width="320" height="220" style="margin-top:8px;"></canvas>
+      <div class="status" style="margin-top:8px;">Tabela (últimos 150)</div>
+      <div id="tableWrap" class="log" style="height:160px; color:#e6edf3;"></div>
+      <div class="row">
+        <div class="status">Log do ESP32-C3</div>
+      </div>
+      <div id="log" class="log"></div>
+      <div class="status">Atualizaçao do grafico: 30 Hz</div>
+    </div>
+  </div>
+
+  <script>
+    const chart = document.getElementById("chart");
+    const ctx = chart.getContext("2d");
+    const spVal = document.getElementById("spVal");
+    const rpmVal = document.getElementById("rpmVal");
+    const statusEl = document.getElementById("status");
+    const outVal = document.getElementById("outVal");
+    const kpLegend = document.getElementById("kpLegend");
+    const kiLegend = document.getElementById("kiLegend");
+    const kdLegend = document.getElementById("kdLegend");
+    const logEl = document.getElementById("log");
+    const cmdStatusEl = document.getElementById("cmdStatus");
+    const scatter = document.getElementById("scatter");
+    const scatterCtx = scatter.getContext("2d");
+    const captureBtn = document.getElementById("captureBtn");
+    const clearCaptureBtn = document.getElementById("clearCaptureBtn");
+    const sweepBtn = document.getElementById("sweepBtn");
+    const sweepStopBtn = document.getElementById("sweepStopBtn");
+    const sweepStatus = document.getElementById("sweepStatus");
+    const tableWrap = document.getElementById("tableWrap");
+    let rxBytes = 0;
+    let lastRxAt = 0;
+    const connectBtn = document.getElementById("connectBtn");
+    const getBtn = document.getElementById("getBtn");
+    const saveBtn = document.getElementById("saveBtn");
+
+    const spSlider = document.getElementById("spSlider");
+    const spInput = document.getElementById("spInput");
+    const kpSlider = document.getElementById("kpSlider");
+    const kpInput = document.getElementById("kpInput");
+    const kiSlider = document.getElementById("kiSlider");
+    const kiInput = document.getElementById("kiInput");
+    const kdSlider = document.getElementById("kdSlider");
+    const kdInput = document.getElementById("kdInput");
+    const outSlider = document.getElementById("outSlider");
+    const outInput = document.getElementById("outInput");
+    const outEnableBtn = document.getElementById("outEnableBtn");
+    const outClearBtn = document.getElementById("outClearBtn");
+
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let buffer = "";
+    let pollTimer = null;
+    let captureOn = false;
+    let captureStartMs = 0;
+    const capture = [];
+    let sweepTimer = null;
+    const sweep = {
+      active: false,
+      out: 0.0,
+      step: 1.0,
+      waitMs: 1000,
+      nextSampleAt: 0,
+      awaitingSample: false,
+    };
+
+    const maxPoints = 600;
+    const data = [];
+
+    function drawChart() {
+      const w = chart.width;
+      const h = chart.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "#263241";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        const y = (h / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      if (data.length < 2) return;
+      const sp = data[data.length - 1].sp;
+      const rpm = data[data.length - 1].rpm;
+      const out = data[data.length - 1].out;
+      spVal.textContent = sp.toFixed(1);
+      rpmVal.textContent = rpm.toFixed(1);
+      outVal.textContent = out.toFixed(1);
+
+      const minY = -300;
+      const maxY = 300;
+      const range = maxY - minY;
+
+      function yScale(v) {
+        return h - ((v - minY) / range) * h;
+      }
+
+      ctx.strokeStyle = "#4cc9f0";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      data.forEach((p, i) => {
+        const x = (i / (maxPoints - 1)) * w;
+        const y = yScale(p.rpm);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.strokeStyle = "#fca311";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      data.forEach((p, i) => {
+        const x = (i / (maxPoints - 1)) * w;
+        const y = yScale(p.sp);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    function drawScatter() {
+      const w = scatter.width;
+      const h = scatter.height;
+      scatterCtx.clearRect(0, 0, w, h);
+      scatterCtx.fillStyle = "#0b1116";
+      scatterCtx.fillRect(0, 0, w, h);
+      scatterCtx.strokeStyle = "#263241";
+      scatterCtx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const x = (w / 4) * i;
+        const y = (h / 4) * i;
+        scatterCtx.beginPath();
+        scatterCtx.moveTo(x, 0);
+        scatterCtx.lineTo(x, h);
+        scatterCtx.stroke();
+        scatterCtx.beginPath();
+        scatterCtx.moveTo(0, y);
+        scatterCtx.lineTo(w, y);
+        scatterCtx.stroke();
+      }
+
+      const xMin = 0;
+      const xMax = 100;
+      const yMin = -300;
+      const yMax = 300;
+
+      function sx(v) {
+        return ((v - xMin) / (xMax - xMin)) * w;
+      }
+      function sy(v) {
+        return h - ((v - yMin) / (yMax - yMin)) * h;
+      }
+
+      scatterCtx.fillStyle = "#4cc9f0";
+      for (const p of capture) {
+        const x = sx(p.out);
+        const y = sy(p.rpm);
+        scatterCtx.fillRect(x - 1, y - 1, 2, 2);
+      }
+    }
+
+    function updateTable() {
+      if (!tableWrap) return;
+      const rows = capture.slice(-150).map((p) =>
+        `${p.t.toFixed(2)}s  rpm=${p.rpm.toFixed(2)}  out=${p.out.toFixed(2)}  sp=${p.sp.toFixed(2)}`
+      );
+      tableWrap.textContent = rows.join("\n");
+      tableWrap.scrollTop = tableWrap.scrollHeight;
+    }
+
+    function appendData(sp, rpm, out) {
+      data.push({ sp, rpm, out });
+      if (data.length > maxPoints) data.shift();
+      drawChart();
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+    function setCmdStatus(text, ok = true) {
+      if (!cmdStatusEl) return;
+      cmdStatusEl.textContent = text;
+      cmdStatusEl.classList.toggle("ok", ok);
+      cmdStatusEl.classList.toggle("err", !ok);
+    }
+
+    function appendLog(line) {
+      if (!logEl) return;
+      logEl.textContent += line + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function appendRawChunk(text) {
+      if (!logEl) return;
+      if (text && text.length) {
+        logEl.textContent += "<< " + text;
+        rxBytes += text.length;
+        lastRxAt = Date.now();
+      }
+      if (logEl.textContent.length > 8000) {
+        logEl.textContent = logEl.textContent.slice(-8000);
+      }
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function connect(useChooser = true) {
+      try {
+        if (!("serial" in navigator)) {
+          setStatus("Web Serial nao suportado");
+          return;
+        }
+        if (useChooser) {
+          port = await navigator.serial.requestPort();
+        } else {
+          const ports = await navigator.serial.getPorts();
+          if (!ports.length) {
+            setStatus("Nenhuma porta pareada");
+            return;
+          }
+          port = ports[0];
+        }
+        await port.open({ baudRate: 115200 });
+        reader = port.readable.getReader();
+        writer = port.writable.getWriter();
+        setStatus("Conectado");
+        connectBtn.textContent = "Desconectar";
+        appendLog("PORT: conectado");
+        readLoop();
+        sendLine("GET");
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(() => {
+          if (writer) sendLine("GET");
+        }, 2000);
+      } catch (err) {
+        setStatus("Erro: " + (err && err.message ? err.message : err));
+        appendLog("ERRO: " + (err && err.message ? err.message : err));
+      }
+    }
+
+    async function disconnect() {
+      try {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        if (reader) {
+          reader.cancel();
+          reader.releaseLock();
+          reader = null;
+        }
+        if (writer) {
+          writer.releaseLock();
+          writer = null;
+        }
+        if (port) {
+          await port.close();
+          port = null;
+        }
+        setStatus("Desconectado");
+        connectBtn.textContent = "Conectar";
+        appendLog("PORT: desconectado");
+      } catch (err) {
+        setStatus("Erro: " + (err && err.message ? err.message : err));
+        appendLog("ERRO: " + (err && err.message ? err.message : err));
+      }
+    }
+
+    async function readLoop() {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          appendRawChunk(chunk);
+          buffer += chunk;
+          let idx;
+          while ((idx = buffer.search(/[\r\n]/)) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (line.length > 0) handleLine(line);
+          }
+        }
+      } catch (err) {
+        appendLog("ERRO RX: " + (err && err.message ? err.message : err));
+      }
+    }
+
+    function handleLine(line) {
+      appendLog("<< " + line);
+      if (line === "OK") {
+        setCmdStatus("OK", true);
+        return;
+      }
+      if (line === "ERR") {
+        setCmdStatus("ERR", false);
+        return;
+      }
+      if (line.startsWith("S,OK")) {
+        setCmdStatus("NVS salvo", true);
+        return;
+      }
+      if (line.startsWith("S,ERR")) {
+        setCmdStatus("NVS erro: " + line, false);
+        return;
+      }
+      if (line.startsWith("T,")) {
+        const parts = line.split(",");
+        if (parts.length >= 4) {
+          const sp = parseFloat(parts[1]);
+          const rpm = parseFloat(parts[2]);
+          const out = parseFloat(parts[3]);
+          appendData(sp, rpm, out);
+          if ((captureOn || sweep.active) && Number.isFinite(out) && Number.isFinite(rpm)) {
+            const t = (Date.now() - captureStartMs) / 1000;
+            if (sweep.active && sweep.awaitingSample) {
+              capture.push({ t, rpm, out, sp });
+              if (capture.length > 2000) capture.shift();
+              sweep.awaitingSample = false;
+              advanceSweep();
+              drawScatter();
+              updateTable();
+            } else if (captureOn) {
+              capture.push({ t, rpm, out, sp });
+              if (capture.length > 2000) capture.shift();
+              drawScatter();
+              updateTable();
+            }
+          }
+        }
+      } else if (line.startsWith("P,")) {
+        const parts = line.split(",");
+        if (parts.length >= 5) {
+          setValue(kpSlider, kpInput, parts[1]);
+          setValue(kiSlider, kiInput, parts[2]);
+          setValue(kdSlider, kdInput, parts[3]);
+          setValue(spSlider, spInput, parts[4]);
+          kpLegend.textContent = String(parts[1]).trim();
+          kiLegend.textContent = String(parts[2]).trim();
+          kdLegend.textContent = String(parts[3]).trim();
+        }
+      }
+    }
+
+    function setValue(slider, input, val) {
+      const raw = String(val).trim();
+      const v = parseFloat(raw);
+      if (Number.isFinite(v)) {
+        slider.value = v;
+        input.value = raw;
+      }
+    }
+
+    function sendLine(text) {
+      if (!writer) return;
+      setCmdStatus("Enviado: " + text, true);
+      appendLog(">> " + text);
+      const data = new TextEncoder().encode(text + "\n");
+      writer.write(data);
+    }
+
+    function bindPair(slider, input, cmd) {
+      let lastSent = 0;
+      function send(v) {
+        const now = Date.now();
+        if (now - lastSent < 100) return;
+        lastSent = now;
+        sendLine(cmd + " " + v);
+      }
+      slider.addEventListener("input", () => {
+        input.value = slider.value;
+        send(slider.value);
+      });
+      input.addEventListener("change", () => {
+        slider.value = input.value;
+        send(input.value);
+      });
+    }
+
+    connectBtn.addEventListener("click", () => {
+      if (port) {
+        disconnect();
+      } else {
+        connect(true);
+      }
+    });
+    getBtn.addEventListener("click", () => sendLine("GET"));
+    saveBtn.addEventListener("click", () => sendLine("SAVE"));
+
+    bindPair(kpSlider, kpInput, "SET KP");
+    bindPair(kiSlider, kiInput, "SET KI");
+    bindPair(kdSlider, kdInput, "SET KD");
+    bindPair(spSlider, spInput, "SET SP");
+
+    outEnableBtn.addEventListener("click", () => {
+      sendLine("SET OUT " + outSlider.value);
+    });
+    outClearBtn.addEventListener("click", () => {
+      sendLine("CLR OUT");
+    });
+    outSlider.addEventListener("input", () => {
+      outInput.value = outSlider.value;
+    });
+    outInput.addEventListener("change", () => {
+      outSlider.value = outInput.value;
+    });
+
+    captureBtn.addEventListener("click", () => {
+      captureOn = !captureOn;
+      if (captureOn) {
+        captureStartMs = Date.now();
+        captureBtn.textContent = "Parar Coleta";
+      } else {
+        captureBtn.textContent = "Iniciar Coleta";
+      }
+    });
+    clearCaptureBtn.addEventListener("click", () => {
+      capture.length = 0;
+      drawScatter();
+      updateTable();
+    });
+
+    function updateSweepStatus() {
+      if (!sweepStatus) return;
+      if (!sweep.active) {
+        sweepStatus.textContent = "Varredura: parada";
+      } else {
+        sweepStatus.textContent = `Varredura: OUT=${sweep.out.toFixed(2)}%`;
+      }
+    }
+
+    function advanceSweep() {
+      sweep.out = Math.round((sweep.out + sweep.step) * 100) / 100;
+      if (sweep.out > 100.0) {
+        stopSweep(true);
+        return;
+      }
+      sendLine("SET OUT " + sweep.out.toFixed(2));
+      sweep.nextSampleAt = Date.now() + sweep.waitMs;
+      sweep.awaitingSample = false;
+      updateSweepStatus();
+    }
+
+    function startSweep() {
+      if (sweep.active) return;
+      capture.length = 0;
+      drawScatter();
+      updateTable();
+      captureStartMs = Date.now();
+      sweep.active = true;
+      sweep.out = 0.0;
+      sweep.awaitingSample = false;
+      sendLine("SET OUT 0");
+      sweep.nextSampleAt = Date.now() + sweep.waitMs;
+      updateSweepStatus();
+      if (sweepTimer) clearInterval(sweepTimer);
+      sweepTimer = setInterval(() => {
+        if (!sweep.active) return;
+        if (Date.now() >= sweep.nextSampleAt) {
+          // espera próxima amostra T
+          sweep.awaitingSample = true;
+        }
+      }, 50);
+    }
+
+    function stopSweep(clearOut) {
+      sweep.active = false;
+      sweep.awaitingSample = false;
+      if (sweepTimer) {
+        clearInterval(sweepTimer);
+        sweepTimer = null;
+      }
+      updateSweepStatus();
+      if (clearOut) {
+        sendLine("CLR OUT");
+      }
+    }
+
+    sweepBtn.addEventListener("click", startSweep);
+    sweepStopBtn.addEventListener("click", () => stopSweep(true));
+
+    if ("serial" in navigator) {
+      navigator.serial.addEventListener("disconnect", () => {
+        setStatus("Desconectado");
+        connectBtn.textContent = "Conectar";
+        appendLog("PORT: desconectado");
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      });
+      setInterval(() => {
+        if (port && Date.now() - lastRxAt > 3000) {
+          setCmdStatus("Sem RX (verifique a porta COM)", false);
+        }
+      }, 1000);
+      // tenta auto-conectar em porta ja pareada
+      connect(false);
+    }
+  </script>
+</body>
+</html>

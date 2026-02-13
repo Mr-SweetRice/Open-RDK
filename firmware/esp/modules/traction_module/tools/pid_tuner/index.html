@@ -136,7 +136,7 @@
       <div class="row">
         <button id="connectBtn" class="primary">Connect</button>
         <button id="getBtn">Read PID</button>
-        <button id="saveBtn">Save NVS</button>
+        <button id="saveBtn">Save</button>
       </div>
       <div class="row">
         <button id="startStopBtn" class="primary">START</button>
@@ -696,6 +696,12 @@
       writer.write(data);
     }
 
+    function bindClick(el, handler) {
+      if (!el) return false;
+      el.addEventListener("click", handler);
+      return true;
+    }
+
     function isRunningSetpoint(sp) {
       return Number.isFinite(sp) && (sp >= START_STOP_THRESHOLD_RPM || sp <= -START_STOP_THRESHOLD_RPM);
     }
@@ -712,6 +718,7 @@
     }
 
     function bindPair(slider, input, cmd) {
+      if (!slider || !input) return;
       let lastSent = 0;
       function send(v) {
         const now = Date.now();
@@ -730,14 +737,14 @@
       });
     }
 
-    connectBtn.addEventListener("click", () => {
+    bindClick(connectBtn, () => {
       if (port) {
         disconnect();
       } else {
         connect(true);
       }
     });
-    getBtn.addEventListener("click", () => sendLine("GET PID RPM"));
+    bindClick(getBtn, () => sendLine("GET PID RPM"));
     function pauseTelemForSave() {
       stopTelem();
       setTimeout(() => {
@@ -747,12 +754,12 @@
       }, SAVE_TELEM_PAUSE_MS);
     }
 
-    saveBtn.addEventListener("click", () => {
+    bindClick(saveBtn, () => {
       sendLine("SAVE PID RPM");
       pauseTelemForSave();
     });
 
-    startStopBtn.addEventListener("click", () => {
+    bindClick(startStopBtn, () => {
       const currentSp = parseFloat(spInput.value);
       if (isRunningSetpoint(currentSp)) {
         setSetpointFromStartStop(START_STOP_SP_STOP);
@@ -776,7 +783,7 @@
       }, TELEM_INTERVAL_MS);
     }
 
-    telemToggleBtn.addEventListener("click", () => {
+    bindClick(telemToggleBtn, () => {
       telemEnabled = !telemEnabled;
       if (telemEnabled) {
         telemToggleBtn.textContent = "Pause Telemetry";
@@ -787,7 +794,7 @@
       }
     });
 
-    logClearBtn.addEventListener("click", () => {
+    bindClick(logClearBtn, () => {
       if (logEl) logEl.textContent = "";
     });
 
@@ -795,24 +802,30 @@
     bindPair(kiSlider, kiInput, "SET PID RPM KI");
     bindPair(kdSlider, kdInput, "SET PID RPM KD");
     bindPair(spSlider, spInput, "SET PID RPM SP");
-    spSlider.addEventListener("input", () => updateStartStopButton(parseFloat(spSlider.value)));
-    spInput.addEventListener("change", () => updateStartStopButton(parseFloat(spInput.value)));
-    updateStartStopButton(parseFloat(spInput.value));
+    if (spSlider) {
+      spSlider.addEventListener("input", () => updateStartStopButton(parseFloat(spSlider.value)));
+    }
+    if (spInput) {
+      spInput.addEventListener("change", () => updateStartStopButton(parseFloat(spInput.value)));
+      updateStartStopButton(parseFloat(spInput.value));
+    }
 
-    outEnableBtn.addEventListener("click", () => {
+    bindClick(outEnableBtn, () => {
       sendLine("SET OUT " + outSlider.value);
     });
-    outClearBtn.addEventListener("click", () => {
+    bindClick(outClearBtn, () => {
       sendLine("CLR OUT");
     });
-    outSlider.addEventListener("input", () => {
-      outInput.value = outSlider.value;
-    });
-    outInput.addEventListener("change", () => {
-      outSlider.value = outInput.value;
-    });
+    if (outSlider && outInput) {
+      outSlider.addEventListener("input", () => {
+        outInput.value = outSlider.value;
+      });
+      outInput.addEventListener("change", () => {
+        outSlider.value = outInput.value;
+      });
+    }
 
-    captureBtn.addEventListener("click", () => {
+    bindClick(captureBtn, () => {
       captureOn = !captureOn;
       if (captureOn) {
         captureStartMs = Date.now();
@@ -821,7 +834,7 @@
         captureBtn.textContent = "Start Capture";
       }
     });
-    clearCaptureBtn.addEventListener("click", () => {
+    bindClick(clearCaptureBtn, () => {
       capture.length = 0;
       drawScatter();
       updateTable();
@@ -883,8 +896,8 @@
       }
     }
 
-    sweepBtn.addEventListener("click", startSweep);
-    sweepStopBtn.addEventListener("click", () => stopSweep(true));
+    bindClick(sweepBtn, startSweep);
+    bindClick(sweepStopBtn, () => stopSweep(true));
 
     if ("serial" in navigator) {
       navigator.serial.addEventListener("disconnect", () => {

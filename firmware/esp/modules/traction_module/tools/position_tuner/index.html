@@ -126,6 +126,7 @@
       <div class="row">
         <button id="connectBtn" class="primary">Connect</button>
         <button id="getBtn">Read POS PID</button>
+        <button id="saveBtn">Save</button>
       </div>
       <div class="row">
         <button id="startBtn" class="primary">Start POS</button>
@@ -201,6 +202,7 @@
 
     const connectBtn = document.getElementById("connectBtn");
     const getBtn = document.getElementById("getBtn");
+    const saveBtn = document.getElementById("saveBtn");
     const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
     const telemBtn = document.getElementById("telemBtn");
@@ -386,6 +388,12 @@
       writer.write(data);
     }
 
+    function bindClick(el, handler) {
+      if (!el) return false;
+      el.addEventListener("click", handler);
+      return true;
+    }
+
     function sendTargetRev(rev) {
       const clampedRev = clamp(rev, 0, 1);
       targetInput.value = clampedRev.toFixed(4);
@@ -421,6 +429,7 @@
     }
 
     function bindNumeric(input, cmdPrefix) {
+      if (!input) return;
       input.addEventListener("change", () => {
         const v = parseFloat(input.value);
         if (!Number.isFinite(v)) return;
@@ -628,18 +637,19 @@
       }
     }
 
-    connectBtn.addEventListener("click", () => {
+    bindClick(connectBtn, () => {
       if (port) void closeSerial({ logDisconnect: true, reportErrors: true });
       else void connect(true);
     });
-    getBtn.addEventListener("click", () => {
+    bindClick(getBtn, () => {
       sendLine("GET PID POS");
       sendLine("GET PID POS SINE");
     });
-    startBtn.addEventListener("click", () => sendLine("START PID POS"));
-    stopBtn.addEventListener("click", () => sendLine("STOP PID POS"));
-    stopBtn.addEventListener("click", () => stopSineTest(true));
-    telemBtn.addEventListener("click", () => {
+    bindClick(saveBtn, () => sendLine("SAVE PID POS"));
+    bindClick(startBtn, () => sendLine("START PID POS"));
+    bindClick(stopBtn, () => sendLine("STOP PID POS"));
+    bindClick(stopBtn, () => stopSineTest(true));
+    bindClick(telemBtn, () => {
       telemEnabled = !telemEnabled;
       if (telemEnabled) {
         telemBtn.textContent = "Pause Telemetry";
@@ -649,24 +659,28 @@
         stopTelem();
       }
     });
-    clearLogBtn.addEventListener("click", () => { logEl.textContent = ""; });
+    bindClick(clearLogBtn, () => { logEl.textContent = ""; });
 
-    setTargetBtn.addEventListener("click", () => {
+    bindClick(setTargetBtn, () => {
       stopSineTest(true);
       const v = parseFloat(targetInput.value);
       if (!Number.isFinite(v)) return;
       sendTargetRev(v);
     });
 
-    angleSlider.addEventListener("input", () => {
-      stopSineTest(true);
-      syncRevFromAngleDeg(parseFloat(angleSlider.value));
-    });
-    angleInput.addEventListener("change", () => {
-      stopSineTest(true);
-      syncRevFromAngleDeg(parseFloat(angleInput.value));
-    });
-    setAngleBtn.addEventListener("click", () => {
+    if (angleSlider) {
+      angleSlider.addEventListener("input", () => {
+        stopSineTest(true);
+        syncRevFromAngleDeg(parseFloat(angleSlider.value));
+      });
+    }
+    if (angleInput) {
+      angleInput.addEventListener("change", () => {
+        stopSineTest(true);
+        syncRevFromAngleDeg(parseFloat(angleInput.value));
+      });
+    }
+    bindClick(setAngleBtn, () => {
       stopSineTest(true);
       const deg = parseFloat(angleInput.value);
       if (!Number.isFinite(deg)) return;
@@ -675,8 +689,8 @@
       sendTargetRev(rev);
     });
 
-    sineStartBtn.addEventListener("click", () => startSineTest());
-    sineStopBtn.addEventListener("click", () => stopSineTest(true));
+    bindClick(sineStartBtn, () => startSineTest());
+    bindClick(sineStopBtn, () => stopSineTest(true));
 
     bindNumeric(kpInput, "SET PID POS KP");
     bindNumeric(kiInput, "SET PID POS KI");

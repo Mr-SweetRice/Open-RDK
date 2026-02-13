@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "esp_err.h"
+#include "esp_attr.h"
 
 static traction_encoder_cfg_t s_enc_cfg;
 static volatile int64_t s_count = 0;
@@ -12,14 +13,14 @@ static bool s_inited = false;
 
 // Tabela padrão de quadratura (Gray code) para delta
 // idx = (prev<<2) | curr, prev/curr em [0..3] (bits: A<<1 | B)
-static const int8_t s_quad_table[16] = {
+DRAM_ATTR static const int8_t s_quad_table[16] = {
      0, -1, +1,  0,
     +1,  0,  0, -1,
     -1,  0,  0, +1,
      0, +1, -1,  0
 };
 
-static inline uint8_t read_state(void)
+static inline uint8_t IRAM_ATTR read_state(void)
 {
     // A como bit1, B como bit0
     uint8_t a = (uint8_t)gpio_get_level(s_enc_cfg.pin_a);
@@ -96,6 +97,17 @@ esp_err_t traction_encoder_get_count(int64_t *out_count)
     portEXIT_CRITICAL(&s_mux);
 
     return ESP_OK;
+}
+
+esp_err_t traction_encoder_set_irq_enabled(bool enabled)
+{
+    if (!s_inited) return ESP_ERR_INVALID_STATE;
+
+    esp_err_t err = enabled ? gpio_intr_enable(s_enc_cfg.pin_a) : gpio_intr_disable(s_enc_cfg.pin_a);
+    if (err != ESP_OK) return err;
+
+    err = enabled ? gpio_intr_enable(s_enc_cfg.pin_b) : gpio_intr_disable(s_enc_cfg.pin_b);
+    return err;
 }
 
 int32_t traction_encoder_counts_per_motor_rev(void)

@@ -27,6 +27,7 @@ typedef struct {
 esp_err_t traction_encoder_init(const traction_encoder_cfg_t *cfg);
 void      traction_encoder_reset(int64_t value);
 esp_err_t traction_encoder_get_count(int64_t *out_count);
+esp_err_t traction_encoder_set_irq_enabled(bool enabled);
 
 int32_t   traction_encoder_counts_per_motor_rev(void);
 int32_t   traction_encoder_counts_per_output_rev(void);
@@ -62,7 +63,8 @@ typedef struct {
 esp_err_t traction_motor_init(const traction_motor_cfg_t *cfg);
 esp_err_t traction_motor_sleep(bool enable_sleep);                 // true = dorme, false = acorda
 esp_err_t traction_motor_set(int percent, traction_dir_t dir);     // 0..100%
-esp_err_t traction_motor_coast(void);                              // “solto” (IN1=0, IN2=0)
+esp_err_t traction_motor_coast(void);                              // roda livre (IN1=0, IN2=0)
+esp_err_t traction_motor_brake(void);                              // freio ativo (IN1=1, IN2=1)
 
 #ifdef __cplusplus
 }

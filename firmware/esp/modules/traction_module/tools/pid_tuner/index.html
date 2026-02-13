@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -105,35 +105,47 @@
   </style>
 </head>
 <body>
-  <header>Traction PID Tuner (USB/Serial)</header>
+  <header>
+    Traction PID Tuner (USB/Serial)
+    <a href="../position_tuner/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Position Page</a>
+  </header>
   <div class="grid">
     <div class="panel">
       <canvas id="chart" width="800" height="360"></canvas>
       <div class="row">
         <div>Setpoint: <span class="value" id="spVal">0</span> rpm</div>
-        <div style="margin-left:auto;">Velocidade: <span class="value" id="rpmVal">0</span> rpm</div>
+        <div style="margin-left:auto;">Speed: <span class="value" id="rpmVal">0</span> rpm</div>
       </div>
       <div class="row">
-        <div>Saída PID: <span class="value" id="outVal">0</span> %</div>
-        <div style="margin-left:auto;" class="status">Saída não entra no gráfico</div>
+        <div>PID Output: <span class="value" id="outVal">0</span> %</div>
+        <div style="margin-left:auto;">PID Raw: <span class="value" id="outRawVal">0</span> %</div>
+      </div>
+      <div class="row">
+        <div style="margin-left:auto;" class="status">Output is not plotted</div>
       </div>
       <div class="row">
         <div class="status">PID: KP=<span id="kpLegend">0</span> KI=<span id="kiLegend">0</span> KD=<span id="kdLegend">0</span></div>
       </div>
       <div class="row">
         <label>SP</label>
-        <input id="spSlider" type="range" min="-300" max="300" step="1" value="0">
-        <input id="spInput" type="number" min="-300" max="300" step="1" value="0">
+        <input id="spSlider" type="range" min="-150" max="150" step="1" value="0">
+        <input id="spInput" type="number" min="-150" max="150" step="1" value="0">
       </div>
     </div>
     <div class="panel">
       <div class="row">
-        <button id="connectBtn" class="primary">Conectar</button>
-        <button id="getBtn">Ler PID</button>
-        <button id="saveBtn">Salvar NVS</button>
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="getBtn">Read PID</button>
+        <button id="saveBtn">Save NVS</button>
       </div>
-      <div class="status" id="status">Desconectado</div>
-      <div class="status" id="cmdStatus">Sem comandos</div>
+      <div class="row">
+        <button id="startStopBtn" class="primary">START</button>
+      </div>
+      <div class="row">
+        <button id="telemToggleBtn">Pause Telemetry</button>
+      </div>
+      <div class="status" id="status">Disconnected</div>
+      <div class="status" id="cmdStatus">No commands</div>
       <hr style="border-color:#232b36; margin:12px 0;">
       <div class="row">
         <label>KP</label>
@@ -157,28 +169,29 @@
         <input id="outInput" type="number" min="0" max="100" step="1" value="0">
       </div>
       <div class="row">
-        <button id="outEnableBtn">Forçar Saída</button>
-        <button id="outClearBtn">Voltar PID</button>
+        <button id="outEnableBtn">Force Output</button>
+        <button id="outClearBtn">Resume PID</button>
       </div>
       <hr style="border-color:#232b36; margin:12px 0;">
       <div class="row">
-        <button id="captureBtn">Iniciar Coleta</button>
-        <button id="clearCaptureBtn">Limpar</button>
+        <button id="captureBtn">Start Capture</button>
+        <button id="clearCaptureBtn">Clear</button>
       </div>
       <div class="row">
-        <button id="sweepBtn">Iniciar Varredura</button>
-        <button id="sweepStopBtn">Parar Varredura</button>
+        <button id="sweepBtn">Start Sweep</button>
+        <button id="sweepStopBtn">Stop Sweep</button>
       </div>
-      <div class="status" id="sweepStatus">Varredura: parada</div>
-      <div class="status">Coleta RPM x Saída (%)</div>
+      <div class="status" id="sweepStatus">Sweep: stopped</div>
+      <div class="status">RPM vs Output Capture (%)</div>
       <canvas id="scatter" width="320" height="220" style="margin-top:8px;"></canvas>
-      <div class="status" style="margin-top:8px;">Tabela (últimos 150)</div>
+      <div class="status" style="margin-top:8px;">Table (last 150)</div>
       <div id="tableWrap" class="log" style="height:160px; color:#e6edf3;"></div>
       <div class="row">
-        <div class="status">Log do ESP32-C3</div>
+        <div class="status">ESP32-C3 Log</div>
+        <button id="logClearBtn" style="margin-left:auto;">Clear Log</button>
       </div>
       <div id="log" class="log"></div>
-      <div class="status">Atualizaçao do grafico: 30 Hz</div>
+      <div class="status">Chart update: 30 Hz</div>
     </div>
   </div>
 
@@ -189,6 +202,7 @@
     const rpmVal = document.getElementById("rpmVal");
     const statusEl = document.getElementById("status");
     const outVal = document.getElementById("outVal");
+    const outRawVal = document.getElementById("outRawVal");
     const kpLegend = document.getElementById("kpLegend");
     const kiLegend = document.getElementById("kiLegend");
     const kdLegend = document.getElementById("kdLegend");
@@ -202,11 +216,11 @@
     const sweepStopBtn = document.getElementById("sweepStopBtn");
     const sweepStatus = document.getElementById("sweepStatus");
     const tableWrap = document.getElementById("tableWrap");
-    let rxBytes = 0;
     let lastRxAt = 0;
     const connectBtn = document.getElementById("connectBtn");
     const getBtn = document.getElementById("getBtn");
     const saveBtn = document.getElementById("saveBtn");
+    const startStopBtn = document.getElementById("startStopBtn");
 
     const spSlider = document.getElementById("spSlider");
     const spInput = document.getElementById("spInput");
@@ -220,12 +234,17 @@
     const outInput = document.getElementById("outInput");
     const outEnableBtn = document.getElementById("outEnableBtn");
     const outClearBtn = document.getElementById("outClearBtn");
+    const logClearBtn = document.getElementById("logClearBtn");
+    const telemToggleBtn = document.getElementById("telemToggleBtn");
 
     let port = null;
     let reader = null;
     let writer = null;
     let buffer = "";
-    let pollTimer = null;
+    let closingSerial = false;
+    let connectingSerial = false;
+    let telemTimer = null;
+    let telemEnabled = true;
     let captureOn = false;
     let captureStartMs = 0;
     const capture = [];
@@ -239,7 +258,17 @@
       awaitingSample: false,
     };
 
-    const maxPoints = 600;
+    const MAX_POINTS = 600;
+    const MAX_CAPTURE = 2000;
+    const MAX_TABLE_ROWS = 150;
+    const RX_TIMEOUT_MS = 3000;
+    const RX_WATCHDOG_MS = 1000;
+    const TELEM_INTERVAL_MS = 33;
+    const SAVE_TELEM_PAUSE_MS = 1000;
+    const SWEEP_POLL_MS = 50;
+    const START_STOP_SP_START = 150;
+    const START_STOP_SP_STOP = 0;
+    const START_STOP_THRESHOLD_RPM = 10;
     const data = [];
 
     function drawChart() {
@@ -260,9 +289,13 @@
       const sp = data[data.length - 1].sp;
       const rpm = data[data.length - 1].rpm;
       const out = data[data.length - 1].out;
+      const outRaw = data[data.length - 1].outRaw;
       spVal.textContent = sp.toFixed(1);
       rpmVal.textContent = rpm.toFixed(1);
       outVal.textContent = out.toFixed(1);
+      if (Number.isFinite(outRaw)) {
+        outRawVal.textContent = outRaw.toFixed(1);
+      }
 
       const minY = -300;
       const maxY = 300;
@@ -276,7 +309,7 @@
       ctx.lineWidth = 2;
       ctx.beginPath();
       data.forEach((p, i) => {
-        const x = (i / (maxPoints - 1)) * w;
+        const x = (i / (MAX_POINTS - 1)) * w;
         const y = yScale(p.rpm);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -287,7 +320,7 @@
       ctx.lineWidth = 2;
       ctx.beginPath();
       data.forEach((p, i) => {
-        const x = (i / (maxPoints - 1)) * w;
+        const x = (i / (MAX_POINTS - 1)) * w;
         const y = yScale(p.sp);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -318,8 +351,8 @@
 
       const xMin = 0;
       const xMax = 100;
-      const yMin = -300;
-      const yMax = 300;
+      const yMin = -250;
+      const yMax = 250;
 
       function sx(v) {
         return ((v - xMin) / (xMax - xMin)) * w;
@@ -338,16 +371,16 @@
 
     function updateTable() {
       if (!tableWrap) return;
-      const rows = capture.slice(-150).map((p) =>
+      const rows = capture.slice(-MAX_TABLE_ROWS).map((p) =>
         `${p.t.toFixed(2)}s  rpm=${p.rpm.toFixed(2)}  out=${p.out.toFixed(2)}  sp=${p.sp.toFixed(2)}`
       );
       tableWrap.textContent = rows.join("\n");
       tableWrap.scrollTop = tableWrap.scrollHeight;
     }
 
-    function appendData(sp, rpm, out) {
-      data.push({ sp, rpm, out });
-      if (data.length > maxPoints) data.shift();
+    function appendData(sp, rpm, out, outRaw) {
+      data.push({ sp, rpm, out, outRaw });
+      if (data.length > MAX_POINTS) data.shift();
       drawChart();
     }
 
@@ -361,29 +394,143 @@
       cmdStatusEl.classList.toggle("err", !ok);
     }
 
+    function setConnectionState(connected) {
+      setStatus(connected ? "Connected" : "Disconnected");
+      connectBtn.textContent = connected ? "Disconnect" : "Connect";
+      appendLog(connected ? "PORT: connected" : "PORT: disconnected");
+    }
+
+    function fmtTime(ts) {
+      const d = new Date(ts);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      const ms = String(d.getMilliseconds()).padStart(3, "0");
+      return `${hh}:${mm}:${ss}.${ms}`;
+    }
+
     function appendLog(line) {
       if (!logEl) return;
-      logEl.textContent += line + "\n";
+      logEl.textContent += `[${fmtTime(Date.now())}] ${line}\n`;
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    function appendRawChunk(text) {
-      if (!logEl) return;
-      if (text && text.length) {
-        logEl.textContent += "<< " + text;
-        rxBytes += text.length;
-        lastRxAt = Date.now();
-      }
-      if (logEl.textContent.length > 8000) {
-        logEl.textContent = logEl.textContent.slice(-8000);
-      }
-      logEl.scrollTop = logEl.scrollHeight;
+    function delayMs(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    async function connect(useChooser = true) {
+    function releaseSerialHandlesForUnload() {
+      stopTelem();
+      stopSweep(false);
+      buffer = "";
+
+      if (reader) {
+        try {
+          void reader.cancel();
+        } catch (_err) {
+          // ignore
+        }
+        try {
+          reader.releaseLock();
+        } catch (_err) {
+          // ignore
+        }
+        reader = null;
+      }
+
+      if (writer) {
+        try {
+          writer.releaseLock();
+        } catch (_err) {
+          // ignore
+        }
+        writer = null;
+      }
+
+      if (port) {
+        const openedPort = port;
+        port = null;
+        try {
+          void openedPort.close();
+        } catch (_err) {
+          // ignore
+        }
+      }
+      connectBtn.textContent = "Connect";
+      statusEl.textContent = "Disconnected";
+    }
+
+    async function closeSerial(options = {}) {
+      const { logDisconnect = true, reportErrors = true } = options;
+      if (closingSerial) return;
+      if (!port && !reader && !writer) {
+        if (logDisconnect && statusEl.textContent !== "Disconnected") {
+          setConnectionState(false);
+        }
+        return;
+      }
+      closingSerial = true;
+      connectingSerial = false;
+
+      try {
+        stopTelem();
+        stopSweep(false);
+        buffer = "";
+
+        if (reader) {
+          try {
+            await reader.cancel();
+          } catch (_err) {
+            // ignore: cancel may fail if stream is already closed/disconnected
+          }
+          try {
+            reader.releaseLock();
+          } catch (_err) {
+            // ignore: lock may already be released
+          }
+          reader = null;
+        }
+
+        if (writer) {
+          try {
+            writer.releaseLock();
+          } catch (_err) {
+            // ignore: lock may already be released
+          }
+          writer = null;
+        }
+
+        if (port) {
+          const openedPort = port;
+          port = null;
+          try {
+            await openedPort.close();
+          } catch (err) {
+            if (reportErrors) {
+              setStatus("Error: " + (err && err.message ? err.message : err));
+              appendLog("Error: " + (err && err.message ? err.message : err));
+            }
+          }
+        }
+
+        if (logDisconnect) {
+          setConnectionState(false);
+        } else {
+          setStatus("Disconnected");
+          connectBtn.textContent = "Connect";
+        }
+      } finally {
+        closingSerial = false;
+      }
+    }
+
+    async function connect(useChooser = true, options = {}) {
+      const { reportErrors = true, openRetries = 1 } = options;
+      if (connectingSerial || closingSerial) return;
+      connectingSerial = true;
       try {
         if (!("serial" in navigator)) {
-          setStatus("Web Serial nao suportado");
+          setStatus("Web Serial not supported");
           return;
         }
         if (useChooser) {
@@ -391,64 +538,58 @@
         } else {
           const ports = await navigator.serial.getPorts();
           if (!ports.length) {
-            setStatus("Nenhuma porta pareada");
+            setStatus("No paired ports");
             return;
           }
           port = ports[0];
         }
-        await port.open({ baudRate: 115200 });
+        let lastOpenErr = null;
+        for (let attempt = 0; attempt < openRetries; attempt++) {
+          try {
+            await port.open({ baudRate: 115200 });
+            lastOpenErr = null;
+            break;
+          } catch (err) {
+            lastOpenErr = err;
+            if (attempt + 1 < openRetries) {
+              await delayMs(200);
+            }
+          }
+        }
+        if (lastOpenErr) throw lastOpenErr;
         reader = port.readable.getReader();
         writer = port.writable.getWriter();
-        setStatus("Conectado");
-        connectBtn.textContent = "Desconectar";
-        appendLog("PORT: conectado");
-        readLoop();
-        sendLine("GET");
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = setInterval(() => {
-          if (writer) sendLine("GET");
-        }, 2000);
+        setConnectionState(true);
+        lastRxAt = Date.now();
+        void readLoop();
+        sendLine("GET PID RPM");
+        stopTelem();
+        if (telemEnabled) startTelem();
       } catch (err) {
-        setStatus("Erro: " + (err && err.message ? err.message : err));
-        appendLog("ERRO: " + (err && err.message ? err.message : err));
+        if (reportErrors) {
+          setStatus("Error: " + (err && err.message ? err.message : err));
+          appendLog("Error: " + (err && err.message ? err.message : err));
+        }
+        await closeSerial({ logDisconnect: false, reportErrors: false });
+      } finally {
+        connectingSerial = false;
       }
     }
 
     async function disconnect() {
-      try {
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-        if (reader) {
-          reader.cancel();
-          reader.releaseLock();
-          reader = null;
-        }
-        if (writer) {
-          writer.releaseLock();
-          writer = null;
-        }
-        if (port) {
-          await port.close();
-          port = null;
-        }
-        setStatus("Desconectado");
-        connectBtn.textContent = "Conectar";
-        appendLog("PORT: desconectado");
-      } catch (err) {
-        setStatus("Erro: " + (err && err.message ? err.message : err));
-        appendLog("ERRO: " + (err && err.message ? err.message : err));
-      }
+      await closeSerial({ logDisconnect: true, reportErrors: true });
     }
 
     async function readLoop() {
       try {
         while (true) {
+          if (!reader) break;
           const { value, done } = await reader.read();
           if (done) break;
           const chunk = new TextDecoder().decode(value);
-          appendRawChunk(chunk);
+          if (chunk && chunk.length) {
+            lastRxAt = Date.now();
+          }
           buffer += chunk;
           let idx;
           while ((idx = buffer.search(/[\r\n]/)) >= 0) {
@@ -458,12 +599,63 @@
           }
         }
       } catch (err) {
-        appendLog("ERRO RX: " + (err && err.message ? err.message : err));
+        if (!closingSerial) {
+          appendLog("RX ERROR: " + (err && err.message ? err.message : err));
+        }
+      } finally {
+        if (!closingSerial && (port || reader || writer)) {
+          await closeSerial({ logDisconnect: true, reportErrors: false });
+        }
       }
     }
 
+    function pushCapturePoint(t, rpm, out, sp) {
+      capture.push({ t, rpm, out, sp });
+      if (capture.length > MAX_CAPTURE) capture.shift();
+      drawScatter();
+      updateTable();
+    }
+
+    function handleTelemLine(parts) {
+      if (parts.length < 4) return;
+      const sp = parseFloat(parts[1]);
+      const rpm = parseFloat(parts[2]);
+      const out = parseFloat(parts[3]);
+      const outRawParsed = parseFloat(parts[4]);
+      const outRaw = Number.isFinite(outRawParsed) ? outRawParsed : out;
+
+      appendData(sp, rpm, out, outRaw);
+      if (!(captureOn || sweep.active) || !Number.isFinite(out) || !Number.isFinite(rpm)) return;
+
+      const t = (Date.now() - captureStartMs) / 1000;
+      if (sweep.active && sweep.awaitingSample) {
+        pushCapturePoint(t, rpm, out, sp);
+        sweep.awaitingSample = false;
+        advanceSweep();
+        return;
+      }
+
+      if (captureOn) {
+        pushCapturePoint(t, rpm, out, sp);
+      }
+    }
+
+    function handlePidLine(parts) {
+      if (parts.length < 5) return;
+      setValue(kpSlider, kpInput, parts[1]);
+      setValue(kiSlider, kiInput, parts[2]);
+      setValue(kdSlider, kdInput, parts[3]);
+      setValue(spSlider, spInput, parts[4]);
+      updateStartStopButton(parseFloat(parts[4]));
+      kpLegend.textContent = String(parts[1]).trim();
+      kiLegend.textContent = String(parts[2]).trim();
+      kdLegend.textContent = String(parts[3]).trim();
+    }
+
     function handleLine(line) {
-      appendLog("<< " + line);
+      const isTelem = line.startsWith("T,");
+      if (!isTelem) appendLog("<< " + line);
+
       if (line === "OK") {
         setCmdStatus("OK", true);
         return;
@@ -473,48 +665,19 @@
         return;
       }
       if (line.startsWith("S,OK")) {
-        setCmdStatus("NVS salvo", true);
+        setCmdStatus("NVS saved", true);
         return;
       }
       if (line.startsWith("S,ERR")) {
-        setCmdStatus("NVS erro: " + line, false);
+        setCmdStatus("NVS Error: " + line, false);
         return;
       }
-      if (line.startsWith("T,")) {
-        const parts = line.split(",");
-        if (parts.length >= 4) {
-          const sp = parseFloat(parts[1]);
-          const rpm = parseFloat(parts[2]);
-          const out = parseFloat(parts[3]);
-          appendData(sp, rpm, out);
-          if ((captureOn || sweep.active) && Number.isFinite(out) && Number.isFinite(rpm)) {
-            const t = (Date.now() - captureStartMs) / 1000;
-            if (sweep.active && sweep.awaitingSample) {
-              capture.push({ t, rpm, out, sp });
-              if (capture.length > 2000) capture.shift();
-              sweep.awaitingSample = false;
-              advanceSweep();
-              drawScatter();
-              updateTable();
-            } else if (captureOn) {
-              capture.push({ t, rpm, out, sp });
-              if (capture.length > 2000) capture.shift();
-              drawScatter();
-              updateTable();
-            }
-          }
-        }
-      } else if (line.startsWith("P,")) {
-        const parts = line.split(",");
-        if (parts.length >= 5) {
-          setValue(kpSlider, kpInput, parts[1]);
-          setValue(kiSlider, kiInput, parts[2]);
-          setValue(kdSlider, kdInput, parts[3]);
-          setValue(spSlider, spInput, parts[4]);
-          kpLegend.textContent = String(parts[1]).trim();
-          kiLegend.textContent = String(parts[2]).trim();
-          kdLegend.textContent = String(parts[3]).trim();
-        }
+      if (isTelem) {
+        handleTelemLine(line.split(","));
+        return;
+      }
+      if (line.startsWith("P,")) {
+        handlePidLine(line.split(","));
       }
     }
 
@@ -529,10 +692,23 @@
 
     function sendLine(text) {
       if (!writer) return;
-      setCmdStatus("Enviado: " + text, true);
-      appendLog(">> " + text);
       const data = new TextEncoder().encode(text + "\n");
       writer.write(data);
+    }
+
+    function isRunningSetpoint(sp) {
+      return Number.isFinite(sp) && (sp >= START_STOP_THRESHOLD_RPM || sp <= -START_STOP_THRESHOLD_RPM);
+    }
+
+    function updateStartStopButton(sp) {
+      if (!startStopBtn) return;
+      startStopBtn.textContent = isRunningSetpoint(sp) ? "STOP" : "START";
+    }
+
+    function setSetpointFromStartStop(nextSp) {
+      setValue(spSlider, spInput, nextSp);
+      sendLine("SET PID RPM SP " + nextSp);
+      updateStartStopButton(nextSp);
     }
 
     function bindPair(slider, input, cmd) {
@@ -549,7 +725,8 @@
       });
       input.addEventListener("change", () => {
         slider.value = input.value;
-        send(input.value);
+        input.value = slider.value;
+        send(slider.value);
       });
     }
 
@@ -560,13 +737,67 @@
         connect(true);
       }
     });
-    getBtn.addEventListener("click", () => sendLine("GET"));
-    saveBtn.addEventListener("click", () => sendLine("SAVE"));
+    getBtn.addEventListener("click", () => sendLine("GET PID RPM"));
+    function pauseTelemForSave() {
+      stopTelem();
+      setTimeout(() => {
+        if (telemEnabled) {
+          startTelem();
+        }
+      }, SAVE_TELEM_PAUSE_MS);
+    }
 
-    bindPair(kpSlider, kpInput, "SET KP");
-    bindPair(kiSlider, kiInput, "SET KI");
-    bindPair(kdSlider, kdInput, "SET KD");
-    bindPair(spSlider, spInput, "SET SP");
+    saveBtn.addEventListener("click", () => {
+      sendLine("SAVE PID RPM");
+      pauseTelemForSave();
+    });
+
+    startStopBtn.addEventListener("click", () => {
+      const currentSp = parseFloat(spInput.value);
+      if (isRunningSetpoint(currentSp)) {
+        setSetpointFromStartStop(START_STOP_SP_STOP);
+      } else {
+        setSetpointFromStartStop(START_STOP_SP_START);
+      }
+    });
+
+    function stopTelem() {
+      if (telemTimer) {
+        clearInterval(telemTimer);
+        telemTimer = null;
+      }
+    }
+
+    function startTelem() {
+      if (!writer || telemTimer) return;
+      sendLine("GET TELEM");
+      telemTimer = setInterval(() => {
+        if (writer) sendLine("GET TELEM");
+      }, TELEM_INTERVAL_MS);
+    }
+
+    telemToggleBtn.addEventListener("click", () => {
+      telemEnabled = !telemEnabled;
+      if (telemEnabled) {
+        telemToggleBtn.textContent = "Pause Telemetry";
+        startTelem();
+      } else {
+        telemToggleBtn.textContent = "Start Telemetry";
+        stopTelem();
+      }
+    });
+
+    logClearBtn.addEventListener("click", () => {
+      if (logEl) logEl.textContent = "";
+    });
+
+    bindPair(kpSlider, kpInput, "SET PID RPM KP");
+    bindPair(kiSlider, kiInput, "SET PID RPM KI");
+    bindPair(kdSlider, kdInput, "SET PID RPM KD");
+    bindPair(spSlider, spInput, "SET PID RPM SP");
+    spSlider.addEventListener("input", () => updateStartStopButton(parseFloat(spSlider.value)));
+    spInput.addEventListener("change", () => updateStartStopButton(parseFloat(spInput.value)));
+    updateStartStopButton(parseFloat(spInput.value));
 
     outEnableBtn.addEventListener("click", () => {
       sendLine("SET OUT " + outSlider.value);
@@ -585,9 +816,9 @@
       captureOn = !captureOn;
       if (captureOn) {
         captureStartMs = Date.now();
-        captureBtn.textContent = "Parar Coleta";
+        captureBtn.textContent = "Stop Capture";
       } else {
-        captureBtn.textContent = "Iniciar Coleta";
+        captureBtn.textContent = "Start Capture";
       }
     });
     clearCaptureBtn.addEventListener("click", () => {
@@ -599,9 +830,9 @@
     function updateSweepStatus() {
       if (!sweepStatus) return;
       if (!sweep.active) {
-        sweepStatus.textContent = "Varredura: parada";
+        sweepStatus.textContent = "Sweep: stopped";
       } else {
-        sweepStatus.textContent = `Varredura: OUT=${sweep.out.toFixed(2)}%`;
+        sweepStatus.textContent = `Sweep: OUT=${sweep.out.toFixed(2)}%`;
       }
     }
 
@@ -633,10 +864,10 @@
       sweepTimer = setInterval(() => {
         if (!sweep.active) return;
         if (Date.now() >= sweep.nextSampleAt) {
-          // espera próxima amostra T
+          // wait for next T sample
           sweep.awaitingSample = true;
         }
-      }, 50);
+      }, SWEEP_POLL_MS);
     }
 
     function stopSweep(clearOut) {
@@ -657,21 +888,24 @@
 
     if ("serial" in navigator) {
       navigator.serial.addEventListener("disconnect", () => {
-        setStatus("Desconectado");
-        connectBtn.textContent = "Conectar";
-        appendLog("PORT: desconectado");
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
+        void closeSerial({ logDisconnect: true, reportErrors: false });
       });
       setInterval(() => {
-        if (port && Date.now() - lastRxAt > 3000) {
-          setCmdStatus("Sem RX (verifique a porta COM)", false);
+        if (port && Date.now() - lastRxAt > RX_TIMEOUT_MS) {
+          setCmdStatus("No RX (check COM port)", false);
         }
-      }, 1000);
-      // tenta auto-conectar em porta ja pareada
-      connect(false);
+      }, RX_WATCHDOG_MS);
+      window.addEventListener("pagehide", () => {
+        releaseSerialHandlesForUnload();
+      });
+      window.addEventListener("beforeunload", () => {
+        releaseSerialHandlesForUnload();
+      });
+      window.addEventListener("unload", () => {
+        releaseSerialHandlesForUnload();
+      });
+      // try auto-connect on a previously paired port
+      void connect(false, { reportErrors: false, openRetries: 8 });
     }
   </script>
 </body>

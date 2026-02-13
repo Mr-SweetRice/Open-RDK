@@ -30,19 +30,35 @@ from .constants import (
     HELLO_READ_TIMEOUT_SEC,
     HELLO_OPEN_DELAY_SEC,
     MODULE_TYPE_MAX_BYTES,
-    COMM_HISTORY_MAX_ENTRIES,
     KEEPALIVE_PING_INTERVAL_SEC,
     KEEPALIVE_PING_TIMEOUT_SEC,
     HOST_TIMEZONE,
     HOST_TIMESTAMP_FORMAT,
     DEFAULT_MODULE_TYPE,
     MODULE_ID_TO_TYPE,
+    DEFAULT_COMMS_LOG_PATH,
 )
 
 _DB_LOCK = threading.RLock()
+_COMMS_LOG_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _KEEPALIVE_STOPS: dict[str, threading.Event] = {}
 _KEEPALIVE_THREADS: dict[str, threading.Thread] = {}
+_COMMS_LOG_PATH = DEFAULT_COMMS_LOG_PATH
+_DEVICE_DB_FIELDS = (
+    "serial_number",
+    "name",
+    "status",
+    "device_node",
+    "module_type",
+    "firmware_module",
+    "module_id",
+    "module_id_hex",
+    "link_live",
+    "link_status",
+    "last_event_at",
+    "last_link_check_at",
+)
 
 def open_serial(port: str, baud: int, timeout: float):
     return serial.Serial(port, baudrate=baud, timeout=timeout)
@@ -75,12 +91,43 @@ def _now_iso() -> str:
     return now.strftime(HOST_TIMESTAMP_FORMAT)
 
 
+def configure_comms_log_path(path: str) -> str:
+    global _COMMS_LOG_PATH
+    resolved = os.path.abspath(path)
+    folder = os.path.dirname(resolved) or "."
+    os.makedirs(folder, exist_ok=True)
+    if not os.path.exists(resolved):
+        with open(resolved, "a", encoding="utf-8"):
+            pass
+    _COMMS_LOG_PATH = resolved
+    print(f"[comms-db] Using comms log path: {resolved}", flush=True)
+    return resolved
+
+
+def _ensure_comms_log_path() -> str:
+    path = _COMMS_LOG_PATH or DEFAULT_COMMS_LOG_PATH
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, "a", encoding="utf-8"):
+            pass
+    return path
+
+
 def _normalize_module_type(value: str | None) -> str:
     if value:
         cleaned = value.strip()
         if cleaned:
             return cleaned
     return DEFAULT_MODULE_TYPE
+
+
+def _normalize_device_name(value: str | None, module_type: str) -> str:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return _normalize_module_type(module_type)
 
 
 def _module_id_to_type(module_id: int | None) -> str | None:
@@ -121,6 +168,39 @@ def _ensure_db(path: str):
             json.dump({"devices": []}, fp, indent=2, sort_keys=True)
             fp.write("\n")
 
+
+def _sanitize_device_entry(item: dict) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    serial_number = item.get("serial_number")
+    if not isinstance(serial_number, str):
+        return None
+    serial_number = serial_number.strip()
+    if not serial_number:
+        return None
+
+    cleaned: dict = {"serial_number": serial_number}
+    for key in _DEVICE_DB_FIELDS:
+        if key == "serial_number":
+            continue
+        if key in item:
+            cleaned[key] = item[key]
+    return cleaned
+
+
+def _canonicalize_db(data: dict) -> dict:
+    devices_raw = data.get("devices") if isinstance(data, dict) else None
+    if not isinstance(devices_raw, list):
+        devices_raw = []
+
+    devices: list[dict] = []
+    for item in devices_raw:
+        sanitized = _sanitize_device_entry(item)
+        if sanitized is not None:
+            devices.append(sanitized)
+    return {"devices": devices}
+
+
 def _load_db(path: str) -> dict:
     _ensure_db(path)
     try:
@@ -128,13 +208,7 @@ def _load_db(path: str) -> dict:
             data = json.load(fp)
     except (json.JSONDecodeError, OSError):
         data = {"devices": []}
-
-    if not isinstance(data, dict):
-        data = {"devices": []}
-    devices = data.get("devices")
-    if not isinstance(devices, list):
-        data["devices"] = []
-    return data
+    return _canonicalize_db(data)
 
 def _save_db(path: str, data: dict):
     _ensure_db(path)
@@ -142,7 +216,7 @@ def _save_db(path: str, data: dict):
     fd, tmp_path = tempfile.mkstemp(prefix=".espressif_devices_", suffix=".json", dir=folder)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fp:
-            json.dump(data, fp, indent=2, sort_keys=True)
+            json.dump(_canonicalize_db(data), fp, indent=2, sort_keys=True)
             fp.write("\n")
         os.replace(tmp_path, path)
     finally:
@@ -178,22 +252,6 @@ def _find_active_device_by_node(devices: list, node: str | None) -> dict | None:
     return fallback
 
 
-def _bytes_to_text(payload: bytes) -> str:
-    out = []
-    for value in payload:
-        if 32 <= value <= 126:
-            out.append(chr(value))
-        elif value == 9:
-            out.append("\\t")
-        elif value == 10:
-            out.append("\\n")
-        elif value == 13:
-            out.append("\\r")
-        else:
-            out.append(f"\\x{value:02x}")
-    return "".join(out)
-
-
 def _frame_payload(payload: bytes, sync_bytes: bytes, module_id: int | None = HOST_MODULE_ID) -> bytes:
     if not payload:
         return b""
@@ -226,14 +284,6 @@ def _find_framed_payload(
     return False, None
 
 
-def _trim_communications(communications: list | None) -> list:
-    if not isinstance(communications, list):
-        return []
-    if len(communications) <= COMM_HISTORY_MAX_ENTRIES:
-        return communications
-    return communications[-COMM_HISTORY_MAX_ENTRIES:]
-
-
 def _append_communication_event(
     db_path: str,
     device_node: str | None,
@@ -245,32 +295,36 @@ def _append_communication_event(
     if not payload:
         return
 
-    with _DB_LOCK:
-        data = _load_db(db_path)
-        devices = data["devices"]
+    resolved_serial = serial_number
+    if not resolved_serial and device_node:
+        with _DB_LOCK:
+            data = _load_db(db_path)
+            devices = data["devices"]
+            item = _find_active_device_by_node(devices, device_node) or _find_device_by_node(
+                devices, device_node
+            )
+            if item is not None:
+                resolved_serial = item.get("serial_number")
 
-        item = None
-        if serial_number:
-            item = _find_device_by_serial(devices, serial_number)
-        if item is None:
-            item = _find_active_device_by_node(devices, device_node)
-        if item is None:
-            return
+    direction_norm = (direction or "").strip().lower()
+    if direction_norm == "tx":
+        sender = "host"
+    elif direction_norm == "rx":
+        sender = resolved_serial or device_node or "device"
+    else:
+        sender = resolved_serial or "unknown"
 
-        communications = _trim_communications(item.get("communications"))
+    event = {
+        "sender": sender,
+        "raw_hex": payload.hex(),
+    }
 
-        communications.append(
-            {
-                "timestamp": _now_iso(),
-                "phase": phase,
-                "direction": direction,
-                "raw_hex": payload.hex(),
-                "text": _bytes_to_text(payload),
-                "num_bytes": len(payload),
-            }
-        )
-        item["communications"] = communications
-        _save_db(db_path, data)
+    log_path = _ensure_comms_log_path()
+    line = json.dumps(event, sort_keys=True, separators=(",", ":"))
+    with _COMMS_LOG_LOCK:
+        with open(log_path, "a", encoding="utf-8") as fp:
+            fp.write(line)
+            fp.write("\n")
 
 def _update_registry(
     dev: pyudev.Device,
@@ -297,37 +351,76 @@ def _update_registry(
             return None
 
         item = _find_device_by_serial(devices, serial_number)
+        dirty = False
+        link_dirty = False
         if not item:
-            item = {"serial_number": serial_number, "communications": []}
+            item = {"serial_number": serial_number}
             devices.append(item)
-        item["communications"] = _trim_communications(item.get("communications"))
+            dirty = True
 
         now = _now_iso()
-        item["status"] = status
-        item["last_event_at"] = now
+        if item.get("status") != status:
+            item["status"] = status
+            item["last_event_at"] = now
+            dirty = True
+
+        previous_module_type = _normalize_module_type(
+            item.get("module_type") or item.get("firmware_module")
+        )
         resolved_module_type = _normalize_module_type(
             module_type
             or _module_id_to_type(module_id)
             or item.get("module_type")
             or item.get("firmware_module")
         )
-        item["module_type"] = resolved_module_type
+        module_changed = previous_module_type != resolved_module_type
+        if item.get("module_type") != resolved_module_type:
+            item["module_type"] = resolved_module_type
+            dirty = True
         # Keep legacy key for compatibility with existing tooling.
-        item["firmware_module"] = resolved_module_type
+        if item.get("firmware_module") != resolved_module_type:
+            item["firmware_module"] = resolved_module_type
+            dirty = True
+
+        current_name = item.get("name")
+        if module_changed or not isinstance(current_name, str) or not current_name.strip():
+            desired_name = resolved_module_type
+            if item.get("name") != desired_name:
+                item["name"] = desired_name
+                dirty = True
+
         if module_id is not None:
-            item["module_id"] = int(module_id) & 0xFF
-            item["module_id_hex"] = _module_id_hex(module_id)
-        if node:
+            module_id_val = int(module_id) & 0xFF
+            module_id_hex = _module_id_hex(module_id)
+            if item.get("module_id") != module_id_val:
+                item["module_id"] = module_id_val
+                dirty = True
+            if item.get("module_id_hex") != module_id_hex:
+                item["module_id_hex"] = module_id_hex
+                dirty = True
+
+        if node and item.get("device_node") != node:
             item["device_node"] = node
+            dirty = True
 
         if link_live is not None:
-            item["link_live"] = bool(link_live)
-            item["last_link_check_at"] = now
+            value = bool(link_live)
+            if item.get("link_live") != value:
+                item["link_live"] = value
+                link_dirty = True
+                dirty = True
         if link_status is not None:
-            item["link_status"] = link_status
-            item["last_link_check_at"] = now
+            if item.get("link_status") != link_status:
+                item["link_status"] = link_status
+                link_dirty = True
+                dirty = True
 
-        _save_db(db_path, data)
+        if link_dirty:
+            item["last_link_check_at"] = now
+            dirty = True
+
+        if dirty:
+            _save_db(db_path, data)
         return item
 
 
@@ -350,36 +443,110 @@ def _update_registry_by_serial(
         item = _find_device_by_serial(devices, serial_number)
         if not item:
             return None
-        item["communications"] = _trim_communications(item.get("communications"))
 
         now = _now_iso()
+        dirty = False
+        link_dirty = False
+
         if status is not None:
-            item["status"] = status
-            item["last_event_at"] = now
-        if device_node:
+            if item.get("status") != status:
+                item["status"] = status
+                item["last_event_at"] = now
+                dirty = True
+        if device_node and item.get("device_node") != device_node:
             item["device_node"] = device_node
+            dirty = True
+
+        previous_module_type = _normalize_module_type(
+            item.get("module_type") or item.get("firmware_module")
+        )
+        module_changed = False
+
         if module_type is not None:
             resolved = _normalize_module_type(module_type)
-            item["module_type"] = resolved
-            item["firmware_module"] = resolved
+            if item.get("module_type") != resolved:
+                item["module_type"] = resolved
+                module_changed = True
+                dirty = True
+            if item.get("firmware_module") != resolved:
+                item["firmware_module"] = resolved
+                module_changed = True
+                dirty = True
         elif module_id is not None:
             mapped = _module_id_to_type(module_id)
             if mapped:
                 resolved = _normalize_module_type(mapped)
-                item["module_type"] = resolved
-                item["firmware_module"] = resolved
-        if module_id is not None:
-            item["module_id"] = int(module_id) & 0xFF
-            item["module_id_hex"] = _module_id_hex(module_id)
-        if link_live is not None:
-            item["link_live"] = bool(link_live)
-            item["last_link_check_at"] = now
-        if link_status is not None:
-            item["link_status"] = link_status
-            item["last_link_check_at"] = now
+                if item.get("module_type") != resolved:
+                    item["module_type"] = resolved
+                    module_changed = True
+                    dirty = True
+                if item.get("firmware_module") != resolved:
+                    item["firmware_module"] = resolved
+                    module_changed = True
+                    dirty = True
 
-        _save_db(db_path, data)
+        current_module_type = _normalize_module_type(
+            item.get("module_type") or item.get("firmware_module")
+        )
+        if previous_module_type != current_module_type:
+            module_changed = True
+
+        current_name = item.get("name")
+        if module_changed or not isinstance(current_name, str) or not current_name.strip():
+            desired_name = current_module_type
+            if item.get("name") != desired_name:
+                item["name"] = desired_name
+                dirty = True
+
+        if module_id is not None:
+            module_id_val = int(module_id) & 0xFF
+            module_id_hex = _module_id_hex(module_id)
+            if item.get("module_id") != module_id_val:
+                item["module_id"] = module_id_val
+                dirty = True
+            if item.get("module_id_hex") != module_id_hex:
+                item["module_id_hex"] = module_id_hex
+                dirty = True
+
+        if link_live is not None:
+            value = bool(link_live)
+            if item.get("link_live") != value:
+                item["link_live"] = value
+                link_dirty = True
+                dirty = True
+        if link_status is not None:
+            if item.get("link_status") != link_status:
+                item["link_status"] = link_status
+                link_dirty = True
+                dirty = True
+
+        if link_dirty:
+            item["last_link_check_at"] = now
+            dirty = True
+
+        if dirty:
+            _save_db(db_path, data)
         return item
+
+
+def set_device_name(db_path: str, serial_number: str, name: str | None) -> dict | None:
+    if not serial_number:
+        return None
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+
+        module_type = _normalize_module_type(
+            item.get("module_type") or item.get("firmware_module")
+        )
+        desired_name = _normalize_device_name(name, module_type)
+        if item.get("name") != desired_name:
+            item["name"] = desired_name
+            _save_db(db_path, data)
+        return dict(item)
+
 
 def _send_and_wait(
     ser: serial.Serial,
@@ -799,7 +966,6 @@ def on_attach(dev: pyudev.Device, db_path: str):
         db_path,
         link_live=False,
         link_status=LINK_STATUS_NOT_LIVE,
-        module_type=DEFAULT_MODULE_TYPE,
     )
     print(f"[ATTACH] {node}  ID_SERIAL_SHORT={props.get('ID_SERIAL_SHORT')}  DB={result}", flush=True)
     if node:
@@ -808,6 +974,13 @@ def on_attach(dev: pyudev.Device, db_path: str):
             db_path=db_path,
             serial_number=serial_number,
         )
+        reported_module_type = module_type
+        if (
+            not link_live
+            and module_id is None
+            and _normalize_module_type(module_type) == DEFAULT_MODULE_TYPE
+        ):
+            reported_module_type = None
         link_status = LINK_STATUS_LIVE if link_live else LINK_STATUS_NOT_LIVE
         result = _update_registry(
             dev,
@@ -815,7 +988,7 @@ def on_attach(dev: pyudev.Device, db_path: str):
             db_path,
             link_live=link_live,
             link_status=link_status,
-            module_type=module_type,
+            module_type=reported_module_type,
             module_id=module_id,
         )
         print(
@@ -862,11 +1035,10 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
         item["link_live"] = False
         item["link_status"] = LINK_STATUS_NOT_LIVE
         item["last_link_check_at"] = now
-        item["module_type"] = DEFAULT_MODULE_TYPE
-        item["firmware_module"] = DEFAULT_MODULE_TYPE
-        item["module_id"] = None
-        item["module_id_hex"] = None
-        item["communications"] = _trim_communications(item.get("communications"))
+        item["name"] = _normalize_device_name(
+            item.get("name"),
+            item.get("module_type") or item.get("firmware_module"),
+        )
     _save_db(db_path, data)
 
     boot_count = 0
@@ -879,7 +1051,6 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
                 db_path,
                 link_live=False,
                 link_status=LINK_STATUS_NOT_LIVE,
-                module_type=DEFAULT_MODULE_TYPE,
             )
             link_live = False
             module_type = DEFAULT_MODULE_TYPE
@@ -892,6 +1063,13 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
                     db_path=db_path,
                     serial_number=serial_number,
                 )
+            reported_module_type = module_type
+            if (
+                not link_live
+                and module_id is None
+                and _normalize_module_type(module_type) == DEFAULT_MODULE_TYPE
+            ):
+                reported_module_type = None
             link_status = LINK_STATUS_LIVE if link_live else LINK_STATUS_NOT_LIVE
             if _update_registry(
                 dev,
@@ -899,7 +1077,7 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
                 db_path,
                 link_live=link_live,
                 link_status=link_status,
-                module_type=module_type,
+                module_type=reported_module_type,
                 module_id=module_id,
             ):
                 boot_count += 1

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Msg Relay Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <aside class="panel devices-panel">
+        <div class="panel-header">
+          <h1>Host Devices</h1>
+          <span id="deviceCount" class="badge">0</span>
+        </div>
+        <div id="devices" class="device-list"></div>
+      </aside>
+
+      <section class="panel comms-panel">
+        <div class="panel-header">
+          <h2 id="selectedTitle">Comms Stream</h2>
+          <div class="status-row">
+            <button id="clearStream" class="action-btn" type="button">Clear</button>
+            <button
+              id="autoScrollToggle"
+              class="action-btn toggle-btn is-on"
+              type="button"
+            >
+              Auto-scroll: On
+            </button>
+            <span id="wsStatus" class="status offline">offline</span>
+            <span id="eventCount" class="badge">0 lines</span>
+          </div>
+        </div>
+        <div id="commsTable" class="comms-table"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

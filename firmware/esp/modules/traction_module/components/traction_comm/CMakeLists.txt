@@ -3,4 +3,9 @@ idf_component_register(
         "traction_comm.c"
     INCLUDE_DIRS
         "include"
+    REQUIRES
+        esp_timer
+        esp_driver_uart
+        esp_driver_usb_serial_jtag
+        vfs
 )

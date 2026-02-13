@@ -84,6 +84,22 @@ esp_err_t traction_motor_coast(void)
     return ESP_OK;
 }
 
+esp_err_t traction_motor_brake(void)
+{
+    ESP_RETURN_ON_FALSE(s_inited, ESP_ERR_INVALID_STATE, TAG, "not inited");
+
+    // DRV8833: IN1=1 e IN2=1 aplica freio ativo (short brake)
+    uint32_t duty = max_duty(s_cfg.duty_resolution);
+
+    ledc_set_duty(s_cfg.speed_mode, s_cfg.channel_a, duty);
+    ledc_update_duty(s_cfg.speed_mode, s_cfg.channel_a);
+
+    ledc_set_duty(s_cfg.speed_mode, s_cfg.channel_b, duty);
+    ledc_update_duty(s_cfg.speed_mode, s_cfg.channel_b);
+
+    return ESP_OK;
+}
+
 esp_err_t traction_motor_set(int percent, traction_dir_t dir)
 {
     ESP_RETURN_ON_FALSE(s_inited, ESP_ERR_INVALID_STATE, TAG, "not inited");

@@ -23,11 +23,10 @@ MODULE_QUERY_TIMEOUT_SEC = 1.5
 HELLO_READ_TIMEOUT_SEC = 0.25
 HELLO_OPEN_DELAY_SEC = 0.2
 MODULE_TYPE_MAX_BYTES = 64
-COMM_HISTORY_MAX_ENTRIES = 20
 KEEPALIVE_PING_INTERVAL_SEC = 2.0
 KEEPALIVE_PING_TIMEOUT_SEC = 1.0
-LOG_MAX_LINES = 20
-LOG_TRIM_INTERVAL_SEC = 0.2
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_TRIM_INTERVAL_SEC = 1.0
 
 DEFAULT_SERVICE_LOG_PATH = os.path.abspath(
     os.path.join(
@@ -38,21 +37,28 @@ DEFAULT_SERVICE_LOG_PATH = os.path.abspath(
     )
 )
 
+DEFAULT_COMMS_LOG_PATH = os.path.abspath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "..",
+        "comms-raw.log",
+    )
+)
+
 # Timezone used for all stored timestamps.
 # -180 minutes = UTC-03:00.
 HOST_TIMEZONE_OFFSET_MINUTES = -180
 HOST_TIMEZONE = timezone(timedelta(minutes=HOST_TIMEZONE_OFFSET_MINUTES))
 HOST_TIMESTAMP_FORMAT = "%H:%M:%S"
-
-WEBVIEW_HOST = "0.0.0.0"
-WEBVIEW_PORT = 8765
-WEBVIEW_REFRESH_SECONDS = 1.0
-
-# Module type shown in DB/webview when firmware does not identify itself.
+# Module type shown in DB when firmware does not identify itself.
 DEFAULT_MODULE_TYPE = "NOT-RDK-MODULE"
 MODULE_ID_TO_TYPE = {
     TEST_MODULE_ID: "test_module",
 }
+
+WEBVIEW_HOST = "0.0.0.0"
+WEBVIEW_PORT = 8765
 
 DEFAULT_DEVICE_DB_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),

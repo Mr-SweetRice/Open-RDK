@@ -12,7 +12,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .functions import set_device_name
+from .functions import (
+    clear_devices_registry,
+    get_active_message_type,
+    get_device_message_type,
+    get_active_serial_baud,
+    set_active_message_type,
+    set_device_message_type,
+    set_active_serial_baud,
+    set_device_name,
+    set_device_telemetry_requested,
+    supported_message_types,
+    supported_serial_baud_rates,
+)
 
 
 def _ensure_file(path: str):
@@ -38,10 +50,50 @@ def _parse_comms_line(line: str) -> dict | None:
         return None
     if not isinstance(raw_hex, str) or not raw_hex.strip():
         return None
-    return {
+    event = {
         "sender": sender.strip(),
         "raw_hex": raw_hex.strip().lower(),
     }
+    device_serial = payload.get("device_serial")
+    if isinstance(device_serial, str) and device_serial.strip():
+        event["device_serial"] = device_serial.strip()
+    direction = payload.get("direction")
+    if isinstance(direction, str) and direction.strip():
+        event["direction"] = direction.strip().lower()
+    message_type = payload.get("message_type")
+    if isinstance(message_type, str) and message_type.strip():
+        event["message_type"] = message_type.strip().upper()
+    message = payload.get("message")
+    if isinstance(message, str):
+        event["message"] = message
+    seq = payload.get("seq")
+    if isinstance(seq, int):
+        event["seq"] = seq
+    seq_abs = payload.get("seq_abs")
+    if isinstance(seq_abs, int):
+        event["seq_abs"] = seq_abs
+    latency_ms = payload.get("latency_ms")
+    if isinstance(latency_ms, (int, float)):
+        event["latency_ms"] = float(latency_ms)
+    retry = payload.get("retry")
+    if isinstance(retry, bool):
+        event["retry"] = retry
+    retry_count = payload.get("retry_count")
+    if isinstance(retry_count, int):
+        event["retry_count"] = retry_count
+    error_kind = payload.get("error_kind")
+    if isinstance(error_kind, str) and error_kind.strip():
+        event["error_kind"] = error_kind.strip()
+    seq_valid = payload.get("seq_valid")
+    if isinstance(seq_valid, bool):
+        event["seq_valid"] = seq_valid
+    expected_seq = payload.get("expected_seq")
+    if isinstance(expected_seq, int):
+        event["expected_seq"] = expected_seq
+    length = payload.get("len")
+    if isinstance(length, int):
+        event["len"] = length
+    return event
 
 
 def _load_devices(db_path: str) -> list[dict]:
@@ -62,6 +114,7 @@ def _load_devices(db_path: str) -> list[dict]:
         if not isinstance(serial, str) or not serial.strip():
             continue
         module_type = item.get("module_type", item.get("firmware_module", ""))
+        message_type = str(item.get("message_type", "CMD") or "CMD").strip().upper()
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
             name = module_type
@@ -71,10 +124,16 @@ def _load_devices(db_path: str) -> list[dict]:
                 "name": name,
                 "status": item.get("status", ""),
                 "module_type": module_type,
+                "message_type": message_type,
                 "link_status": item.get("link_status", ""),
                 "device_node": item.get("device_node"),
                 "last_event_at": item.get("last_event_at"),
                 "last_link_check_at": item.get("last_link_check_at"),
+                "error_count": int(item.get("error_count", 0) or 0),
+                "last_error_kind": str(item.get("last_error_kind", "") or ""),
+                "last_error_at": str(item.get("last_error_at", "") or ""),
+                "telemetry_requested": bool(item.get("telemetry_requested", False)),
+                "telemetry_active": bool(item.get("telemetry_active", False)),
             }
         )
     out.sort(key=lambda dev: dev.get("serial_number", ""))
@@ -195,11 +254,9 @@ class CommsStreamBroker:
             except queue.Empty:
                 continue
 
-            event = {
-                "line": self._next_line(),
-                "sender": event.get("sender"),
-                "raw_hex": event.get("raw_hex"),
-            }
+            event = dict(event)
+            event["line"] = self._next_line()
+            event.setdefault("direction", "unknown")
             with self._history_lock:
                 self._history.append(event)
 
@@ -245,7 +302,11 @@ class CommsStreamBroker:
             events = list(self._history)
 
         if serial:
-            events = [item for item in events if item.get("sender") in (serial, "host")]
+            events = [
+                item
+                for item in events
+                if item.get("sender") == serial or item.get("device_serial") == serial
+            ]
         if len(events) > keep:
             events = events[-keep:]
         return events
@@ -253,6 +314,14 @@ class CommsStreamBroker:
 
 class DeviceNameUpdatePayload(BaseModel):
     name: str = ""
+
+
+class MessageTypeUpdatePayload(BaseModel):
+    message_type: str = ""
+
+
+class BaudRateUpdatePayload(BaseModel):
+    baud_rate: int
 
 
 def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
@@ -282,6 +351,15 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
     async def devices():
         return {"devices": _load_devices(db_path)}
 
+    @app.post("/api/devices/clear")
+    async def clear_devices():
+        cleared = clear_devices_registry(db_path=db_path)
+        return {
+            "ok": True,
+            "cleared": int(cleared),
+            "devices": _load_devices(db_path),
+        }
+
     @app.post("/api/devices/{serial_number}/name")
     async def update_device_name(serial_number: str, payload: DeviceNameUpdatePayload):
         updated = set_device_name(
@@ -297,6 +375,124 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
                 return {"device": device}
 
         raise HTTPException(status_code=500, detail="updated device not found")
+
+    @app.get("/api/config/message-type")
+    async def get_message_type_config():
+        # Legacy global default for new sessions; per-device mode is authoritative.
+        return {
+            "active_message_type": get_active_message_type(),
+            "supported_message_types": supported_message_types(),
+        }
+
+    @app.post("/api/config/message-type")
+    async def update_message_type_config(payload: MessageTypeUpdatePayload):
+        # Legacy global default for new sessions; existing devices keep their own mode.
+        active = set_active_message_type(payload.message_type)
+        return {
+            "active_message_type": active,
+            "supported_message_types": supported_message_types(),
+        }
+
+    @app.get("/api/devices/{serial_number}/config/message-type")
+    async def get_device_message_type_config(serial_number: str):
+        active = get_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
+        if active is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        return {
+            "serial_number": serial_number,
+            "active_message_type": active,
+            "supported_message_types": supported_message_types(),
+        }
+
+    @app.post("/api/devices/{serial_number}/config/message-type")
+    async def update_device_message_type_config(
+        serial_number: str,
+        payload: MessageTypeUpdatePayload,
+    ):
+        updated = set_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+            message_type=payload.message_type,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        active = str(updated.get("message_type") or "").strip().upper()
+        if not active:
+            active = get_device_message_type(db_path=db_path, serial_number=serial_number) or "CMD"
+
+        for device in _load_devices(db_path):
+            if device.get("serial_number") == serial_number:
+                return {
+                    "serial_number": serial_number,
+                    "active_message_type": active,
+                    "supported_message_types": supported_message_types(),
+                    "device": device,
+                }
+
+        return {
+            "serial_number": serial_number,
+            "active_message_type": active,
+            "supported_message_types": supported_message_types(),
+        }
+
+    @app.get("/api/config/serial")
+    async def get_serial_config():
+        return {
+            "active_baud_rate": get_active_serial_baud(),
+            "supported_baud_rates": supported_serial_baud_rates(),
+        }
+
+    @app.post("/api/config/serial")
+    async def update_serial_config(payload: BaudRateUpdatePayload):
+        try:
+            active_baud_rate = set_active_serial_baud(payload.baud_rate)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {
+            "active_baud_rate": active_baud_rate,
+            "supported_baud_rates": supported_serial_baud_rates(),
+        }
+
+    @app.post("/api/devices/{serial_number}/telemetry/start")
+    async def start_telemetry(serial_number: str):
+        message_type = get_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
+        if message_type is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if message_type != "TELEMETRY":
+            raise HTTPException(status_code=409, detail="set message type to TELEMETRY for this device")
+        updated = set_device_telemetry_requested(
+            db_path=db_path,
+            serial_number=serial_number,
+            enabled=True,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        return {"ok": True}
+
+    @app.post("/api/devices/{serial_number}/telemetry/stop")
+    async def stop_telemetry(serial_number: str):
+        message_type = get_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
+        if message_type is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if message_type != "TELEMETRY":
+            raise HTTPException(status_code=409, detail="set message type to TELEMETRY for this device")
+        updated = set_device_telemetry_requested(
+            db_path=db_path,
+            serial_number=serial_number,
+            enabled=False,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        return {"ok": True}
 
     @app.get("/api/comms")
     async def comms(
@@ -315,6 +511,10 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
                     "type": "snapshot",
                     "devices": _load_devices(db_path),
                     "events": broker.history(limit=500, serial_filter=None),
+                    "active_message_type": get_active_message_type(),
+                    "supported_message_types": supported_message_types(),
+                    "active_baud_rate": get_active_serial_baud(),
+                    "supported_baud_rates": supported_serial_baud_rates(),
                 }
             )
             while True:

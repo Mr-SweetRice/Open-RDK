@@ -5,6 +5,10 @@ const state = {
   ws: null,
   clearAfterLine: 0,
   autoScrollEnabled: true,
+  activeMessageType: "CMD",
+  supportedMessageTypes: [],
+  activeBaudRate: 115200,
+  supportedBaudRates: [],
 };
 
 const elements = {
@@ -16,6 +20,11 @@ const elements = {
   wsStatus: document.getElementById("wsStatus"),
   clearStream: document.getElementById("clearStream"),
   autoScrollToggle: document.getElementById("autoScrollToggle"),
+  messageTypeSelect: document.getElementById("messageTypeSelect"),
+  baudRateSelect: document.getElementById("baudRateSelect"),
+  telemetryStart: document.getElementById("telemetryStart"),
+  telemetryStop: document.getElementById("telemetryStop"),
+  clearDevices: document.getElementById("clearDevices"),
 };
 
 function setWsStatus(isOnline) {
@@ -35,8 +44,56 @@ function resolvePort(device) {
   return device.device_node || "not attached";
 }
 
+function selectedDevice() {
+  if (!state.selectedSerial) {
+    return null;
+  }
+  return state.devices.find((item) => item.serial_number === state.selectedSerial) || null;
+}
+
+function isOnlineConnected(device) {
+  return normalizeState(device?.status) === "online connected";
+}
+
+function activeTelemetryDevice() {
+  return selectedDevice();
+}
+
 function normalizeState(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeMessageType(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function isTelemetryMessageType(value) {
+  return normalizeMessageType(value) === "TELEMETRY";
+}
+
+function resolveDeviceMessageType(device) {
+  const normalized = normalizeMessageType(device?.message_type);
+  if (normalized) {
+    return normalized;
+  }
+  return "CMD";
+}
+
+function syncSelectedDeviceMessageType() {
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    state.activeMessageType = "CMD";
+    return;
+  }
+  state.activeMessageType = resolveDeviceMessageType(selected);
+}
+
+function normalizeBaudRate(value) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 115200;
+  }
+  return parsed;
 }
 
 function statusStateClass(status) {
@@ -74,7 +131,9 @@ function isEventForSelectedDevice(event) {
   if (!state.selectedSerial) {
     return true;
   }
-  return event.sender === state.selectedSerial || event.sender === "host";
+  const sender = String(event?.sender || "").trim();
+  const deviceSerial = String(event?.device_serial || "").trim();
+  return sender === state.selectedSerial || deviceSerial === state.selectedSerial;
 }
 
 function filteredEvents() {
@@ -82,6 +141,58 @@ function filteredEvents() {
     .filter(isEventForSelectedDevice)
     .filter((event) => Number(event.line || 0) > state.clearAfterLine);
   return list.slice(-1000);
+}
+
+function resolveDirection(event) {
+  const explicit = normalizeState(event.direction);
+  if (explicit === "tx" || explicit === "rx") {
+    return explicit;
+  }
+  return event.sender === "host" ? "tx" : "rx";
+}
+
+function resolveEventType(event) {
+  const messageType = normalizeMessageType(event.message_type);
+  if (messageType) {
+    return messageType;
+  }
+  return "-";
+}
+
+function resolveEventMessage(event) {
+  const message = event.message;
+  if (typeof message === "string" && message.length > 0) {
+    return message;
+  }
+  return event.raw_hex || "";
+}
+
+function resolveEventSeq(event) {
+  const absolute = Number(event.seq_abs);
+  if (Number.isFinite(absolute)) {
+    return absolute;
+  }
+  const wrapped = Number(event.seq);
+  if (Number.isFinite(wrapped)) {
+    return wrapped;
+  }
+  return "-";
+}
+
+function resolveEventLatency(event) {
+  const value = Number(event.latency_ms);
+  if (!Number.isFinite(value) || value < 0) {
+    return "-";
+  }
+  return `${value.toFixed(3)} ms`;
+}
+
+function isUnstableEvent(event) {
+  if (event?.retry === true) {
+    return true;
+  }
+  const errorKind = normalizeState(event?.error_kind);
+  return errorKind.includes("timeout");
 }
 
 function renderEvents() {
@@ -98,14 +209,20 @@ function renderEvents() {
   for (let i = 0; i < list.length; i += 1) {
     const event = list[i];
     const row = document.createElement("div");
-    const direction = event.sender === "host" ? "tx" : "rx";
+    const direction = resolveDirection(event);
     const displayLine = i;
-    row.className = "row";
+    const seq = resolveEventSeq(event);
+    const latency = resolveEventLatency(event);
+    const unstable = isUnstableEvent(event);
+    row.className = `row ${unstable ? "unstable" : ""}`.trim();
     row.innerHTML = `
       <span class="line">#${displayLine}</span>
       <span class="dir ${direction}">${direction.toUpperCase()}</span>
-      <span class="sender">${event.sender}</span>
-      <span class="raw">${event.raw_hex}</span>
+      <span class="sender">${escapeHtml(event.sender || "-")}</span>
+      <span class="mtype">${escapeHtml(resolveEventType(event))}</span>
+      <span class="seq">${escapeHtml(seq)}</span>
+      <span class="lat">${escapeHtml(latency)}</span>
+      <span class="raw">${escapeHtml(resolveEventMessage(event))}</span>
     `;
     fragment.appendChild(row);
   }
@@ -125,6 +242,8 @@ function renderDevices() {
     const selected = state.selectedSerial === device.serial_number;
     const node = document.createElement("div");
     node.className = `device-item ${selected ? "selected" : ""}`;
+    const lastErrorKind = String(device.last_error_kind || "").trim() || "-";
+    const lastErrorAt = String(device.last_error_at || "").trim() || "-";
     node.innerHTML = `
       <div class="device-title">
         <span class="device-name">${escapeHtml(resolveName(device))}</span>
@@ -143,13 +262,22 @@ function renderDevices() {
     )}</span>
       </div>
       <div class="device-port">port: ${escapeHtml(resolvePort(device))}</div>
+      <div class="device-extra">
+        mode: ${escapeHtml(resolveDeviceMessageType(device))} |
+        errors(streak): ${escapeHtml(Number(device.error_count || 0))} |
+        last_error: ${escapeHtml(lastErrorKind)} @ ${escapeHtml(lastErrorAt)} |
+        telemetry: ${escapeHtml(device.telemetry_active ? "active" : "idle")}
+      </div>
     `;
     node.addEventListener("click", () => {
       state.selectedSerial =
         state.selectedSerial === device.serial_number ? null : device.serial_number;
+      syncSelectedDeviceMessageType();
       updateSelectedTitle();
       renderDevices();
       renderEvents();
+      renderMessageTypeSelect();
+      renderTelemetryControls();
     });
     const renameButton = node.querySelector(".rename-btn");
     if (renameButton) {
@@ -161,6 +289,7 @@ function renderDevices() {
     fragment.appendChild(node);
   }
   elements.devices.appendChild(fragment);
+  renderTelemetryControls();
 }
 
 function updateSelectedTitle() {
@@ -190,6 +319,249 @@ function toggleAutoScroll() {
   renderAutoScrollToggle();
   if (state.autoScrollEnabled) {
     elements.commsTable.scrollTop = elements.commsTable.scrollHeight;
+  }
+}
+
+function renderMessageTypeSelect() {
+  if (!elements.messageTypeSelect) {
+    return;
+  }
+  const selected = selectedDevice();
+  const hasSelected = Boolean(selected?.serial_number);
+  const supported = Array.isArray(state.supportedMessageTypes)
+    ? state.supportedMessageTypes
+    : [];
+  const options = supported
+    .map((item) => normalizeMessageType(item?.name))
+    .filter((item) => Boolean(item));
+  if (options.length === 0) {
+    options.push(normalizeMessageType(state.activeMessageType || "TEST"));
+  }
+
+  const unique = [...new Set(options)];
+  elements.messageTypeSelect.innerHTML = "";
+  for (const typeName of unique) {
+    const option = document.createElement("option");
+    option.value = typeName;
+    option.textContent = typeName;
+    elements.messageTypeSelect.appendChild(option);
+  }
+
+  const active = normalizeMessageType(state.activeMessageType);
+  if (unique.includes(active)) {
+    elements.messageTypeSelect.value = active;
+  } else if (unique.length > 0) {
+    elements.messageTypeSelect.value = unique[0];
+    state.activeMessageType = unique[0];
+  }
+  elements.messageTypeSelect.disabled = !hasSelected;
+}
+
+function renderTelemetryControls() {
+  const modeIsTelemetry = isTelemetryMessageType(state.activeMessageType);
+  const device = activeTelemetryDevice();
+  const enabled = modeIsTelemetry && Boolean(device?.serial_number);
+
+  if (elements.telemetryStart) {
+    elements.telemetryStart.disabled = !enabled;
+  }
+  if (elements.telemetryStop) {
+    elements.telemetryStop.disabled = !enabled;
+  }
+}
+
+function renderBaudRateSelect() {
+  if (!elements.baudRateSelect) {
+    return;
+  }
+  const supported = Array.isArray(state.supportedBaudRates)
+    ? state.supportedBaudRates
+    : [];
+  const options = supported
+    .map((item) => normalizeBaudRate(item))
+    .filter((item) => item > 0);
+  if (options.length === 0) {
+    options.push(normalizeBaudRate(state.activeBaudRate || 115200));
+  }
+
+  const unique = [...new Set(options)].sort((a, b) => a - b);
+  elements.baudRateSelect.innerHTML = "";
+  for (const baudRate of unique) {
+    const option = document.createElement("option");
+    option.value = String(baudRate);
+    option.textContent = String(baudRate);
+    elements.baudRateSelect.appendChild(option);
+  }
+
+  const active = normalizeBaudRate(state.activeBaudRate);
+  if (unique.includes(active)) {
+    elements.baudRateSelect.value = String(active);
+  } else if (unique.length > 0) {
+    elements.baudRateSelect.value = String(unique[0]);
+    state.activeBaudRate = unique[0];
+  }
+}
+
+async function updateActiveMessageType(nextType) {
+  const normalized = normalizeMessageType(nextType);
+  if (!normalized) {
+    return;
+  }
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    renderMessageTypeSelect();
+    return;
+  }
+  try {
+    const response = await fetch(
+      `/api/devices/${encodeURIComponent(selected.serial_number)}/config/message-type`,
+      {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_type: normalized }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`message type update failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    state.activeMessageType = normalizeMessageType(payload.active_message_type || normalized);
+    if (payload?.device?.serial_number) {
+      state.devices = state.devices.map((item) =>
+        item.serial_number === payload.device.serial_number ? payload.device : item,
+      );
+    } else {
+      const current = selectedDevice();
+      if (current?.serial_number) {
+        current.message_type = state.activeMessageType;
+      }
+    }
+    state.supportedMessageTypes = Array.isArray(payload.supported_message_types)
+      ? payload.supported_message_types
+      : state.supportedMessageTypes;
+    updateSelectedTitle();
+    renderDevices();
+    renderEvents();
+    renderMessageTypeSelect();
+    renderTelemetryControls();
+  } catch (_err) {
+    renderMessageTypeSelect();
+    renderTelemetryControls();
+    window.alert("Failed to update message type.");
+  }
+}
+
+async function updateActiveBaudRate(nextBaudRate) {
+  const normalized = normalizeBaudRate(nextBaudRate);
+  if (!normalized) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/config/serial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ baud_rate: normalized }),
+    });
+    if (!response.ok) {
+      throw new Error(`baud rate update failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    state.activeBaudRate = normalizeBaudRate(payload.active_baud_rate || normalized);
+    state.supportedBaudRates = Array.isArray(payload.supported_baud_rates)
+      ? payload.supported_baud_rates
+      : state.supportedBaudRates;
+    renderBaudRateSelect();
+  } catch (_err) {
+    renderBaudRateSelect();
+    window.alert("Failed to update baud rate.");
+  }
+}
+
+async function refreshMessageTypeConfig() {
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    syncSelectedDeviceMessageType();
+    renderMessageTypeSelect();
+    renderTelemetryControls();
+    return;
+  }
+  try {
+    const response = await fetch(
+      `/api/devices/${encodeURIComponent(selected.serial_number)}/config/message-type`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    state.activeMessageType = normalizeMessageType(
+      payload.active_message_type || state.activeMessageType,
+    );
+    const current = selectedDevice();
+    if (current?.serial_number) {
+      current.message_type = state.activeMessageType;
+    }
+    state.supportedMessageTypes = Array.isArray(payload.supported_message_types)
+      ? payload.supported_message_types
+      : [];
+    updateSelectedTitle();
+    renderDevices();
+    renderEvents();
+    renderMessageTypeSelect();
+    renderTelemetryControls();
+  } catch (_err) {
+  }
+}
+
+async function refreshSerialConfig() {
+  try {
+    const response = await fetch("/api/config/serial", { cache: "no-store" });
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    state.activeBaudRate = normalizeBaudRate(
+      payload.active_baud_rate || state.activeBaudRate,
+    );
+    state.supportedBaudRates = Array.isArray(payload.supported_baud_rates)
+      ? payload.supported_baud_rates
+      : [];
+    renderBaudRateSelect();
+  } catch (_err) {
+  }
+}
+
+async function sendTelemetryCommand(action) {
+  const device = activeTelemetryDevice();
+  if (!device?.serial_number) {
+    window.alert("Select a device first.");
+    return;
+  }
+  const deviceMode = resolveDeviceMessageType(device);
+  if (!isTelemetryMessageType(deviceMode)) {
+    window.alert("Set this device Type to TELEMETRY first.");
+    return;
+  }
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (normalizedAction !== "start" && normalizedAction !== "stop") {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/devices/${encodeURIComponent(device.serial_number)}/telemetry/${normalizedAction}`,
+      {
+        method: "POST",
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`telemetry ${normalizedAction} failed with status ${response.status}`);
+    }
+    await refreshDevices();
+  } catch (_err) {
+    window.alert(`Failed to ${normalizedAction} telemetry.`);
+  } finally {
+    renderTelemetryControls();
   }
 }
 
@@ -232,6 +604,32 @@ async function renameDevice(device) {
   }
 }
 
+async function clearDevicesRegistry() {
+  const confirmed = window.confirm(
+    "Clear all devices from host JSON?\nConnected devices can appear again after detection.",
+  );
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/devices/clear", { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`clear devices failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    state.devices = Array.isArray(payload.devices) ? payload.devices : [];
+    state.selectedSerial = null;
+    syncSelectedDeviceMessageType();
+    updateSelectedTitle();
+    renderDevices();
+    renderEvents();
+    renderMessageTypeSelect();
+    renderTelemetryControls();
+  } catch (_err) {
+    window.alert("Failed to clear devices JSON.");
+  }
+}
+
 async function refreshDevices() {
   try {
     const response = await fetch("/api/devices", { cache: "no-store" });
@@ -249,9 +647,12 @@ async function refreshDevices() {
     ) {
       state.selectedSerial = null;
     }
+    syncSelectedDeviceMessageType();
     updateSelectedTitle();
     renderDevices();
     renderEvents();
+    renderMessageTypeSelect();
+    renderTelemetryControls();
   } catch (_err) {
   }
 }
@@ -279,9 +680,22 @@ function connectWebSocket() {
       if (Array.isArray(data.events)) {
         state.events = data.events.slice(-3000);
       }
+      if (Array.isArray(data.supported_message_types)) {
+        state.supportedMessageTypes = data.supported_message_types;
+      }
+      if (Array.isArray(data.supported_baud_rates)) {
+        state.supportedBaudRates = data.supported_baud_rates;
+      }
+      if (data.active_baud_rate) {
+        state.activeBaudRate = normalizeBaudRate(data.active_baud_rate);
+      }
+      syncSelectedDeviceMessageType();
       updateSelectedTitle();
       renderDevices();
       renderEvents();
+      renderMessageTypeSelect();
+      renderBaudRateSelect();
+      renderTelemetryControls();
       return;
     }
 
@@ -309,8 +723,32 @@ function start() {
   renderDevices();
   renderEvents();
   renderAutoScrollToggle();
+  renderMessageTypeSelect();
+  renderBaudRateSelect();
+  renderTelemetryControls();
   elements.clearStream.addEventListener("click", clearVisualStream);
   elements.autoScrollToggle.addEventListener("click", toggleAutoScroll);
+  if (elements.messageTypeSelect) {
+    elements.messageTypeSelect.addEventListener("change", (event) => {
+      updateActiveMessageType(event.target.value);
+    });
+  }
+  if (elements.baudRateSelect) {
+    elements.baudRateSelect.addEventListener("change", (event) => {
+      updateActiveBaudRate(event.target.value);
+    });
+  }
+  if (elements.telemetryStart) {
+    elements.telemetryStart.addEventListener("click", () => sendTelemetryCommand("start"));
+  }
+  if (elements.telemetryStop) {
+    elements.telemetryStop.addEventListener("click", () => sendTelemetryCommand("stop"));
+  }
+  if (elements.clearDevices) {
+    elements.clearDevices.addEventListener("click", clearDevicesRegistry);
+  }
+  refreshMessageTypeConfig();
+  refreshSerialConfig();
   refreshDevices();
   setInterval(refreshDevices, 2000);
   connectWebSocket();

@@ -1,179 +1,44 @@
 {
   "devices": [
     {
-      "communications": [
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:26:46"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:26:46"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:26:48"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:26:48"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:26:50"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:26:51"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:26:53"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:26:53"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:26:55"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:26:55"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:26:57"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:26:58"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:27:00"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:27:00"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:27:02"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:27:02"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:27:04"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:27:04"
-        },
-        {
-          "direction": "tx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa550002",
-          "text": "\\xaaU\\xaaU\\x00\\x02",
-          "timestamp": "01:27:06"
-        },
-        {
-          "direction": "rx",
-          "num_bytes": 6,
-          "phase": "keepalive",
-          "raw_hex": "aa55aa551103",
-          "text": "\\xaaU\\xaaU\\x11\\x03",
-          "timestamp": "01:27:07"
-        }
-      ],
       "device_node": "/dev/ttyACM0",
+      "error_count": 0,
       "firmware_module": "test_module",
-      "last_event_at": "01:23:43",
-      "last_link_check_at": "01:27:07",
+      "last_error_at": "",
+      "last_error_kind": "",
+      "last_event_at": "19:54:06",
+      "last_link_check_at": "19:54:07",
       "link_live": true,
       "link_status": "live",
+      "message_type": "TELEMETRY",
       "module_id": 17,
       "module_id_hex": "0x11",
       "module_type": "test_module",
+      "name": "MOTOR_01",
+      "serial_number": "98:3D:AE:42:0F:14",
+      "status": "online connected",
+      "telemetry_active": false,
+      "telemetry_requested": false
+    },
+    {
+      "device_node": "/dev/ttyACM0",
+      "error_count": 5,
+      "firmware_module": "test_module",
+      "last_error_at": "19:53:58",
+      "last_error_kind": "serial_open_failed",
+      "last_event_at": "19:53:58",
+      "last_link_check_at": "19:53:45",
+      "link_live": false,
+      "link_status": "not live",
+      "message_type": "CMD",
+      "module_id": 17,
+      "module_id_hex": "0x11",
+      "module_type": "test_module",
+      "name": "BANCADA",
       "serial_number": "98:3D:AE:41:97:C4",
-      "status": "online connected"
+      "status": "offline disconnected",
+      "telemetry_active": false,
+      "telemetry_requested": false
     }
   ]
 }

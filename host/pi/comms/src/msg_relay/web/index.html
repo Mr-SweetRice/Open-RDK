@@ -11,7 +11,10 @@
       <aside class="panel devices-panel">
         <div class="panel-header">
           <h1>Host Devices</h1>
-          <span id="deviceCount" class="badge">0</span>
+          <div class="device-header-actions">
+            <span id="deviceCount" class="badge">0</span>
+            <button id="clearDevices" class="action-btn" type="button">Clear Devices</button>
+          </div>
         </div>
         <div id="devices" class="device-list"></div>
       </aside>
@@ -20,6 +23,16 @@
         <div class="panel-header">
           <h2 id="selectedTitle">Comms Stream</h2>
           <div class="status-row">
+            <label class="type-picker" for="messageTypeSelect">
+              <span>Type</span>
+              <select id="messageTypeSelect" class="type-select"></select>
+            </label>
+            <label class="type-picker" for="baudRateSelect">
+              <span>Baud</span>
+              <select id="baudRateSelect" class="type-select"></select>
+            </label>
+            <button id="telemetryStart" class="action-btn" type="button">Start RX</button>
+            <button id="telemetryStop" class="action-btn" type="button">Stop RX</button>
             <button id="clearStream" class="action-btn" type="button">Clear</button>
             <button
               id="autoScrollToggle"
@@ -36,6 +49,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260213-clear-devices"></script>
   </body>
 </html>

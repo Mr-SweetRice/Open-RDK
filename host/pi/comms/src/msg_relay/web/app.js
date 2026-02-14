@@ -9,7 +9,11 @@ const state = {
   supportedMessageTypes: [],
   activeBaudRate: 115200,
   supportedBaudRates: [],
+  activeTractionOutValue: 0,
+  tractionOutSending: false,
 };
+
+const TRACTION_OUT_MESSAGE_TYPE = "TRACTION_OUT";
 
 const elements = {
   devices: document.getElementById("devices"),
@@ -25,6 +29,8 @@ const elements = {
   telemetryStart: document.getElementById("telemetryStart"),
   telemetryStop: document.getElementById("telemetryStop"),
   clearDevices: document.getElementById("clearDevices"),
+  tractionOutValueInput: document.getElementById("tractionOutValueInput"),
+  tractionOutSend: document.getElementById("tractionOutSend"),
 };
 
 function setWsStatus(isOnline) {
@@ -71,6 +77,10 @@ function isTelemetryMessageType(value) {
   return normalizeMessageType(value) === "TELEMETRY";
 }
 
+function isTractionOutMessageType(value) {
+  return normalizeMessageType(value) === TRACTION_OUT_MESSAGE_TYPE;
+}
+
 function resolveDeviceMessageType(device) {
   const normalized = normalizeMessageType(device?.message_type);
   if (normalized) {
@@ -86,6 +96,33 @@ function syncSelectedDeviceMessageType() {
     return;
   }
   state.activeMessageType = resolveDeviceMessageType(selected);
+}
+
+function normalizeTractionOutValue(value) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  if (parsed < 0) {
+    return 0;
+  }
+  if (parsed > 100) {
+    return 100;
+  }
+  return parsed;
+}
+
+function resolveDeviceTractionOutValue(device) {
+  return normalizeTractionOutValue(device?.traction_out_value ?? 0);
+}
+
+function syncSelectedDeviceTractionOutValue() {
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    state.activeTractionOutValue = 0;
+    return;
+  }
+  state.activeTractionOutValue = resolveDeviceTractionOutValue(selected);
 }
 
 function normalizeBaudRate(value) {
@@ -264,6 +301,7 @@ function renderDevices() {
       <div class="device-port">port: ${escapeHtml(resolvePort(device))}</div>
       <div class="device-extra">
         mode: ${escapeHtml(resolveDeviceMessageType(device))} |
+        out: ${escapeHtml(resolveDeviceTractionOutValue(device))}% |
         errors(streak): ${escapeHtml(Number(device.error_count || 0))} |
         last_error: ${escapeHtml(lastErrorKind)} @ ${escapeHtml(lastErrorAt)} |
         telemetry: ${escapeHtml(device.telemetry_active ? "active" : "idle")}
@@ -273,10 +311,12 @@ function renderDevices() {
       state.selectedSerial =
         state.selectedSerial === device.serial_number ? null : device.serial_number;
       syncSelectedDeviceMessageType();
+      syncSelectedDeviceTractionOutValue();
       updateSelectedTitle();
       renderDevices();
       renderEvents();
       renderMessageTypeSelect();
+      renderTractionOutInput();
       renderTelemetryControls();
     });
     const renameButton = node.querySelector(".rename-btn");
@@ -289,6 +329,7 @@ function renderDevices() {
     fragment.appendChild(node);
   }
   elements.devices.appendChild(fragment);
+  renderTractionOutInput();
   renderTelemetryControls();
 }
 
@@ -370,6 +411,25 @@ function renderTelemetryControls() {
   }
 }
 
+function renderTractionOutInput() {
+  if (!elements.tractionOutValueInput) {
+    return;
+  }
+  const hasSelected = Boolean(selectedDevice()?.serial_number);
+  const enabled = hasSelected && isTractionOutMessageType(state.activeMessageType);
+  elements.tractionOutValueInput.disabled = !enabled;
+  const isTyping = document.activeElement === elements.tractionOutValueInput;
+  if (!isTyping) {
+    elements.tractionOutValueInput.value = String(
+      normalizeTractionOutValue(state.activeTractionOutValue),
+    );
+  }
+  if (elements.tractionOutSend) {
+    elements.tractionOutSend.disabled = !enabled || state.tractionOutSending;
+    elements.tractionOutSend.textContent = state.tractionOutSending ? "Sending..." : "OK";
+  }
+}
+
 function renderBaudRateSelect() {
   if (!elements.baudRateSelect) {
     return;
@@ -410,6 +470,7 @@ async function updateActiveMessageType(nextType) {
   const selected = selectedDevice();
   if (!selected?.serial_number) {
     renderMessageTypeSelect();
+    renderTractionOutInput();
     return;
   }
   try {
@@ -439,13 +500,16 @@ async function updateActiveMessageType(nextType) {
     state.supportedMessageTypes = Array.isArray(payload.supported_message_types)
       ? payload.supported_message_types
       : state.supportedMessageTypes;
+    syncSelectedDeviceTractionOutValue();
     updateSelectedTitle();
     renderDevices();
     renderEvents();
     renderMessageTypeSelect();
+    renderTractionOutInput();
     renderTelemetryControls();
   } catch (_err) {
     renderMessageTypeSelect();
+    renderTractionOutInput();
     renderTelemetryControls();
     window.alert("Failed to update message type.");
   }
@@ -477,11 +541,111 @@ async function updateActiveBaudRate(nextBaudRate) {
   }
 }
 
+async function updateTractionOutValue(nextValue) {
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    renderTractionOutInput();
+    return;
+  }
+  const normalized = normalizeTractionOutValue(nextValue);
+  try {
+    const response = await fetch(
+      `/api/devices/${encodeURIComponent(selected.serial_number)}/config/traction-out`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: normalized }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`traction out update failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    const resolved = normalizeTractionOutValue(payload.traction_out_value);
+    state.activeTractionOutValue = resolved;
+    state.devices = state.devices.map((item) =>
+      item.serial_number === selected.serial_number
+        ? { ...item, traction_out_value: resolved }
+        : item,
+    );
+    renderDevices();
+    renderTractionOutInput();
+  } catch (_err) {
+    renderTractionOutInput();
+    window.alert("Failed to update output value.");
+  }
+}
+
+async function sendTractionOutCommand() {
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    window.alert("Select a device first.");
+    return;
+  }
+  if (!isTractionOutMessageType(resolveDeviceMessageType(selected))) {
+    window.alert("Set this device Type to TRACTION_OUT first.");
+    return;
+  }
+  if (state.tractionOutSending) {
+    return;
+  }
+
+  const inputValue = elements.tractionOutValueInput
+    ? elements.tractionOutValueInput.value
+    : state.activeTractionOutValue;
+  const normalized = normalizeTractionOutValue(inputValue);
+  state.tractionOutSending = true;
+  renderTractionOutInput();
+
+  try {
+    const response = await fetch(
+      `/api/devices/${encodeURIComponent(selected.serial_number)}/traction-out/send`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: normalized }),
+      },
+    );
+    if (!response.ok) {
+      let detail = `status ${response.status}`;
+      try {
+        const payload = await response.json();
+        if (payload?.detail) {
+          detail = String(payload.detail);
+        }
+      } catch (_err) {
+      }
+      throw new Error(detail);
+    }
+
+    const payload = await response.json();
+    const resolved = normalizeTractionOutValue(
+      payload.traction_out_value ?? normalized,
+    );
+    state.activeTractionOutValue = resolved;
+    state.devices = state.devices.map((item) =>
+      item.serial_number === selected.serial_number
+        ? { ...item, traction_out_value: resolved }
+        : item,
+    );
+    renderDevices();
+    renderTractionOutInput();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "unknown error";
+    window.alert(`Failed to send output command: ${detail}.`);
+  } finally {
+    state.tractionOutSending = false;
+    renderTractionOutInput();
+  }
+}
+
 async function refreshMessageTypeConfig() {
   const selected = selectedDevice();
   if (!selected?.serial_number) {
     syncSelectedDeviceMessageType();
+    syncSelectedDeviceTractionOutValue();
     renderMessageTypeSelect();
+    renderTractionOutInput();
     renderTelemetryControls();
     return;
   }
@@ -504,10 +668,12 @@ async function refreshMessageTypeConfig() {
     state.supportedMessageTypes = Array.isArray(payload.supported_message_types)
       ? payload.supported_message_types
       : [];
+    syncSelectedDeviceTractionOutValue();
     updateSelectedTitle();
     renderDevices();
     renderEvents();
     renderMessageTypeSelect();
+    renderTractionOutInput();
     renderTelemetryControls();
   } catch (_err) {
   }
@@ -620,10 +786,12 @@ async function clearDevicesRegistry() {
     state.devices = Array.isArray(payload.devices) ? payload.devices : [];
     state.selectedSerial = null;
     syncSelectedDeviceMessageType();
+    syncSelectedDeviceTractionOutValue();
     updateSelectedTitle();
     renderDevices();
     renderEvents();
     renderMessageTypeSelect();
+    renderTractionOutInput();
     renderTelemetryControls();
   } catch (_err) {
     window.alert("Failed to clear devices JSON.");
@@ -648,10 +816,12 @@ async function refreshDevices() {
       state.selectedSerial = null;
     }
     syncSelectedDeviceMessageType();
+    syncSelectedDeviceTractionOutValue();
     updateSelectedTitle();
     renderDevices();
     renderEvents();
     renderMessageTypeSelect();
+    renderTractionOutInput();
     renderTelemetryControls();
   } catch (_err) {
   }
@@ -690,10 +860,12 @@ function connectWebSocket() {
         state.activeBaudRate = normalizeBaudRate(data.active_baud_rate);
       }
       syncSelectedDeviceMessageType();
+      syncSelectedDeviceTractionOutValue();
       updateSelectedTitle();
       renderDevices();
       renderEvents();
       renderMessageTypeSelect();
+      renderTractionOutInput();
       renderBaudRateSelect();
       renderTelemetryControls();
       return;
@@ -724,6 +896,7 @@ function start() {
   renderEvents();
   renderAutoScrollToggle();
   renderMessageTypeSelect();
+  renderTractionOutInput();
   renderBaudRateSelect();
   renderTelemetryControls();
   elements.clearStream.addEventListener("click", clearVisualStream);
@@ -737,6 +910,20 @@ function start() {
     elements.baudRateSelect.addEventListener("change", (event) => {
       updateActiveBaudRate(event.target.value);
     });
+  }
+  if (elements.tractionOutValueInput) {
+    elements.tractionOutValueInput.addEventListener("change", (event) => {
+      updateTractionOutValue(event.target.value);
+    });
+    elements.tractionOutValueInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        sendTractionOutCommand();
+      }
+    });
+  }
+  if (elements.tractionOutSend) {
+    elements.tractionOutSend.addEventListener("click", () => sendTractionOutCommand());
   }
   if (elements.telemetryStart) {
     elements.telemetryStart.addEventListener("click", () => sendTelemetryCommand("start"));

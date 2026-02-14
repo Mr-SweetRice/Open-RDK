@@ -34,10 +34,15 @@ from .constants import (
     MESSAGE_TYPE_CODE_TO_NAME,
     MESSAGE_TYPE_DEFAULT_BYTES,
     MESSAGE_TYPE_TELEMETRY,
+    MESSAGE_TYPE_TRACTION_OUT,
     DEFAULT_ACTIVE_MESSAGE_TYPE,
     TELEMETRY_START_COMMAND,
     TELEMETRY_SYNC_COMMAND,
     TELEMETRY_STOP_BYTES,
+    TRACTION_OUT_MIN_VALUE,
+    TRACTION_OUT_MAX_VALUE,
+    TRACTION_OUT_DEFAULT_VALUE,
+    TRACTION_OUT_COMMAND_PREFIX,
     FRAME_LEN_MAX,
     FRAME_RX_BUFFER_MAX_BYTES,
     FRAME_KEEPALIVE_INTERVAL_SEC,
@@ -68,6 +73,10 @@ _COMMS_LOG_LOCK = threading.Lock()
 _MONITOR_LOCK = threading.Lock()
 _KEEPALIVE_STOPS: dict[str, threading.Event] = {}
 _KEEPALIVE_THREADS: dict[str, threading.Thread] = {}
+_KEEPALIVE_WAKES: dict[str, threading.Event] = {}
+_TRACTION_OUT_LOCK = threading.Lock()
+_TRACTION_OUT_PENDING: dict[str, dict] = {}
+_TRACTION_OUT_REQUEST_ID = 0
 _COMMS_LOG_PATH = DEFAULT_COMMS_LOG_PATH
 _COMMS_LOG_QUEUE: queue.Queue[str] = queue.Queue(maxsize=max(256, int(COMMS_LOG_QUEUE_MAX)))
 _COMMS_LOG_WRITER_THREAD: threading.Thread | None = None
@@ -95,6 +104,7 @@ _DEVICE_DB_FIELDS = (
     "last_error_at",
     "telemetry_requested",
     "telemetry_active",
+    "traction_out_value",
 )
 
 def open_serial(port: str, baud: int, timeout: float):
@@ -284,6 +294,31 @@ def _ensure_device_message_type(item: dict) -> bool:
     return False
 
 
+def _normalize_traction_out_value(value: int | str | None) -> int:
+    if isinstance(value, bool):
+        parsed = TRACTION_OUT_DEFAULT_VALUE
+    else:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = TRACTION_OUT_DEFAULT_VALUE
+    if parsed < TRACTION_OUT_MIN_VALUE:
+        return TRACTION_OUT_MIN_VALUE
+    if parsed > TRACTION_OUT_MAX_VALUE:
+        return TRACTION_OUT_MAX_VALUE
+    return parsed
+
+
+def _ensure_device_traction_out_value(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    normalized = _normalize_traction_out_value(item.get("traction_out_value"))
+    if item.get("traction_out_value") != normalized:
+        item["traction_out_value"] = normalized
+        return True
+    return False
+
+
 def get_device_message_type(db_path: str, serial_number: str) -> str | None:
     if not serial_number:
         return None
@@ -295,6 +330,21 @@ def get_device_message_type(db_path: str, serial_number: str) -> str | None:
         normalized = _normalize_message_type_name(item.get("message_type"))
         if item.get("message_type") != normalized:
             item["message_type"] = normalized
+            _save_db(db_path, data)
+        return normalized
+
+
+def get_device_traction_out_value(db_path: str, serial_number: str) -> int | None:
+    if not serial_number:
+        return None
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+        normalized = _normalize_traction_out_value(item.get("traction_out_value"))
+        if item.get("traction_out_value") != normalized:
+            item["traction_out_value"] = normalized
             _save_db(db_path, data)
         return normalized
 
@@ -324,6 +374,27 @@ def set_device_message_type(
             item["message_type"] = normalized
             dirty = True
         if dirty:
+            _save_db(db_path, data)
+        updated = dict(item)
+    _wake_keepalive_monitor(serial_number)
+    return updated
+
+
+def set_device_traction_out_value(
+    db_path: str,
+    serial_number: str,
+    traction_out_value: int | str | None,
+) -> dict | None:
+    if not serial_number:
+        return None
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+        normalized = _normalize_traction_out_value(traction_out_value)
+        if item.get("traction_out_value") != normalized:
+            item["traction_out_value"] = normalized
             _save_db(db_path, data)
         return dict(item)
 
@@ -824,6 +895,8 @@ def _update_registry(
             dirty = True
         elif _ensure_device_message_type(item):
             dirty = True
+        if _ensure_device_traction_out_value(item):
+            dirty = True
         if not isinstance(item.get("error_count"), int) or int(item.get("error_count", 0)) < 0:
             item["error_count"] = 0
             dirty = True
@@ -948,6 +1021,8 @@ def _update_registry_by_serial(
             item["message_type"] = _default_device_message_type()
             dirty = True
         elif _ensure_device_message_type(item):
+            dirty = True
+        if _ensure_device_traction_out_value(item):
             dirty = True
         if not isinstance(item.get("telemetry_requested"), bool):
             item["telemetry_requested"] = False
@@ -1112,7 +1187,7 @@ def set_device_telemetry_requested(
 ) -> dict | None:
     if not serial_number:
         return None
-    return _update_registry_by_serial(
+    updated = _update_registry_by_serial(
         serial_number=serial_number,
         db_path=db_path,
         telemetry_requested=bool(enabled),
@@ -1120,6 +1195,173 @@ def set_device_telemetry_requested(
         # Keepalive thread handles START/STOP sequencing and state transitions.
         telemetry_active=None,
     )
+    _wake_keepalive_monitor(serial_number)
+    return updated
+
+
+def _complete_traction_out_request(request: dict | None, result: dict):
+    if not isinstance(request, dict):
+        return
+    done_event = request.get("done_event")
+    request["result"] = dict(result or {})
+    if isinstance(done_event, threading.Event):
+        done_event.set()
+
+
+def _wake_keepalive_monitor(serial_number: str | None):
+    if not serial_number:
+        return
+    wake_event = None
+    with _MONITOR_LOCK:
+        wake_event = _KEEPALIVE_WAKES.get(serial_number)
+    if wake_event is not None:
+        wake_event.set()
+
+
+def _enqueue_traction_out_request(serial_number: str, value: int) -> dict:
+    global _TRACTION_OUT_REQUEST_ID
+    request = {
+        "serial_number": serial_number,
+        "value": _normalize_traction_out_value(value),
+        "queued_at_monotonic_ns": time.perf_counter_ns(),
+        "done_event": threading.Event(),
+        "result": None,
+    }
+
+    superseded = None
+    with _TRACTION_OUT_LOCK:
+        _TRACTION_OUT_REQUEST_ID += 1
+        request["request_id"] = int(_TRACTION_OUT_REQUEST_ID)
+        superseded = _TRACTION_OUT_PENDING.get(serial_number)
+        _TRACTION_OUT_PENDING[serial_number] = request
+
+    if isinstance(superseded, dict):
+        _complete_traction_out_request(
+            superseded,
+            {
+                "ok": False,
+                "serial_number": serial_number,
+                "traction_out_value": int(superseded.get("value", value)),
+                "ack": "SUPERSEDED",
+                "error_kind": "traction_out_superseded",
+                "latency_ms": None,
+            },
+        )
+    _wake_keepalive_monitor(serial_number)
+    return request
+
+
+def _pop_traction_out_request(serial_number: str) -> dict | None:
+    with _TRACTION_OUT_LOCK:
+        return _TRACTION_OUT_PENDING.pop(serial_number, None)
+
+
+def _cancel_traction_out_request(serial_number: str, error_kind: str):
+    request = _pop_traction_out_request(serial_number)
+    if not isinstance(request, dict):
+        return
+    _complete_traction_out_request(
+        request,
+        {
+            "ok": False,
+            "serial_number": serial_number,
+            "traction_out_value": int(request.get("value", TRACTION_OUT_DEFAULT_VALUE)),
+            "ack": "CANCELLED",
+            "error_kind": str(error_kind or "traction_out_cancelled"),
+            "latency_ms": None,
+        },
+    )
+
+
+def send_device_traction_out_once(
+    db_path: str,
+    serial_number: str,
+    value: int | str | None = None,
+    timeout_sec: float = 1.5,
+) -> dict | None:
+    if not serial_number:
+        return None
+
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+        normalized_value = _normalize_traction_out_value(
+            value if value is not None else item.get("traction_out_value")
+        )
+        if item.get("traction_out_value") != normalized_value:
+            item["traction_out_value"] = normalized_value
+            _save_db(db_path, data)
+        status_value = str(item.get("status") or "")
+        message_type_value = _normalize_message_type_name(item.get("message_type"))
+        device_node_value = str(item.get("device_node") or "").strip()
+
+    if message_type_value != MESSAGE_TYPE_TRACTION_OUT:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "traction_out_value": int(normalized_value),
+            "ack": "MODE REQUIRED",
+            "error_kind": "traction_out_mode_required",
+            "latency_ms": None,
+        }
+    if status_value != STATUS_ONLINE_CONNECTED:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "traction_out_value": int(normalized_value),
+            "ack": "OFFLINE",
+            "error_kind": "device_offline",
+            "latency_ms": None,
+        }
+
+    with _MONITOR_LOCK:
+        monitor_thread = _KEEPALIVE_THREADS.get(serial_number)
+    if (not monitor_thread or not monitor_thread.is_alive()) and device_node_value:
+        _start_keepalive_monitor(
+            serial_number=serial_number,
+            device_node=device_node_value,
+            db_path=db_path,
+        )
+        time.sleep(0.05)
+        with _MONITOR_LOCK:
+            monitor_thread = _KEEPALIVE_THREADS.get(serial_number)
+    if not monitor_thread or not monitor_thread.is_alive():
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "traction_out_value": int(normalized_value),
+            "ack": "NO MONITOR",
+            "error_kind": "keepalive_not_running",
+            "latency_ms": None,
+        }
+
+    request = _enqueue_traction_out_request(serial_number, normalized_value)
+    done_event = request.get("done_event")
+    wait_timeout = max(0.1, float(timeout_sec))
+    if isinstance(done_event, threading.Event):
+        done_event.wait(wait_timeout)
+
+    result = request.get("result")
+    if not isinstance(result, dict):
+        with _TRACTION_OUT_LOCK:
+            pending = _TRACTION_OUT_PENDING.get(serial_number)
+            if pending is request:
+                _TRACTION_OUT_PENDING.pop(serial_number, None)
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "traction_out_value": int(normalized_value),
+            "ack": "TIMEOUT",
+            "error_kind": "traction_out_send_timeout",
+            "latency_ms": None,
+        }
+
+    merged = dict(result)
+    merged.setdefault("serial_number", serial_number)
+    merged.setdefault("traction_out_value", int(normalized_value))
+    return merged
 
 
 def _send_and_wait(
@@ -1286,6 +1528,27 @@ def _build_telemetry_sync_payload() -> bytes:
     return f"{TELEMETRY_SYNC_COMMAND}:{host_epoch_ms}".encode("utf-8")
 
 
+def _build_traction_out_payload(value: int | str | None) -> bytes:
+    normalized = _normalize_traction_out_value(value)
+    return f"{TRACTION_OUT_COMMAND_PREFIX} {normalized}".encode("utf-8")
+
+
+def _classify_line_ack(line_text: str) -> str | None:
+    text = str(line_text or "").strip().upper()
+    if not text:
+        return None
+
+    cleaned = "".join(ch if ch.isalnum() else " " for ch in text)
+    tokens = [token for token in cleaned.split() if token]
+    for token in tokens:
+        compact = token.lstrip("0123456789")
+        if compact == "OK":
+            return "OK"
+        if compact == "ERR":
+            return "ERR"
+    return None
+
+
 def _extract_telemetry_tx_epoch_ms(message_text: str | None) -> int | None:
     if not isinstance(message_text, str):
         return None
@@ -1353,6 +1616,121 @@ def _log_stream_rx_frame(
         parsed_frame=parsed_for_log,
     )
     return parsed_for_log
+
+
+def _send_line_command_and_wait(
+    ser: serial.Serial,
+    port: str,
+    db_path: str,
+    serial_number: str | None,
+    command_text: str,
+    message_type_name: str,
+    sequence_abs: int | None = None,
+    timeout_sec: float = FRAME_RESPONSE_TIMEOUT_SEC,
+    max_attempts: int = FRAME_MAX_RETRY_ATTEMPTS,
+) -> tuple[bool, dict | None, int]:
+    normalized_type = _normalize_message_type_name(message_type_name)
+    command = str(command_text or "").strip()
+    if not command:
+        return False, None, 1
+
+    attempts = max(1, int(max_attempts or 1))
+    timeout_errors = 0
+    seq_abs_val = int(sequence_abs) if sequence_abs is not None else None
+
+    for attempt_idx in range(attempts):
+        is_retry = attempt_idx > 0
+        tx_bytes = (command + "\n").encode("utf-8")
+        tx_frame = {
+            "len": len(command),
+            "message_text": command,
+            "message_type": normalized_type,
+            "seq_abs": seq_abs_val,
+            "retry": is_retry,
+            "retry_count": attempt_idx,
+            "error_kind": "timeout_retry" if is_retry else None,
+        }
+        tx_started_ns = time.perf_counter_ns()
+        try:
+            ser.reset_input_buffer()
+        except Exception:
+            pass
+        ser.write(tx_bytes)
+        ser.flush()
+        _append_communication_event(
+            db_path=db_path,
+            device_node=port,
+            phase="line",
+            direction="tx",
+            payload=tx_bytes,
+            serial_number=serial_number,
+            parsed_frame=tx_frame,
+        )
+
+        deadline = time.monotonic() + max(float(timeout_sec), 0.1)
+        rx_buffer = bytearray()
+        last_err_parsed: dict | None = None
+        while time.monotonic() < deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                continue
+            rx_buffer.extend(chunk)
+            if len(rx_buffer) > 1024:
+                del rx_buffer[:-1024]
+
+            while True:
+                newline_index = -1
+                for idx, ch in enumerate(rx_buffer):
+                    if ch == 0x0A or ch == 0x0D:
+                        newline_index = idx
+                        break
+                if newline_index < 0:
+                    break
+
+                line_bytes = bytes(rx_buffer[: newline_index + 1])
+                del rx_buffer[: newline_index + 1]
+                line_text = line_bytes.decode("utf-8", errors="replace").strip()
+                if not line_text:
+                    continue
+
+                parsed = {
+                    "len": len(line_text),
+                    "message_text": line_text,
+                    "message_type": normalized_type,
+                    "seq_abs": seq_abs_val,
+                    "latency_ms": round(
+                        max(
+                            0.0,
+                            (time.perf_counter_ns() - tx_started_ns) / 1_000_000.0,
+                        ),
+                        3,
+                    ),
+                }
+                _append_communication_event(
+                    db_path=db_path,
+                    device_node=port,
+                    phase="line",
+                    direction="rx",
+                    payload=line_bytes,
+                    serial_number=serial_number,
+                    parsed_frame=parsed,
+                )
+
+                ack_kind = _classify_line_ack(line_text)
+                if ack_kind == "OK":
+                    return True, parsed, timeout_errors
+                if ack_kind == "ERR":
+                    last_err_parsed = parsed
+                    continue
+
+        if last_err_parsed is not None:
+            return False, last_err_parsed, timeout_errors + 1
+
+        timeout_errors += 1
+        if attempt_idx < attempts - 1 and FRAME_RETRY_DELAY_SEC > 0:
+            time.sleep(FRAME_RETRY_DELAY_SEC)
+
+    return False, None, timeout_errors
 
 
 def _send_stream_frame_and_wait(
@@ -1496,7 +1874,19 @@ def _probe_link_via_handshake(
     open_delay_sec: float = HELLO_OPEN_DELAY_SEC,
 ) -> tuple[bool, str, int | None]:
     try:
-        with serial.Serial(port, baudrate=baud, timeout=read_timeout_sec, write_timeout=read_timeout_sec) as ser:
+        with serial.Serial(
+            port,
+            baudrate=baud,
+            timeout=read_timeout_sec,
+            write_timeout=read_timeout_sec,
+            dsrdtr=False,
+            rtscts=False,
+        ) as ser:
+            try:
+                ser.dtr = False
+                ser.rts = False
+            except Exception:
+                pass
             if open_delay_sec > 0:
                 time.sleep(open_delay_sec)
 
@@ -1541,12 +1931,17 @@ def _probe_link_via_handshake(
 def _stop_keepalive_monitor(serial_number: str | None):
     if not serial_number:
         return
+    wake_event = None
     with _MONITOR_LOCK:
         stop_event = _KEEPALIVE_STOPS.pop(serial_number, None)
         _KEEPALIVE_THREADS.pop(serial_number, None)
+        wake_event = _KEEPALIVE_WAKES.pop(serial_number, None)
     if stop_event:
         stop_event.set()
-        # print(f"[keepalive] stop requested for {serial_number}", flush=True)
+    if wake_event:
+        wake_event.set()
+    _cancel_traction_out_request(serial_number, "keepalive_stopped")
+    # print(f"[keepalive] stop requested for {serial_number}", flush=True)
 
 
 def _keepalive_loop(
@@ -1554,11 +1949,13 @@ def _keepalive_loop(
     initial_node: str | None,
     db_path: str,
     stop_event: threading.Event,
+    wake_event: threading.Event,
 ):
     device_node = initial_node
     keepalive_serial: serial.Serial | None = None
     keepalive_port: str | None = None
     stream_reader: _SerialFrameReader | None = None
+    keepalive_line_mode = False
     stream_seq = FRAME_SEQUENCE_MIN
     stream_seq_abs = 0
     last_telemetry_rx_at = 0.0
@@ -1567,6 +1964,7 @@ def _keepalive_loop(
     telemetry_requested = False
     telemetry_active_state = False
     device_message_type = _default_device_message_type()
+    device_traction_out_value = TRACTION_OUT_DEFAULT_VALUE
     last_db_refresh_at = 0.0
     last_registry_sync_at = 0.0
     last_registry_link_live: bool | None = None
@@ -1589,12 +1987,19 @@ def _keepalive_loop(
                         break
                     device_node = item.get("device_node") or device_node
                     device_message_type = _normalize_message_type_name(item.get("message_type"))
+                    device_traction_out_value = _normalize_traction_out_value(
+                        item.get("traction_out_value")
+                    )
                     telemetry_requested = bool(item.get("telemetry_requested", False))
                     telemetry_active_state = bool(item.get("telemetry_active", False))
                 last_db_refresh_at = now_mono
             telemetry_mode = device_message_type == MESSAGE_TYPE_TELEMETRY
+            traction_out_mode = device_message_type == MESSAGE_TYPE_TRACTION_OUT
+            if not traction_out_mode:
+                _cancel_traction_out_request(serial_number, "traction_out_mode_inactive")
 
             if not device_node:
+                _cancel_traction_out_request(serial_number, "device_node_missing")
                 if stream_reader is not None:
                     stream_reader.clear_frames()
                     stream_reader.stop()
@@ -1610,15 +2015,19 @@ def _keepalive_loop(
                         pass
                     keepalive_serial = None
                     keepalive_port = None
+                    keepalive_line_mode = False
                 _update_registry_by_serial(
                     serial_number=serial_number,
                     db_path=db_path,
                     link_live=False,
                     link_status=LINK_STATUS_NOT_LIVE,
                     telemetry_active=False,
+                    telemetry_requested=False,
                     error_count_reset=True,
                 )
-                if stop_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC):
+                wake_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC)
+                wake_event.clear()
+                if stop_event.is_set():
                     break
                 continue
 
@@ -1638,6 +2047,7 @@ def _keepalive_loop(
                         pass
                     keepalive_serial = None
                     keepalive_port = None
+                    keepalive_line_mode = False
                     stream_seq = FRAME_SEQUENCE_MIN
                     stream_seq_abs = 0
                     last_telemetry_rx_at = 0.0
@@ -1648,6 +2058,7 @@ def _keepalive_loop(
                 keepalive_serial is None
                 or keepalive_port != device_node
                 or not keepalive_serial.is_open
+                or keepalive_line_mode != traction_out_mode
             ):
                 if stream_reader is not None:
                     stream_reader.clear_frames()
@@ -1660,68 +2071,84 @@ def _keepalive_loop(
                         pass
                 keepalive_serial = None
                 keepalive_port = None
+                keepalive_line_mode = False
 
                 try:
                     keepalive_serial = serial.Serial(
                         device_node,
                         baudrate=active_baud,
-                        timeout=STREAM_READ_TIMEOUT_SEC,
+                        timeout=0.05 if traction_out_mode else STREAM_READ_TIMEOUT_SEC,
                         write_timeout=STREAM_WRITE_TIMEOUT_SEC,
                         dsrdtr=False,
                         rtscts=False,
                     )
+                    try:
+                        keepalive_serial.dtr = False
+                        keepalive_serial.rts = False
+                    except Exception:
+                        pass
                     keepalive_port = device_node
+                    keepalive_line_mode = traction_out_mode
                     stream_seq = FRAME_SEQUENCE_MIN
                     stream_seq_abs = 0
                     last_telemetry_rx_at = 0.0
                     last_telemetry_sync_at = 0.0
                     last_telemetry_timeout_error_at = 0.0
+                    if traction_out_mode:
+                        _update_registry_by_serial(
+                            serial_number=serial_number,
+                            db_path=db_path,
+                            device_node=device_node,
+                            telemetry_requested=False,
+                            telemetry_active=False,
+                        )
+                        stream_reader = None
+                    else:
+                        ack_ok, rx_module_id = _send_and_wait(
+                            ser=keepalive_serial,
+                            port=device_node,
+                            tx_bytes=HELLO_MESSAGE_BYTES,
+                            expected_bytes=HELLO_ACK_BYTES,
+                            timeout_sec=HELLO_ACK_TIMEOUT_SEC,
+                            phase="hello",
+                            db_path=db_path,
+                            serial_number=serial_number,
+                            sync_bytes=FRAME_SYNC_BYTES,
+                        )
+                        if not ack_ok:
+                            raise RuntimeError("hello handshake timeout")
 
-                    ack_ok, rx_module_id = _send_and_wait(
-                        ser=keepalive_serial,
-                        port=device_node,
-                        tx_bytes=HELLO_MESSAGE_BYTES,
-                        expected_bytes=HELLO_ACK_BYTES,
-                        timeout_sec=HELLO_ACK_TIMEOUT_SEC,
-                        phase="hello",
-                        db_path=db_path,
-                        serial_number=serial_number,
-                        sync_bytes=FRAME_SYNC_BYTES,
-                    )
-                    if not ack_ok:
-                        raise RuntimeError("hello handshake timeout")
-
-                    module_type, query_module_id = _query_module_type(
-                        ser=keepalive_serial,
-                        port=device_node,
-                        query_bytes=MODULE_QUERY_MESSAGE_BYTES,
-                        response_prefix_byte=MODULE_INFO_PREFIX_BYTE,
-                        timeout_sec=MODULE_QUERY_TIMEOUT_SEC,
-                        max_payload_bytes=MODULE_TYPE_MAX_BYTES,
-                        db_path=db_path,
-                        serial_number=serial_number,
-                        sync_bytes=FRAME_SYNC_BYTES,
-                    )
-                    if query_module_id is not None:
-                        rx_module_id = query_module_id
-                    if module_type == DEFAULT_MODULE_TYPE:
-                        module_type = _normalize_module_type(_module_id_to_type(rx_module_id))
-                    _update_registry_by_serial(
-                        serial_number=serial_number,
-                        db_path=db_path,
-                        device_node=device_node,
-                        module_type=module_type,
-                        module_id=rx_module_id,
-                        telemetry_active=False,
-                    )
-                    stream_reader = _SerialFrameReader(
-                        ser=keepalive_serial,
-                        sync_bytes=FRAME_SYNC_BYTES,
-                        queue_size=FRAME_READER_QUEUE_MAX,
-                    )
-                    stream_reader.start()
-                    last_telemetry_rx_at = 0.0
-                    last_telemetry_sync_at = 0.0
+                        module_type, query_module_id = _query_module_type(
+                            ser=keepalive_serial,
+                            port=device_node,
+                            query_bytes=MODULE_QUERY_MESSAGE_BYTES,
+                            response_prefix_byte=MODULE_INFO_PREFIX_BYTE,
+                            timeout_sec=MODULE_QUERY_TIMEOUT_SEC,
+                            max_payload_bytes=MODULE_TYPE_MAX_BYTES,
+                            db_path=db_path,
+                            serial_number=serial_number,
+                            sync_bytes=FRAME_SYNC_BYTES,
+                        )
+                        if query_module_id is not None:
+                            rx_module_id = query_module_id
+                        if module_type == DEFAULT_MODULE_TYPE:
+                            module_type = _normalize_module_type(_module_id_to_type(rx_module_id))
+                        _update_registry_by_serial(
+                            serial_number=serial_number,
+                            db_path=db_path,
+                            device_node=device_node,
+                            module_type=module_type,
+                            module_id=rx_module_id,
+                            telemetry_active=False,
+                        )
+                        stream_reader = _SerialFrameReader(
+                            ser=keepalive_serial,
+                            sync_bytes=FRAME_SYNC_BYTES,
+                            queue_size=FRAME_READER_QUEUE_MAX,
+                        )
+                        stream_reader.start()
+                        last_telemetry_rx_at = 0.0
+                        last_telemetry_sync_at = 0.0
                 except Exception as exc:
                     print(
                         f"[keepalive] serial open failed on {device_node}: {exc}",
@@ -1748,7 +2175,11 @@ def _keepalive_loop(
                             pass
                     keepalive_serial = None
                     keepalive_port = None
-                    if stop_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC):
+                    keepalive_line_mode = False
+                    _cancel_traction_out_request(serial_number, "serial_open_failed")
+                    wake_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC)
+                    wake_event.clear()
+                    if stop_event.is_set():
                         break
                     continue
 
@@ -1757,11 +2188,87 @@ def _keepalive_loop(
                 rx_frame = None
                 error_delta = 0
                 error_kind: str | None = None
-                if stream_reader is None:
-                    error_kind = "stream_reader_unavailable"
-                    raise RuntimeError("stream reader unavailable")
-
-                if telemetry_mode:
+                current_traction_request = None
+                if traction_out_mode:
+                    if telemetry_requested:
+                        telemetry_requested = False
+                    if telemetry_active_state:
+                        telemetry_active_state = False
+                    current_traction_request = _pop_traction_out_request(serial_number)
+                    if not isinstance(current_traction_request, dict):
+                        link_live = bool(keepalive_serial and keepalive_serial.is_open)
+                    else:
+                        request_value = _normalize_traction_out_value(
+                            current_traction_request.get("value")
+                        )
+                        command_bytes = _build_traction_out_payload(request_value)
+                        command_text = command_bytes.decode("utf-8", errors="replace")
+                        tx_seq_abs = stream_seq_abs
+                        line_ok, line_ack, line_errors = _send_line_command_and_wait(
+                            ser=keepalive_serial,
+                            port=device_node,
+                            db_path=db_path,
+                            serial_number=serial_number,
+                            command_text=command_text,
+                            message_type_name=MESSAGE_TYPE_TRACTION_OUT,
+                            sequence_abs=tx_seq_abs,
+                            timeout_sec=min(max(FRAME_RESPONSE_TIMEOUT_SEC, 0.15), 0.75),
+                            max_attempts=1,
+                        )
+                        error_delta += line_errors
+                        ack_text = str((line_ack or {}).get("message_text") or "").strip().upper()
+                        line_latency_ms = (line_ack or {}).get("latency_ms")
+                        if line_ok:
+                            link_live = True
+                            rx_frame = line_ack
+                            stream_seq_abs += 1
+                            _complete_traction_out_request(
+                                current_traction_request,
+                                {
+                                    "ok": True,
+                                    "serial_number": serial_number,
+                                    "traction_out_value": int(request_value),
+                                    "ack": ack_text or "OK",
+                                    "latency_ms": (
+                                        float(line_latency_ms)
+                                        if isinstance(line_latency_ms, (int, float))
+                                        else None
+                                    ),
+                                    "seq_abs": int(tx_seq_abs),
+                                },
+                            )
+                            current_traction_request = None
+                        else:
+                            if line_errors <= 0:
+                                error_delta += 1
+                            if ack_text.startswith("ERR"):
+                                error_kind = error_kind or "traction_out_error"
+                            elif ack_text:
+                                error_kind = error_kind or "traction_out_unexpected_ack"
+                            else:
+                                error_kind = error_kind or "traction_out_timeout"
+                            link_live = bool(keepalive_serial and keepalive_serial.is_open)
+                            _complete_traction_out_request(
+                                current_traction_request,
+                                {
+                                    "ok": False,
+                                    "serial_number": serial_number,
+                                    "traction_out_value": int(request_value),
+                                    "ack": ack_text or "TIMEOUT",
+                                    "error_kind": error_kind,
+                                    "latency_ms": (
+                                        float(line_latency_ms)
+                                        if isinstance(line_latency_ms, (int, float))
+                                        else None
+                                    ),
+                                    "seq_abs": int(tx_seq_abs),
+                                },
+                            )
+                            current_traction_request = None
+                elif telemetry_mode:
+                    if stream_reader is None:
+                        error_kind = "stream_reader_unavailable"
+                        raise RuntimeError("stream reader unavailable")
                     if telemetry_requested and not telemetry_active_state:
                         stream_reader.clear_frames()
                         try:
@@ -1901,6 +2408,9 @@ def _keepalive_loop(
                     if telemetry_requested:
                         telemetry_requested = False
                     if telemetry_active_state:
+                        if stream_reader is None:
+                            error_kind = "stream_reader_unavailable"
+                            raise RuntimeError("stream reader unavailable")
                         stream_reader.clear_frames()
                         try:
                             keepalive_serial.reset_input_buffer()
@@ -1937,7 +2447,13 @@ def _keepalive_loop(
                             pass
 
                     active_type = device_message_type
+                    if stream_reader is None:
+                        error_kind = "stream_reader_unavailable"
+                        raise RuntimeError("stream reader unavailable")
                     stream_reader.clear_frames()
+                    active_payload = None
+                    if active_type == MESSAGE_TYPE_TRACTION_OUT:
+                        active_payload = _build_traction_out_payload(device_traction_out_value)
                     link_live, rx_frame, frame_errors = _send_stream_frame_and_wait(
                         ser=keepalive_serial,
                         stream_reader=stream_reader,
@@ -1947,6 +2463,7 @@ def _keepalive_loop(
                         message_type_name=active_type,
                         sequence=stream_seq,
                         sequence_abs=stream_seq_abs,
+                        message_bytes=active_payload,
                         timeout_sec=FRAME_RESPONSE_TIMEOUT_SEC,
                         max_attempts=FRAME_MAX_RETRY_ATTEMPTS,
                         sync_bytes=FRAME_SYNC_BYTES,
@@ -1967,6 +2484,24 @@ def _keepalive_loop(
                 error_delta = 1
                 error_kind = error_kind or "keepalive_exception"
                 telemetry_active_state = False
+                if isinstance(current_traction_request, dict):
+                    _complete_traction_out_request(
+                        current_traction_request,
+                        {
+                            "ok": False,
+                            "serial_number": serial_number,
+                            "traction_out_value": int(
+                                _normalize_traction_out_value(
+                                    current_traction_request.get("value")
+                                )
+                            ),
+                            "ack": "EXCEPTION",
+                            "error_kind": "keepalive_exception",
+                            "latency_ms": None,
+                        },
+                    )
+                    current_traction_request = None
+                _cancel_traction_out_request(serial_number, "keepalive_exception")
                 if keepalive_serial is not None:
                     try:
                         keepalive_serial.reset_input_buffer()
@@ -1978,6 +2513,7 @@ def _keepalive_loop(
                         pass
                 keepalive_serial = None
                 keepalive_port = None
+                keepalive_line_mode = False
                 if stream_reader is not None:
                     stream_reader.clear_frames()
                     stream_reader.stop()
@@ -1995,7 +2531,12 @@ def _keepalive_loop(
                 or telemetry_requested != last_registry_telemetry_requested
                 or telemetry_active_state != last_registry_telemetry_active
             )
-            registry_interval = 0.25 if telemetry_mode else FRAME_KEEPALIVE_INTERVAL_SEC
+            if traction_out_mode:
+                registry_interval = 0.25
+            elif telemetry_mode:
+                registry_interval = 0.25
+            else:
+                registry_interval = FRAME_KEEPALIVE_INTERVAL_SEC
             registry_due = (now_mono - last_registry_sync_at) >= registry_interval
             if error_delta or registry_changed or registry_due:
                 if error_delta and not error_kind:
@@ -2017,15 +2558,20 @@ def _keepalive_loop(
                 last_registry_telemetry_requested = telemetry_requested
                 last_registry_telemetry_active = telemetry_active_state
 
-            if telemetry_mode and telemetry_requested and telemetry_active_state:
+            if traction_out_mode:
+                wait_sec = 0.2
+            elif telemetry_mode and telemetry_requested and telemetry_active_state:
                 wait_sec = FRAME_TELEMETRY_IDLE_SLEEP_SEC
             elif telemetry_mode:
                 wait_sec = FRAME_TELEMETRY_POLL_INTERVAL_SEC
             else:
                 wait_sec = FRAME_KEEPALIVE_INTERVAL_SEC
-            if stop_event.wait(wait_sec):
+            wake_event.wait(wait_sec)
+            wake_event.clear()
+            if stop_event.is_set():
                 break
     finally:
+        _cancel_traction_out_request(serial_number, "keepalive_stopped")
         if stream_reader is not None:
             stream_reader.stop()
         if keepalive_serial is not None:
@@ -2038,6 +2584,7 @@ def _keepalive_loop(
             if existing_stop is stop_event:
                 _KEEPALIVE_STOPS.pop(serial_number, None)
                 _KEEPALIVE_THREADS.pop(serial_number, None)
+                _KEEPALIVE_WAKES.pop(serial_number, None)
         # print(f"[keepalive] monitor stopped for {serial_number}", flush=True)
 
 
@@ -2052,17 +2599,20 @@ def _start_keepalive_monitor(
     with _MONITOR_LOCK:
         thread = _KEEPALIVE_THREADS.get(serial_number)
         if thread and thread.is_alive():
+            _KEEPALIVE_WAKES.setdefault(serial_number, threading.Event())
             return
 
         stop_event = threading.Event()
+        wake_event = threading.Event()
         monitor = threading.Thread(
             target=_keepalive_loop,
-            args=(serial_number, device_node, db_path, stop_event),
+            args=(serial_number, device_node, db_path, stop_event, wake_event),
             daemon=True,
             name=f"keepalive-{serial_number.replace(':', '')[-8:]}",
         )
         _KEEPALIVE_STOPS[serial_number] = stop_event
         _KEEPALIVE_THREADS[serial_number] = monitor
+        _KEEPALIVE_WAKES[serial_number] = wake_event
         monitor.start()
 
 
@@ -2091,6 +2641,12 @@ def on_attach(dev: pyudev.Device, db_path: str):
     node = dev.device_node  # like /dev/ttyUSB0 or /dev/ttyACM0
     props = dict(dev.properties)
     serial_number = _extract_serial(dev)
+    known_message_type = None
+    if serial_number:
+        known_message_type = get_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
     result = _update_registry(
         dev,
         STATUS_ONLINE_CONNECTED,
@@ -2105,7 +2661,11 @@ def on_attach(dev: pyudev.Device, db_path: str):
             telemetry_active=False,
         )
     # print(f"[ATTACH] {node}  ID_SERIAL_SHORT={props.get('ID_SERIAL_SHORT')}  DB={result}", flush=True)
-    if node:
+    skip_handshake_probe = (
+        bool(node)
+        and _normalize_message_type_name(known_message_type) == MESSAGE_TYPE_TRACTION_OUT
+    )
+    if node and not skip_handshake_probe:
         link_live, module_type, module_id = _probe_link_via_handshake(
             port=node,
             db_path=db_path,
@@ -2181,6 +2741,7 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
         item["link_status"] = LINK_STATUS_NOT_LIVE
         item["last_link_check_at"] = now
         item["message_type"] = _normalize_message_type_name(item.get("message_type"))
+        item["traction_out_value"] = _normalize_traction_out_value(item.get("traction_out_value"))
         item["telemetry_requested"] = False
         item["telemetry_active"] = False
         if not isinstance(item.get("error_count"), int) or int(item.get("error_count", 0)) < 0:

@@ -16,9 +16,12 @@ from .functions import (
     clear_devices_registry,
     get_active_message_type,
     get_device_message_type,
+    get_device_traction_out_value,
     get_active_serial_baud,
     set_active_message_type,
     set_device_message_type,
+    send_device_traction_out_once,
+    set_device_traction_out_value,
     set_active_serial_baud,
     set_device_name,
     set_device_telemetry_requested,
@@ -125,6 +128,7 @@ def _load_devices(db_path: str) -> list[dict]:
                 "status": item.get("status", ""),
                 "module_type": module_type,
                 "message_type": message_type,
+                "traction_out_value": int(item.get("traction_out_value", 0) or 0),
                 "link_status": item.get("link_status", ""),
                 "device_node": item.get("device_node"),
                 "last_event_at": item.get("last_event_at"),
@@ -324,6 +328,14 @@ class BaudRateUpdatePayload(BaseModel):
     baud_rate: int
 
 
+class TractionOutValueUpdatePayload(BaseModel):
+    value: int
+
+
+class TractionOutSendPayload(BaseModel):
+    value: int | None = None
+
+
 def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -437,6 +449,62 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
             "active_message_type": active,
             "supported_message_types": supported_message_types(),
         }
+
+    @app.get("/api/devices/{serial_number}/config/traction-out")
+    async def get_device_traction_out_config(serial_number: str):
+        value = get_device_traction_out_value(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
+        if value is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        return {
+            "serial_number": serial_number,
+            "traction_out_value": int(value),
+        }
+
+    @app.post("/api/devices/{serial_number}/config/traction-out")
+    async def update_device_traction_out_config(
+        serial_number: str,
+        payload: TractionOutValueUpdatePayload,
+    ):
+        updated = set_device_traction_out_value(
+            db_path=db_path,
+            serial_number=serial_number,
+            traction_out_value=payload.value,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        return {
+            "serial_number": serial_number,
+            "traction_out_value": int(updated.get("traction_out_value", 0) or 0),
+        }
+
+    @app.post("/api/devices/{serial_number}/traction-out/send")
+    async def send_device_traction_out(serial_number: str, payload: TractionOutSendPayload):
+        message_type = get_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
+        if message_type is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if message_type != "TRACTION_OUT":
+            raise HTTPException(status_code=409, detail="set message type to TRACTION_OUT first")
+
+        result = send_device_traction_out_once(
+            db_path=db_path,
+            serial_number=serial_number,
+            value=payload.value,
+            timeout_sec=1.5,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if not bool(result.get("ok")):
+            detail = str(result.get("error_kind") or "traction_out_send_failed")
+            if detail == "traction_out_send_timeout":
+                raise HTTPException(status_code=504, detail=detail)
+            raise HTTPException(status_code=409, detail=detail)
+        return result
 
     @app.get("/api/config/serial")
     async def get_serial_config():

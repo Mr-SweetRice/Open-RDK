@@ -50,6 +50,7 @@
 #define POS_SINE_PERIOD_MIN_S       0.5f
 #define POS_SINE_PERIOD_MAX_S       60.0f
 #define PI_F                        3.14159265358979323846f
+#define PRESERVE_FORCE_OUTPUT_ON_LINK_TIMEOUT 1
 
 static const char *TAG = "ctrl_app";
 
@@ -84,12 +85,14 @@ static bool s_pos_telem_req = false;
 static TaskHandle_t s_speed_task = NULL;
 static TaskHandle_t s_enc_task = NULL;
 
-static void set_control_to_zero(void)
+static void set_control_to_zero(bool clear_force_output)
 {
     portENTER_CRITICAL(&s_pid_mux);
     s_setpoint_rpm = 0.0f;
     s_target_pos_rev = 0.0f;
-    s_force_out_pct = -1;
+    if (clear_force_output) {
+        s_force_out_pct = -1;
+    }
     s_pos_mode_enabled = false;
     s_pos_sine_enabled = false;
     portEXIT_CRITICAL(&s_pid_mux);
@@ -392,8 +395,25 @@ static void comm_request_pos_telem(void *ctx)
 static void comm_on_link_timeout(void *ctx)
 {
     (void)ctx;
-    set_control_to_zero();
+    bool keep_forced_output = false;
+    int forced_output = -1;
+
+    portENTER_CRITICAL(&s_pid_mux);
+    forced_output = s_force_out_pct;
+    keep_forced_output = (forced_output >= 0);
+    portEXIT_CRITICAL(&s_pid_mux);
+
+#if PRESERVE_FORCE_OUTPUT_ON_LINK_TIMEOUT
+    set_control_to_zero(false);
+    if (keep_forced_output) {
+        ESP_LOGW(TAG, "serial link timeout, preserving forced output=%d%%", forced_output);
+    } else {
+        ESP_LOGW(TAG, "serial link timeout, forcing SP=0");
+    }
+#else
+    set_control_to_zero(true);
     ESP_LOGW(TAG, "serial link timeout, forcing SP=0");
+#endif
 }
 
 static void pid_defaults(void)
@@ -506,7 +526,7 @@ esp_err_t traction_control_app_init(void)
 {
     pid_defaults();
     pid_load_from_nvs();
-    set_control_to_zero();
+    set_control_to_zero(true);
 
     s_nvs_queue = xQueueCreate(1, sizeof(nvs_save_req_t));
     if (!s_nvs_queue) {

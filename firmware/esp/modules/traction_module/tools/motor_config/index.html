@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Traction Motor Config</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #151b22;
+      --accent: #4cc9f0;
+      --accent-2: #fca311;
+      --muted: #7a8699;
+      --text: #e6edf3;
+      --line: #232b36;
+      --good: #84cc16;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: "Fira Sans", Arial, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% 10%, #1f2a37 0%, var(--bg) 58%),
+        linear-gradient(180deg, #0f1419 0%, #10161d 100%);
+      color: var(--text);
+    }
+    header {
+      padding: 18px 22px 10px;
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 900px;
+      line-height: 1.45;
+    }
+    .nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 0 22px 18px;
+    }
+    .nav a {
+      color: #071018;
+      text-decoration: none;
+      background: var(--accent);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .nav a.secondary {
+      background: #1b2430;
+      color: var(--text);
+      border: 1px solid var(--line);
+      font-weight: 500;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+      padding: 0 22px 22px;
+    }
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    }
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+    .panel p.note {
+      margin: 0 0 14px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    td code {
+      color: #b8f2ff;
+      font-family: "Fira Mono", Consolas, monospace;
+      font-size: 13px;
+    }
+    .tag {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(76, 201, 240, 0.14);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .field label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .field input,
+    .field select {
+      width: 100%;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    button {
+      background: #1f2937;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 10px;
+      padding: 9px 13px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #071018;
+      border-color: transparent;
+      font-weight: 700;
+    }
+    button.warn {
+      background: rgba(252, 163, 17, 0.14);
+      color: #ffd089;
+      border-color: rgba(252, 163, 17, 0.35);
+    }
+    .status {
+      margin-top: 12px;
+      color: var(--good);
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .curve-tools {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .curve-tools .meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .curve-table input {
+      width: 100%;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+    .curve-table td.actions-cell {
+      width: 70px;
+    }
+    .curve-table button {
+      width: 100%;
+      padding: 8px 10px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .summary .card {
+      background: #0b1116;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .summary .card span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .summary .card strong {
+      font-size: 20px;
+      color: var(--accent-2);
+    }
+    .foot {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .config-grid,
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Traction Motor Configuration</h1>
+    <p>
+      Central page for wiring reference and base calibration. The pin table below mirrors the current firmware
+      defaults, while the configuration and motor curve tables are read from and written back to the controller NVS.
+    </p>
+  </header>
+
+  <div class="nav">
+    <a href="../pid_tuner/index.html" class="secondary">Speed Page</a>
+    <a href="../position_tuner/index.html" class="secondary">Position Page</a>
+    <a href="./index.html">Motor Config</a>
+  </div>
+
+  <div class="layout">
+    <div class="stack">
+      <section class="panel">
+        <h2>Static Wiring Table</h2>
+        <p class="note">
+          Reference based on the firmware defaults in <code>main.c</code>. Use this as the bench wiring checklist before enabling the bridge.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Signal</th>
+              <th>GPIO</th>
+              <th>Connect To</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Driver Sleep / Enable</td>
+              <td><code>GPIO21</code></td>
+              <td>TB6612 <code>STBY</code> or DRV8833 <code>nSLEEP</code></td>
+              <td>Must stay low during reset for safe startup.</td>
+            </tr>
+            <tr>
+              <td>Motor Direction A</td>
+              <td><code>GPIO0</code></td>
+              <td>TB6612 <code>AIN1</code> or DRV8833 <code>IN1</code></td>
+              <td>Boot-sensitive pin. Prefer pull-down / safe hardware state.</td>
+            </tr>
+            <tr>
+              <td>Motor Direction B</td>
+              <td><code>GPIO1</code></td>
+              <td>TB6612 <code>AIN2</code> or DRV8833 <code>IN2</code></td>
+              <td>Boot-sensitive pin. Same recommendation as GPIO0.</td>
+            </tr>
+            <tr>
+              <td>Motor PWM</td>
+              <td><code>GPIO4</code></td>
+              <td>TB6612 <code>PWMA</code></td>
+              <td>Used as dedicated PWM for TB6612 mode.</td>
+            </tr>
+            <tr>
+              <td>Encoder Channel A</td>
+              <td><code>GPIO5</code></td>
+              <td>Quadrature encoder output A</td>
+              <td>Internal pull-up enabled by firmware.</td>
+            </tr>
+            <tr>
+              <td>Encoder Channel B</td>
+              <td><code>GPIO6</code></td>
+              <td>Quadrature encoder output B</td>
+              <td>Internal pull-up enabled by firmware.</td>
+            </tr>
+            <tr>
+              <td>Motor Power</td>
+              <td><span class="tag">External</span></td>
+              <td>Bridge VM / motor supply rail</td>
+              <td>Do not power the motor from the ESP32-C3 3V3 rail.</td>
+            </tr>
+            <tr>
+              <td>Logic Ground</td>
+              <td><span class="tag">GND</span></td>
+              <td>ESP32-C3 GND + bridge GND + encoder GND</td>
+              <td>Single common ground is mandatory.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Motor Curve Table</h2>
+        <p class="note">
+          Fixed 10-point curve used by the firmware normalization. Each row maps the applied PWM to the measured RPM and can be read from or written to the controller.
+        </p>
+        <div class="curve-tools">
+          <div class="meta">Suggested workflow: connect to the controller, click Create Curve, then save or read back the firmware curve.</div>
+          <div class="actions" style="margin-top:0;">
+            <button id="connectBtn" class="primary">Connect Controller</button>
+            <button id="readCurveBtn">Read Curve</button>
+            <button id="writeCurveBtn">Write Curve</button>
+            <button id="generateCurveBtn">Create Curve</button>
+            <button id="resetCurveBtn" class="warn">Reset Curve</button>
+          </div>
+        </div>
+        <div class="status" id="serialStatus">Controller disconnected.</div>
+        <table class="curve-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Applied PWM %</th>
+              <th>Measured RPM</th>
+            </tr>
+          </thead>
+          <tbody id="curveBody"></tbody>
+        </table>
+
+        <div class="summary">
+          <div class="card">
+            <span>Curve Points</span>
+            <strong id="curveCount">0</strong>
+          </div>
+          <div class="card">
+            <span>Max Table RPM</span>
+            <strong id="curveMaxRpm">0</strong>
+          </div>
+          <div class="card">
+            <span>Average Slope</span>
+            <strong id="curveSlope">0</strong>
+          </div>
+        </div>
+
+        <div class="foot">
+          The firmware stores this curve in NVS and interpolates it for normalization. Fixed PWM points: <code>10%</code> through <code>100%</code>.
+        </div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="panel">
+        <h2>Configuration Table</h2>
+        <p class="note">
+          Configuration worksheet for motor + encoder baseline. Values are read from and saved to the controller NVS.
+        </p>
+
+        <div class="config-grid">
+          <div class="field">
+            <label for="bridgeMode">Motor Bridge Mode</label>
+            <select id="bridgeMode">
+              <option value="TB6612">TB6612</option>
+              <option value="DRV8833">DRV8833</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="encoderMode">Encoder Mode</label>
+            <select id="encoderMode">
+              <option value="Quadrature x4">Quadrature x4</option>
+              <option value="Quadrature x2">Quadrature x2</option>
+              <option value="Single Channel">Single Channel</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="motorDirection">Motor Direction</label>
+            <select id="motorDirection">
+              <option value="Normal">Normal</option>
+              <option value="Inverted">Inverted</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="encoderDirection">Encoder Direction</label>
+            <select id="encoderDirection">
+              <option value="Normal">Normal</option>
+              <option value="Inverted">Inverted</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="rpmMax">Maximum RPM</label>
+            <input id="rpmMax" type="number" min="0" step="0.01" value="199.89" />
+          </div>
+          <div class="field">
+            <label for="pwmFreq">PWM Frequency (Hz)</label>
+            <input id="pwmFreq" type="number" min="1" step="1" value="20000" />
+          </div>
+          <div class="field">
+            <label for="countsPerRev">Counts / Motor Rev</label>
+            <input id="countsPerRev" type="number" min="1" step="1" value="44" />
+          </div>
+          <div class="field">
+            <label for="gearRatio">Gear Ratio</label>
+            <input id="gearRatio" type="number" min="1" step="1" value="45" />
+          </div>
+          <div class="field">
+            <label for="pullupMode">Encoder Pull-up</label>
+            <select id="pullupMode">
+              <option value="Enabled">Enabled</option>
+              <option value="Disabled">Disabled</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="notes">Configuration Notes</label>
+            <input id="notes" type="text" value="Bench profile / default firmware values" />
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Parameter</th>
+              <th>Value</th>
+              <th>Firmware Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Motor bridge</td><td id="cfgBridgeValue">TB6612</td><td><code>TRACTION_MOTOR_BRIDGE_TB6612</code></td></tr>
+            <tr><td>Encoder mode</td><td id="cfgEncoderValue">Quadrature x4</td><td>Incremental quadrature</td></tr>
+            <tr><td>Maximum RPM</td><td id="cfgRpmValue">199.89</td><td><code>RPM_AT_100_PCT</code></td></tr>
+            <tr><td>PWM frequency</td><td id="cfgPwmValue">20000 Hz</td><td><code>PWM_FREQ_HZ</code></td></tr>
+            <tr><td>Counts / motor rev</td><td id="cfgCountsValue">44</td><td><code>counts_per_motor_rev</code></td></tr>
+            <tr><td>Gear ratio</td><td id="cfgGearValue">45</td><td><code>gear_ratio</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="actions">
+          <button id="saveConfigBtn" class="primary">Save Config to Controller</button>
+          <button id="resetConfigBtn" class="warn">Reset Defaults</button>
+        </div>
+        <div class="status" id="configStatus"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    if (false) {
+    const CONFIG_KEY = "tractionMotorConfig.v1";
+    const CURVE_KEY = "tractionMotorCurve.v1";
+    const CURVE_PWM_POINTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    const CURVE_PREP_MS = 400;
+    const CURVE_SETTLE_MS = 1200;
+    const CURVE_SAMPLE_MS = 1000;
+    const CURVE_SAMPLE_PERIOD_MS = 100;
+    const RX_TIMEOUT_MS = 3000;
+
+    const configDefaults = {
+      bridgeMode: "TB6612",
+      encoderMode: "Quadrature x4",
+      motorDirection: "Normal",
+      encoderDirection: "Normal",
+      rpmMax: 199.89,
+      pwmFreq: 20000,
+      countsPerRev: 44,
+      gearRatio: 45,
+      pullupMode: "Enabled",
+      notes: "Bench profile / default firmware values",
+    };
+
+    function defaultCurveRpmForPwm(pwm) {
+      if (pwm <= 40) return 0;
+      if (pwm >= 100) return 199.89;
+      return 0.5855839 * Math.pow(pwm - 40, 1.42);
+    }
+
+    function buildCurveDefaults() {
+      return CURVE_PWM_POINTS.map((pwm) => ({
+        output: pwm,
+        rpm: Number(defaultCurveRpmForPwm(pwm).toFixed(2)),
+        notes: "Default firmware seed",
+      }));
+    }
+
+    const bridgeMode = document.getElementById("bridgeMode");
+    const encoderMode = document.getElementById("encoderMode");
+    const motorDirection = document.getElementById("motorDirection");
+    const encoderDirection = document.getElementById("encoderDirection");
+    const rpmMax = document.getElementById("rpmMax");
+    const pwmFreq = document.getElementById("pwmFreq");
+    const countsPerRev = document.getElementById("countsPerRev");
+    const gearRatio = document.getElementById("gearRatio");
+    const pullupMode = document.getElementById("pullupMode");
+    const notes = document.getElementById("notes");
+    const configStatus = document.getElementById("configStatus");
+    const serialStatus = document.getElementById("serialStatus");
+
+    const cfgBridgeValue = document.getElementById("cfgBridgeValue");
+    const cfgEncoderValue = document.getElementById("cfgEncoderValue");
+    const cfgRpmValue = document.getElementById("cfgRpmValue");
+    const cfgPwmValue = document.getElementById("cfgPwmValue");
+    const cfgCountsValue = document.getElementById("cfgCountsValue");
+    const cfgGearValue = document.getElementById("cfgGearValue");
+
+    const curveBody = document.getElementById("curveBody");
+    const curveCount = document.getElementById("curveCount");
+    const curveMaxRpm = document.getElementById("curveMaxRpm");
+    const curveSlope = document.getElementById("curveSlope");
+
+    const connectBtn = document.getElementById("connectBtn");
+    const readCurveBtn = document.getElementById("readCurveBtn");
+    const writeCurveBtn = document.getElementById("writeCurveBtn");
+    const generateCurveBtn = document.getElementById("generateCurveBtn");
+    const saveConfigBtn = document.getElementById("saveConfigBtn");
+    const resetConfigBtn = document.getElementById("resetConfigBtn");
+    const resetCurveBtn = document.getElementById("resetCurveBtn");
+
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let buffer = "";
+    let closingSerial = false;
+    let connectingSerial = false;
+    let curveRun = false;
+    let latestTelem = { rpm: 0, pwm: 0, ts: 0 };
+    let pendingCurvePromise = null;
+
+    function saveStatus(text) {
+      configStatus.textContent = text;
+    }
+
+    function setSerialStatus(text) {
+      serialStatus.textContent = text;
+    }
+
+    function loadJson(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (_err) {
+        return fallback;
+      }
+    }
+
+    function saveJson(key, value) {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    function collectConfig() {
+      return {
+        bridgeMode: bridgeMode.value,
+        encoderMode: encoderMode.value,
+        motorDirection: motorDirection.value,
+        encoderDirection: encoderDirection.value,
+        rpmMax: Number(rpmMax.value) || 0,
+        pwmFreq: Number(pwmFreq.value) || 0,
+        countsPerRev: Number(countsPerRev.value) || 0,
+        gearRatio: Number(gearRatio.value) || 0,
+        pullupMode: pullupMode.value,
+        notes: notes.value.trim(),
+      };
+    }
+
+    function fillConfig(cfg) {
+      bridgeMode.value = cfg.bridgeMode;
+      encoderMode.value = cfg.encoderMode;
+      motorDirection.value = cfg.motorDirection;
+      encoderDirection.value = cfg.encoderDirection;
+      rpmMax.value = cfg.rpmMax;
+      pwmFreq.value = cfg.pwmFreq;
+      countsPerRev.value = cfg.countsPerRev;
+      gearRatio.value = cfg.gearRatio;
+      pullupMode.value = cfg.pullupMode;
+      notes.value = cfg.notes;
+      syncConfigTable();
+    }
+
+    function syncConfigTable() {
+      const cfg = collectConfig();
+      cfgBridgeValue.textContent = `${cfg.bridgeMode} / Motor ${cfg.motorDirection}`;
+      cfgEncoderValue.textContent = `${cfg.encoderMode} / Encoder ${cfg.encoderDirection}`;
+      cfgRpmValue.textContent = cfg.rpmMax.toFixed(2);
+      cfgPwmValue.textContent = `${cfg.pwmFreq} Hz`;
+      cfgCountsValue.textContent = String(cfg.countsPerRev);
+      cfgGearValue.textContent = String(cfg.gearRatio);
+    }
+
+    function normalizeCurveRows(rows) {
+      const byOutput = new Map(
+        Array.isArray(rows)
+          ? rows.map((row) => [Number(row && row.output), row])
+          : []
+      );
+      return CURVE_PWM_POINTS.map((output) => {
+        const match = byOutput.get(output);
+        return {
+          output,
+          rpm: Number(match && match.rpm) || 0,
+          notes: match && typeof match.notes === "string" ? match.notes : "",
+        };
+      });
+    }
+
+    function getCurveRows() {
+      return Array.from(curveBody.querySelectorAll("tr")).map((row) => ({
+        output: Number(row.querySelector("[data-field='output']").value) || 0,
+        rpm: Number(row.querySelector("[data-field='rpm']").value) || 0,
+        notes: row.querySelector("[data-field='notes']").value.trim(),
+      }));
+    }
+
+    function renderCurve(rows) {
+      curveBody.innerHTML = "";
+      normalizeCurveRows(rows).forEach((row, index) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${index + 1}</td>
+          <td><input data-field="output" type="number" value="${row.output}" readonly></td>
+          <td><input data-field="rpm" type="number" min="0" step="0.01" value="${row.rpm.toFixed(2)}"></td>
+          <td><input data-field="notes" type="text" value="${row.notes || ""}"></td>
+        `;
+        curveBody.appendChild(tr);
+      });
+      syncCurveSummary();
+    }
+
+    function syncCurveSummary() {
+      const rows = getCurveRows();
+      curveCount.textContent = String(rows.length);
+
+      const maxRpm = rows.reduce((max, row) => Math.max(max, row.rpm), 0);
+      curveMaxRpm.textContent = maxRpm.toFixed(1);
+
+      let slopeSum = 0;
+      let slopeCountLocal = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const deltaOut = rows[i].output - rows[i - 1].output;
+        const deltaRpm = rows[i].rpm - rows[i - 1].rpm;
+        if (deltaOut > 0) {
+          slopeSum += deltaRpm / deltaOut;
+          slopeCountLocal++;
+        }
+      }
+      const slope = slopeCountLocal ? slopeSum / slopeCountLocal : 0;
+      curveSlope.textContent = slope.toFixed(2);
+    }
+
+    function persistCurve(text = "Curve table saved locally.") {
+      saveJson(CURVE_KEY, normalizeCurveRows(getCurveRows()));
+      syncCurveSummary();
+      saveStatus(text);
+    }
+
+    function loadCurve() {
+      const stored = loadJson(CURVE_KEY, buildCurveDefaults());
+      renderCurve(stored);
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function bindConfigInputs() {
+      [
+        bridgeMode,
+        encoderMode,
+        motorDirection,
+        encoderDirection,
+        rpmMax,
+        pwmFreq,
+        countsPerRev,
+        gearRatio,
+        pullupMode,
+        notes,
+      ].forEach((el) => {
+        el.addEventListener("input", syncConfigTable);
+        el.addEventListener("change", syncConfigTable);
+      });
+    }
+
+    function resolvePendingCurve(rows) {
+      if (!pendingCurvePromise) return;
+      clearTimeout(pendingCurvePromise.timer);
+      pendingCurvePromise.resolve(rows);
+      pendingCurvePromise = null;
+    }
+
+    function rejectPendingCurve(message) {
+      if (!pendingCurvePromise) return;
+      clearTimeout(pendingCurvePromise.timer);
+      pendingCurvePromise.reject(new Error(message));
+      pendingCurvePromise = null;
+    }
+
+    function sendLine(text) {
+      if (!writer) return;
+      const data = new TextEncoder().encode(text + "\n");
+      writer.write(data);
+    }
+
+    function handleCurveLine(parts) {
+      if (parts.length < 11) return;
+      const previous = normalizeCurveRows(getCurveRows());
+      const rows = CURVE_PWM_POINTS.map((output, index) => ({
+        output,
+        rpm: Number(parts[index + 1]) || 0,
+        notes: previous[index] ? previous[index].notes : "Loaded from controller",
+      }));
+      renderCurve(rows);
+      saveJson(CURVE_KEY, rows);
+      saveStatus("Curve table updated from controller.");
+      resolvePendingCurve(rows);
+    }
+
+    function handleTelemLine(parts) {
+      if (parts.length < 5) return;
+      const rpm = parseFloat(parts[2]);
+      const pwm = parseFloat(parts[3]);
+      latestTelem = {
+        rpm: Number.isFinite(rpm) ? Math.abs(rpm) : 0,
+        pwm: Number.isFinite(pwm) ? Math.abs(pwm) : 0,
+        ts: Date.now(),
+      };
+    }
+
+    function handleLine(line) {
+      if (line === "OK") {
+        return;
+      }
+      if (line === "ERR") {
+        setSerialStatus("Controller returned ERR.");
+        return;
+      }
+      if (line.startsWith("S,OK")) {
+        setSerialStatus("Controller curve saved to NVS.");
+        return;
+      }
+      if (line.startsWith("S,ERR")) {
+        setSerialStatus("Controller save failed: " + line);
+        return;
+      }
+      if (line.startsWith("CV,")) {
+        handleCurveLine(line.split(","));
+        return;
+      }
+      if (line.startsWith("T,")) {
+        handleTelemLine(line.split(","));
+      }
+    }
+
+    async function readLoop() {
+      try {
+        while (reader) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += new TextDecoder().decode(value);
+          let idx;
+          while ((idx = buffer.search(/[\r\n]/)) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (line) handleLine(line);
+          }
+        }
+      } catch (err) {
+        if (!closingSerial) {
+          setSerialStatus("Serial RX error: " + (err && err.message ? err.message : err));
+        }
+      } finally {
+        if (!closingSerial && (port || reader || writer)) {
+          await closeSerial();
+        }
+      }
+    }
+
+    async function closeSerial() {
+      if (closingSerial) return;
+      closingSerial = true;
+      rejectPendingCurve("Controller disconnected");
+      try {
+        if (reader) {
+          try { await reader.cancel(); } catch (_err) {}
+          try { reader.releaseLock(); } catch (_err) {}
+          reader = null;
+        }
+        if (writer) {
+          try { writer.releaseLock(); } catch (_err) {}
+          writer = null;
+        }
+        if (port) {
+          const openedPort = port;
+          port = null;
+          try { await openedPort.close(); } catch (_err) {}
+        }
+      } finally {
+        buffer = "";
+        closingSerial = false;
+        connectBtn.textContent = "Connect Controller";
+        setSerialStatus("Controller disconnected.");
+      }
+    }
+
+    async function connect(useChooser = true) {
+      if (connectingSerial || closingSerial) return;
+      connectingSerial = true;
+      try {
+        if (!("serial" in navigator)) {
+          setSerialStatus("Web Serial is not available in this browser.");
+          return;
+        }
+        if (useChooser) {
+          port = await navigator.serial.requestPort();
+        } else {
+          const ports = await navigator.serial.getPorts();
+          if (!ports.length) {
+            setSerialStatus("No paired controller ports.");
+            return;
+          }
+          port = ports[0];
+        }
+        await port.open({ baudRate: 115200 });
+        reader = port.readable.getReader();
+        writer = port.writable.getWriter();
+        connectBtn.textContent = "Disconnect Controller";
+        setSerialStatus("Controller connected.");
+        void readLoop();
+        try {
+          await requestCurveSnapshot();
+        } catch (err) {
+          setSerialStatus("Controller connected, but curve read failed: " + (err && err.message ? err.message : err));
+        }
+      } catch (err) {
+        setSerialStatus("Connect failed: " + (err && err.message ? err.message : err));
+        await closeSerial();
+      } finally {
+        connectingSerial = false;
+      }
+    }
+
+    function requestCurveSnapshot(timeoutMs = 2000) {
+      if (!writer) {
+        return Promise.reject(new Error("Controller is not connected"));
+      }
+      rejectPendingCurve("Replaced by newer curve request");
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingCurvePromise = null;
+          reject(new Error("Timeout waiting for curve snapshot"));
+        }, timeoutMs);
+        pendingCurvePromise = { resolve, reject, timer };
+        sendLine("GET CURVE");
+      });
+    }
+
+    async function sampleAverageRpm(durationMs) {
+      const samples = [];
+      const deadline = Date.now() + durationMs;
+      while (Date.now() < deadline) {
+        if (curveRun) {
+          sendLine("GET TELEM");
+        }
+        await sleep(CURVE_SAMPLE_PERIOD_MS);
+        if (Date.now() - latestTelem.ts < RX_TIMEOUT_MS) {
+          samples.push(latestTelem.rpm);
+        }
+      }
+      if (!samples.length) {
+        return 0;
+      }
+      return samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    }
+
+    async function writeCurveToController(rows, persistToNvs = true) {
+      if (!writer) {
+        throw new Error("Controller is not connected");
+      }
+      const normalized = normalizeCurveRows(rows);
+      for (const row of normalized) {
+        sendLine(`SET CURVE ${row.output} ${row.rpm.toFixed(2)}`);
+        await sleep(70);
+      }
+      if (persistToNvs) {
+        sendLine("SAVE CURVE");
+        await sleep(250);
+      }
+      await requestCurveSnapshot();
+      setSerialStatus("Controller curve updated.");
+    }
+
+    function setCurveButtonsBusy(active) {
+      curveRun = active;
+      connectBtn.disabled = active;
+      readCurveBtn.disabled = active;
+      writeCurveBtn.disabled = active;
+      resetCurveBtn.disabled = active;
+      generateCurveBtn.textContent = active ? "Creating Curve..." : "Create Curve";
+    }
+
+    async function generateCurve() {
+      if (!writer) {
+        setSerialStatus("Connect to the controller before creating the curve.");
+        return;
+      }
+      setCurveButtonsBusy(true);
+      try {
+        sendLine("SET PID RPM SP 0");
+        sendLine("CLR OUT");
+        await sleep(CURVE_PREP_MS);
+
+        const rows = [];
+        for (const pwm of CURVE_PWM_POINTS) {
+          setSerialStatus(`Creating curve at ${pwm}% raw PWM...`);
+          sendLine(`SET OUT RAW ${pwm.toFixed(2)}`);
+          await sleep(CURVE_SETTLE_MS);
+          const rpmMeasured = await sampleAverageRpm(CURVE_SAMPLE_MS);
+          rows.push({
+            output: pwm,
+            rpm: Number(rpmMeasured.toFixed(2)),
+            notes: `Generated at ${new Date().toLocaleString()}`,
+          });
+          renderCurve(rows);
+          saveJson(CURVE_KEY, normalizeCurveRows(rows));
+        }
+
+        sendLine("CLR OUT");
+        renderCurve(rows);
+        persistCurve("Curve generated locally.");
+        await writeCurveToController(rows, true);
+        setSerialStatus("Curve generated and saved to controller.");
+      } catch (err) {
+        setSerialStatus("Curve generation failed: " + (err && err.message ? err.message : err));
+      } finally {
+        sendLine("CLR OUT");
+        setCurveButtonsBusy(false);
+      }
+    }
+
+    saveConfigBtn.addEventListener("click", () => {
+      saveJson(CONFIG_KEY, collectConfig());
+      saveStatus("Configuration saved locally.");
+    });
+
+    resetConfigBtn.addEventListener("click", () => {
+      fillConfig(configDefaults);
+      saveJson(CONFIG_KEY, configDefaults);
+      saveStatus("Configuration reset to firmware defaults.");
+    });
+
+    connectBtn.addEventListener("click", () => {
+      if (port) {
+        void closeSerial();
+      } else {
+        void connect(true);
+      }
+    });
+
+    readCurveBtn.addEventListener("click", () => {
+      requestCurveSnapshot()
+        .then(() => setSerialStatus("Curve loaded from controller."))
+        .catch((err) => setSerialStatus(err.message));
+    });
+
+    writeCurveBtn.addEventListener("click", () => {
+      void writeCurveToController(getCurveRows(), true)
+        .then(() => saveStatus("Curve written to controller and saved to NVS."))
+        .catch((err) => setSerialStatus(err.message));
+    });
+
+    generateCurveBtn.addEventListener("click", () => {
+      void generateCurve();
+    });
+
+    resetCurveBtn.addEventListener("click", () => {
+      const defaults = buildCurveDefaults();
+      renderCurve(defaults);
+      saveJson(CURVE_KEY, defaults);
+      saveStatus("Curve table reset to firmware defaults.");
+    });
+
+    curveBody.addEventListener("input", () => {
+      persistCurve();
+    });
+
+    window.addEventListener("storage", (event) => {
+      if (event.key === CURVE_KEY) {
+        loadCurve();
+        saveStatus("Curve table updated from another tab.");
+      }
+      if (event.key === CONFIG_KEY) {
+        fillConfig(loadJson(CONFIG_KEY, configDefaults));
+        saveStatus("Configuration updated from another tab.");
+      }
+    });
+
+    if ("serial" in navigator) {
+      navigator.serial.addEventListener("disconnect", () => {
+        void closeSerial();
+      });
+    }
+
+    bindConfigInputs();
+    fillConfig(loadJson(CONFIG_KEY, configDefaults));
+    loadCurve();
+    saveStatus("Loaded local configuration profile.");
+    }
+  </script>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -60,6 +60,14 @@
       border-radius: 6px;
       padding: 6px;
     }
+    select {
+      width: 100%;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 6px;
+      padding: 6px;
+    }
     button {
       background: #1f2937;
       color: var(--text);
@@ -105,20 +113,21 @@
   <header>
     Traction Position Tuner (USB/Serial)
     <a href="../pid_tuner/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Speed Page</a>
+    <a href="../motor_config/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Motor Config</a>
   </header>
   <div class="grid">
     <div class="panel">
       <canvas id="chart" width="900" height="360"></canvas>
       <div class="row">
-        <div>Target: <span class="value" id="targetVal">0</span> rev</div>
-        <div style="margin-left:auto;">Position: <span class="value" id="posVal">0</span> rev</div>
+        <div>Target: <span class="value" id="targetVal">0</span> deg</div>
+        <div style="margin-left:auto;">Position: <span class="value" id="posVal">0</span> deg</div>
       </div>
       <div class="row">
         <div>Output PWM: <span class="value" id="outPwmVal">0</span> %</div>
         <div style="margin-left:auto;">Output Raw: <span class="value" id="outRawVal">0</span> %</div>
       </div>
       <div class="row">
-        <div>Error: <span class="value" id="errVal">0</span> rev</div>
+        <div>Error: <span class="value" id="errVal">0</span> deg</div>
         <div style="margin-left:auto;" class="status" id="modeStatus">Mode: disabled</div>
       </div>
     </div>
@@ -133,7 +142,7 @@
         <button id="stopBtn">Stop POS</button>
       </div>
       <div class="row">
-        <button id="telemBtn">Pause Telemetry</button>
+        <div class="status">Telemetry running</div>
         <button id="clearLogBtn">Clear Log</button>
       </div>
       <div class="status" id="status">Disconnected</div>
@@ -152,18 +161,13 @@
         <input id="kdInput" type="number" step="0.01" value="0.10" />
       </div>
       <div class="row">
-        <label>Target</label>
-        <input id="targetInput" type="number" step="0.01" value="0.00" />
-        <button id="setTargetBtn">Set</button>
-      </div>
-      <div class="row">
         <label>Angle</label>
         <input id="angleSlider" type="range" min="0" max="360" step="1" value="0" style="width:100%;" />
       </div>
       <div class="row">
         <label>Deg</label>
-        <input id="angleInput" type="number" min="0" max="360" step="1" value="0" />
-        <button id="setAngleBtn">Set Angle</button>
+        <input id="angleInput" type="number" step="1" value="0" />
+        <button id="setAngleBtn">Sync</button>
       </div>
       <hr style="border-color:#232b36; margin:12px 0;">
       <div class="row">
@@ -205,9 +209,7 @@
     const saveBtn = document.getElementById("saveBtn");
     const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
-    const telemBtn = document.getElementById("telemBtn");
     const clearLogBtn = document.getElementById("clearLogBtn");
-    const setTargetBtn = document.getElementById("setTargetBtn");
     const setAngleBtn = document.getElementById("setAngleBtn");
     const sineStartBtn = document.getElementById("sineStartBtn");
     const sineStopBtn = document.getElementById("sineStopBtn");
@@ -215,7 +217,6 @@
     const kpInput = document.getElementById("kpInput");
     const kiInput = document.getElementById("kiInput");
     const kdInput = document.getElementById("kdInput");
-    const targetInput = document.getElementById("targetInput");
     const angleSlider = document.getElementById("angleSlider");
     const angleInput = document.getElementById("angleInput");
     const sineAmpInput = document.getElementById("sineAmpInput");
@@ -233,15 +234,18 @@
     let closingSerial = false;
     let connectingSerial = false;
     let lastRxAt = 0;
-    let telemEnabled = true;
     let telemTimer = null;
     let posModeEnabled = false;
+    let chartRefreshTimer = null;
+    const logLines = [];
     const data = [];
 
     const MAX_POINTS = 600;
+    const MAX_LOG_LINES = 300;
     const RX_TIMEOUT_MS = 3000;
     const RX_WATCHDOG_MS = 1000;
     const TELEM_INTERVAL_MS = 50;
+    const CHART_REFRESH_MS = 66;
 
     function clamp(v, min, max) {
       if (!Number.isFinite(v)) return min;
@@ -250,25 +254,16 @@
       return v;
     }
 
-    function degToRev(deg) {
-      return clamp(deg, 0, 360) / 360.0;
+    function normalizeAngleForSlider(deg) {
+      if (!Number.isFinite(deg)) return 0;
+      const wrapped = deg % 360;
+      return wrapped < 0 ? wrapped + 360 : wrapped;
     }
 
-    function revToDeg(rev) {
-      return clamp(rev, 0, 1) * 360.0;
-    }
-
-    function syncAngleFromRev(rev) {
-      const deg = revToDeg(rev);
-      angleSlider.value = String(Math.round(deg));
+    function syncAngleControls(deg) {
+      const sliderDeg = normalizeAngleForSlider(deg);
+      angleSlider.value = String(Math.round(sliderDeg));
       angleInput.value = String(Math.round(deg));
-    }
-
-    function syncRevFromAngleDeg(deg) {
-      const clampedDeg = clamp(deg, 0, 360);
-      angleSlider.value = String(Math.round(clampedDeg));
-      angleInput.value = String(Math.round(clampedDeg));
-      targetInput.value = degToRev(clampedDeg).toFixed(4);
     }
 
     function fmtTime(ts) {
@@ -281,7 +276,11 @@
     }
 
     function appendLog(line) {
-      logEl.textContent += `[${fmtTime(Date.now())}] ${line}\n`;
+      logLines.push(`[${fmtTime(Date.now())}] ${line}`);
+      if (logLines.length > MAX_LOG_LINES) {
+        logLines.splice(0, logLines.length - MAX_LOG_LINES);
+      }
+      logEl.textContent = logLines.join("\n");
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -379,7 +378,12 @@
     function appendData(target, pos, outPwm, outRaw) {
       data.push({ target, pos, outPwm, outRaw });
       if (data.length > MAX_POINTS) data.shift();
-      drawChart();
+      if (!chartRefreshTimer) {
+        chartRefreshTimer = setTimeout(() => {
+          chartRefreshTimer = null;
+          drawChart();
+        }, CHART_REFRESH_MS);
+      }
     }
 
     function sendLine(text) {
@@ -394,11 +398,11 @@
       return true;
     }
 
-    function sendTargetRev(rev) {
-      const clampedRev = clamp(rev, 0, 1);
-      targetInput.value = clampedRev.toFixed(4);
-      syncAngleFromRev(clampedRev);
-      sendLine(`SET PID POS TARGET ${clampedRev.toFixed(4)}`);
+    function sendTargetDeg(deg) {
+      if (!Number.isFinite(deg)) return;
+      syncAngleControls(deg);
+      sendLine("START PID POS");
+      sendLine(`SET PID POS ANGLE ${deg.toFixed(2)}`);
     }
 
     function stopSineTest(sendCmd = true) {
@@ -442,9 +446,8 @@
       kpInput.value = String(parseFloat(parts[1]).toFixed(4));
       kiInput.value = String(parseFloat(parts[2]).toFixed(4));
       kdInput.value = String(parseFloat(parts[3]).toFixed(4));
-      const targetRev = parseFloat(parts[4]);
-      targetInput.value = String(targetRev.toFixed(4));
-      syncAngleFromRev(targetRev);
+      const targetDeg = parseFloat(parts[4]);
+      if (Number.isFinite(targetDeg)) syncAngleControls(targetDeg);
       setModeEnabled(parseInt(parts[5], 10) === 1);
     }
 
@@ -627,7 +630,7 @@
         void readLoop();
         sendLine("GET PID POS");
         sendLine("GET PID POS SINE");
-        if (telemEnabled) startTelem();
+        startTelem();
       } catch (err) {
         setStatus("Error: " + (err && err.message ? err.message : err));
         appendLog("Error: " + (err && err.message ? err.message : err));
@@ -649,44 +652,29 @@
     bindClick(startBtn, () => sendLine("START PID POS"));
     bindClick(stopBtn, () => sendLine("STOP PID POS"));
     bindClick(stopBtn, () => stopSineTest(true));
-    bindClick(telemBtn, () => {
-      telemEnabled = !telemEnabled;
-      if (telemEnabled) {
-        telemBtn.textContent = "Pause Telemetry";
-        startTelem();
-      } else {
-        telemBtn.textContent = "Start Telemetry";
-        stopTelem();
-      }
-    });
-    bindClick(clearLogBtn, () => { logEl.textContent = ""; });
-
-    bindClick(setTargetBtn, () => {
-      stopSineTest(true);
-      const v = parseFloat(targetInput.value);
-      if (!Number.isFinite(v)) return;
-      sendTargetRev(v);
+    bindClick(clearLogBtn, () => {
+      logLines.length = 0;
+      logEl.textContent = "";
     });
 
     if (angleSlider) {
       angleSlider.addEventListener("input", () => {
         stopSineTest(true);
-        syncRevFromAngleDeg(parseFloat(angleSlider.value));
+        syncAngleControls(parseFloat(angleSlider.value));
       });
     }
     if (angleInput) {
       angleInput.addEventListener("change", () => {
         stopSineTest(true);
-        syncRevFromAngleDeg(parseFloat(angleInput.value));
+        syncAngleControls(parseFloat(angleInput.value));
       });
     }
     bindClick(setAngleBtn, () => {
       stopSineTest(true);
       const deg = parseFloat(angleInput.value);
       if (!Number.isFinite(deg)) return;
-      syncRevFromAngleDeg(deg);
-      const rev = parseFloat(targetInput.value);
-      sendTargetRev(rev);
+      syncAngleControls(deg);
+      sendTargetDeg(deg);
     });
 
     bindClick(sineStartBtn, () => startSineTest());
@@ -695,7 +683,7 @@
     bindNumeric(kpInput, "SET PID POS KP");
     bindNumeric(kiInput, "SET PID POS KI");
     bindNumeric(kdInput, "SET PID POS KD");
-    syncRevFromAngleDeg(0);
+    syncAngleControls(0);
 
     setModeEnabled(false);
 

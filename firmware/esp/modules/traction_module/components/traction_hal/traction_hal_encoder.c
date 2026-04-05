@@ -28,12 +28,34 @@ static inline uint8_t IRAM_ATTR read_state(void)
     return (uint8_t)((a << 1) | b);
 }
 
+static inline traction_encoder_mode_t IRAM_ATTR encoder_mode_or_default(traction_encoder_mode_t mode)
+{
+    if (mode == TRACTION_ENCODER_MODE_QUADRATURE_X2 ||
+        mode == TRACTION_ENCODER_MODE_SINGLE_CHANNEL) {
+        return mode;
+    }
+    return TRACTION_ENCODER_MODE_QUADRATURE_X4;
+}
+
 static void IRAM_ATTR encoder_isr(void *arg)
 {
     (void)arg;
     uint8_t curr = read_state();
     uint8_t idx  = (uint8_t)((s_prev_state << 2) | curr);
     int8_t delta = s_quad_table[idx];
+
+    const bool prev_a = ((s_prev_state >> 1) & 0x1U) != 0U;
+    const bool curr_a = ((curr >> 1) & 0x1U) != 0U;
+    const traction_encoder_mode_t mode = encoder_mode_or_default(s_enc_cfg.mode);
+    if (mode == TRACTION_ENCODER_MODE_QUADRATURE_X2) {
+        if (prev_a == curr_a) {
+            delta = 0;
+        }
+    } else if (mode == TRACTION_ENCODER_MODE_SINGLE_CHANNEL) {
+        if (prev_a || !curr_a) {
+            delta = 0;
+        }
+    }
 
     if (s_enc_cfg.invert_direction) {
         delta = (int8_t)-delta;
@@ -50,6 +72,7 @@ esp_err_t traction_encoder_init(const traction_encoder_cfg_t *cfg)
     if (!cfg) return ESP_ERR_INVALID_ARG;
 
     s_enc_cfg = *cfg;
+    s_enc_cfg.mode = encoder_mode_or_default(s_enc_cfg.mode);
 
     // Config GPIOs como entrada com interrupção em qualquer borda
     gpio_config_t io = {
@@ -76,6 +99,42 @@ esp_err_t traction_encoder_init(const traction_encoder_cfg_t *cfg)
     if (err != ESP_OK) return err;
 
     s_inited = true;
+    return ESP_OK;
+}
+
+esp_err_t traction_encoder_set_runtime_config(bool pullup,
+                                              bool invert_direction,
+                                              traction_encoder_mode_t mode,
+                                              int32_t counts_per_motor_rev,
+                                              int32_t gear_ratio)
+{
+    if (!s_inited) return ESP_ERR_INVALID_STATE;
+    if (counts_per_motor_rev <= 0 || gear_ratio <= 0) return ESP_ERR_INVALID_ARG;
+
+    gpio_pull_mode_t pull_mode = pullup ? GPIO_PULLUP_ONLY : GPIO_FLOATING;
+    esp_err_t err = gpio_set_pull_mode(s_enc_cfg.pin_a, pull_mode);
+    if (err != ESP_OK) return err;
+    err = gpio_set_pull_mode(s_enc_cfg.pin_b, pull_mode);
+    if (err != ESP_OK) return err;
+
+    portENTER_CRITICAL(&s_mux);
+    s_enc_cfg.pullup = pullup;
+    s_enc_cfg.invert_direction = invert_direction;
+    s_enc_cfg.mode = encoder_mode_or_default(mode);
+    s_enc_cfg.counts_per_motor_rev = counts_per_motor_rev;
+    s_enc_cfg.gear_ratio = gear_ratio;
+    portEXIT_CRITICAL(&s_mux);
+    return ESP_OK;
+}
+
+esp_err_t traction_encoder_get_runtime_config(traction_encoder_cfg_t *out_cfg)
+{
+    if (!s_inited) return ESP_ERR_INVALID_STATE;
+    if (!out_cfg) return ESP_ERR_INVALID_ARG;
+
+    portENTER_CRITICAL(&s_mux);
+    *out_cfg = s_enc_cfg;
+    portEXIT_CRITICAL(&s_mux);
     return ESP_OK;
 }
 

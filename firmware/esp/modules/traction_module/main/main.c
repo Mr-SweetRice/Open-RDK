@@ -8,8 +8,9 @@
 
 // Pins
 #define DRIVER_SLEEP_PIN     GPIO_NUM_21
-#define DRIVE_ENABLE_PIN1    GPIO_NUM_0
-#define DRIVE_ENABLE_PIN2    GPIO_NUM_1
+#define DRIVE_DIR_PIN1       GPIO_NUM_0
+#define DRIVE_DIR_PIN2       GPIO_NUM_1
+#define DRIVE_PWM_PIN        GPIO_NUM_4
 
 // PWM config
 #define PWM_FREQ_HZ          20000
@@ -60,8 +61,10 @@ void app_main(void)
 
     traction_motor_cfg_t motor_cfg = {
         .sleep_gpio = DRIVER_SLEEP_PIN,
-        .pwm_gpio_a = DRIVE_ENABLE_PIN1,
-        .pwm_gpio_b = DRIVE_ENABLE_PIN2,
+        .pwm_gpio_a = DRIVE_DIR_PIN1,
+        .pwm_gpio_b = DRIVE_DIR_PIN2,
+        .tb6612_pwm_gpio = DRIVE_PWM_PIN,
+        .bridge_type = TRACTION_MOTOR_BRIDGE_TB6612,
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .timer_num = LEDC_TIMER_0,
         .channel_a = LEDC_CHANNEL_1,
@@ -76,6 +79,7 @@ void app_main(void)
         .pin_b = GPIO_NUM_6,
         .pullup = true,
         .invert_direction = false,
+        .mode = TRACTION_ENCODER_MODE_QUADRATURE_X4,
         .counts_per_motor_rev = 44,
         .gear_ratio = 45,
     };

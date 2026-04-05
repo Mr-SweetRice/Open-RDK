@@ -63,6 +63,14 @@
       border-radius: 6px;
       padding: 6px;
     }
+    select {
+      width: 100%;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 6px;
+      padding: 6px;
+    }
     button {
       background: #1f2937;
       color: var(--text);
@@ -108,6 +116,7 @@
   <header>
     Traction PID Tuner (USB/Serial)
     <a href="../position_tuner/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Position Page</a>
+    <a href="../motor_config/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Motor Config</a>
   </header>
   <div class="grid">
     <div class="panel">
@@ -117,8 +126,8 @@
         <div style="margin-left:auto;">Speed: <span class="value" id="rpmVal">0</span> rpm</div>
       </div>
       <div class="row">
-        <div>PID Output: <span class="value" id="outVal">0</span> %</div>
-        <div style="margin-left:auto;">PID Raw: <span class="value" id="outRawVal">0</span> %</div>
+        <div>Applied PWM: <span class="value" id="outVal">0</span> %</div>
+        <div style="margin-left:auto;">Pre-Curve Cmd: <span class="value" id="outRawVal">0</span> %</div>
       </div>
       <div class="row">
         <div style="margin-left:auto;" class="status">Output is not plotted</div>
@@ -142,9 +151,8 @@
         <button id="startStopBtn" class="primary">START</button>
       </div>
       <div class="row">
-        <button id="telemToggleBtn">Pause Telemetry</button>
+        <div class="status" id="status">Disconnected</div>
       </div>
-      <div class="status" id="status">Disconnected</div>
       <div class="status" id="cmdStatus">No commands</div>
       <hr style="border-color:#232b36; margin:12px 0;">
       <div class="row">
@@ -172,20 +180,6 @@
         <button id="outEnableBtn">Force Output</button>
         <button id="outClearBtn">Resume PID</button>
       </div>
-      <hr style="border-color:#232b36; margin:12px 0;">
-      <div class="row">
-        <button id="captureBtn">Start Capture</button>
-        <button id="clearCaptureBtn">Clear</button>
-      </div>
-      <div class="row">
-        <button id="sweepBtn">Start Sweep</button>
-        <button id="sweepStopBtn">Stop Sweep</button>
-      </div>
-      <div class="status" id="sweepStatus">Sweep: stopped</div>
-      <div class="status">RPM vs Output Capture (%)</div>
-      <canvas id="scatter" width="320" height="220" style="margin-top:8px;"></canvas>
-      <div class="status" style="margin-top:8px;">Table (last 150)</div>
-      <div id="tableWrap" class="log" style="height:160px; color:#e6edf3;"></div>
       <div class="row">
         <div class="status">ESP32-C3 Log</div>
         <button id="logClearBtn" style="margin-left:auto;">Clear Log</button>
@@ -208,14 +202,6 @@
     const kdLegend = document.getElementById("kdLegend");
     const logEl = document.getElementById("log");
     const cmdStatusEl = document.getElementById("cmdStatus");
-    const scatter = document.getElementById("scatter");
-    const scatterCtx = scatter.getContext("2d");
-    const captureBtn = document.getElementById("captureBtn");
-    const clearCaptureBtn = document.getElementById("clearCaptureBtn");
-    const sweepBtn = document.getElementById("sweepBtn");
-    const sweepStopBtn = document.getElementById("sweepStopBtn");
-    const sweepStatus = document.getElementById("sweepStatus");
-    const tableWrap = document.getElementById("tableWrap");
     let lastRxAt = 0;
     const connectBtn = document.getElementById("connectBtn");
     const getBtn = document.getElementById("getBtn");
@@ -235,7 +221,6 @@
     const outEnableBtn = document.getElementById("outEnableBtn");
     const outClearBtn = document.getElementById("outClearBtn");
     const logClearBtn = document.getElementById("logClearBtn");
-    const telemToggleBtn = document.getElementById("telemToggleBtn");
 
     let port = null;
     let reader = null;
@@ -244,28 +229,17 @@
     let closingSerial = false;
     let connectingSerial = false;
     let telemTimer = null;
-    let telemEnabled = true;
-    let captureOn = false;
-    let captureStartMs = 0;
-    const capture = [];
-    let sweepTimer = null;
-    const sweep = {
-      active: false,
-      out: 0.0,
-      step: 1.0,
-      waitMs: 1000,
-      nextSampleAt: 0,
-      awaitingSample: false,
-    };
+    let chartRefreshTimer = null;
+    const logLines = [];
+    let latestTelem = { sp: 0, rpm: 0, out: 0, outRaw: 0, ts: 0 };
 
     const MAX_POINTS = 600;
-    const MAX_CAPTURE = 2000;
-    const MAX_TABLE_ROWS = 150;
+    const MAX_LOG_LINES = 300;
     const RX_TIMEOUT_MS = 3000;
     const RX_WATCHDOG_MS = 1000;
-    const TELEM_INTERVAL_MS = 33;
+    const TELEM_INTERVAL_MS = 50;
+    const CHART_REFRESH_MS = 66;
     const SAVE_TELEM_PAUSE_MS = 1000;
-    const SWEEP_POLL_MS = 50;
     const START_STOP_SP_START = 150;
     const START_STOP_SP_STOP = 0;
     const START_STOP_THRESHOLD_RPM = 10;
@@ -328,60 +302,18 @@
       ctx.stroke();
     }
 
-    function drawScatter() {
-      const w = scatter.width;
-      const h = scatter.height;
-      scatterCtx.clearRect(0, 0, w, h);
-      scatterCtx.fillStyle = "#0b1116";
-      scatterCtx.fillRect(0, 0, w, h);
-      scatterCtx.strokeStyle = "#263241";
-      scatterCtx.lineWidth = 1;
-      for (let i = 1; i < 4; i++) {
-        const x = (w / 4) * i;
-        const y = (h / 4) * i;
-        scatterCtx.beginPath();
-        scatterCtx.moveTo(x, 0);
-        scatterCtx.lineTo(x, h);
-        scatterCtx.stroke();
-        scatterCtx.beginPath();
-        scatterCtx.moveTo(0, y);
-        scatterCtx.lineTo(w, y);
-        scatterCtx.stroke();
-      }
-
-      const xMin = 0;
-      const xMax = 100;
-      const yMin = -250;
-      const yMax = 250;
-
-      function sx(v) {
-        return ((v - xMin) / (xMax - xMin)) * w;
-      }
-      function sy(v) {
-        return h - ((v - yMin) / (yMax - yMin)) * h;
-      }
-
-      scatterCtx.fillStyle = "#4cc9f0";
-      for (const p of capture) {
-        const x = sx(p.out);
-        const y = sy(p.rpm);
-        scatterCtx.fillRect(x - 1, y - 1, 2, 2);
-      }
-    }
-
-    function updateTable() {
-      if (!tableWrap) return;
-      const rows = capture.slice(-MAX_TABLE_ROWS).map((p) =>
-        `${p.t.toFixed(2)}s  rpm=${p.rpm.toFixed(2)}  out=${p.out.toFixed(2)}  sp=${p.sp.toFixed(2)}`
-      );
-      tableWrap.textContent = rows.join("\n");
-      tableWrap.scrollTop = tableWrap.scrollHeight;
+    function scheduleChartRefresh() {
+      if (chartRefreshTimer) return;
+      chartRefreshTimer = setTimeout(() => {
+        chartRefreshTimer = null;
+        drawChart();
+      }, CHART_REFRESH_MS);
     }
 
     function appendData(sp, rpm, out, outRaw) {
       data.push({ sp, rpm, out, outRaw });
       if (data.length > MAX_POINTS) data.shift();
-      drawChart();
+      scheduleChartRefresh();
     }
 
     function setStatus(text) {
@@ -411,7 +343,11 @@
 
     function appendLog(line) {
       if (!logEl) return;
-      logEl.textContent += `[${fmtTime(Date.now())}] ${line}\n`;
+      logLines.push(`[${fmtTime(Date.now())}] ${line}`);
+      if (logLines.length > MAX_LOG_LINES) {
+        logLines.splice(0, logLines.length - MAX_LOG_LINES);
+      }
+      logEl.textContent = logLines.join("\n");
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -421,7 +357,6 @@
 
     function releaseSerialHandlesForUnload() {
       stopTelem();
-      stopSweep(false);
       buffer = "";
 
       if (reader) {
@@ -474,7 +409,6 @@
 
       try {
         stopTelem();
-        stopSweep(false);
         buffer = "";
 
         if (reader) {
@@ -564,7 +498,7 @@
         void readLoop();
         sendLine("GET PID RPM");
         stopTelem();
-        if (telemEnabled) startTelem();
+        startTelem();
       } catch (err) {
         if (reportErrors) {
           setStatus("Error: " + (err && err.message ? err.message : err));
@@ -609,13 +543,6 @@
       }
     }
 
-    function pushCapturePoint(t, rpm, out, sp) {
-      capture.push({ t, rpm, out, sp });
-      if (capture.length > MAX_CAPTURE) capture.shift();
-      drawScatter();
-      updateTable();
-    }
-
     function handleTelemLine(parts) {
       if (parts.length < 4) return;
       const sp = parseFloat(parts[1]);
@@ -623,21 +550,15 @@
       const out = parseFloat(parts[3]);
       const outRawParsed = parseFloat(parts[4]);
       const outRaw = Number.isFinite(outRawParsed) ? outRawParsed : out;
+      latestTelem = {
+        sp: Number.isFinite(sp) ? sp : 0,
+        rpm: Number.isFinite(rpm) ? rpm : 0,
+        out: Number.isFinite(out) ? out : 0,
+        outRaw: Number.isFinite(outRaw) ? outRaw : 0,
+        ts: Date.now(),
+      };
 
       appendData(sp, rpm, out, outRaw);
-      if (!(captureOn || sweep.active) || !Number.isFinite(out) || !Number.isFinite(rpm)) return;
-
-      const t = (Date.now() - captureStartMs) / 1000;
-      if (sweep.active && sweep.awaitingSample) {
-        pushCapturePoint(t, rpm, out, sp);
-        sweep.awaitingSample = false;
-        advanceSweep();
-        return;
-      }
-
-      if (captureOn) {
-        pushCapturePoint(t, rpm, out, sp);
-      }
     }
 
     function handlePidLine(parts) {
@@ -744,13 +665,13 @@
         connect(true);
       }
     });
-    bindClick(getBtn, () => sendLine("GET PID RPM"));
+    bindClick(getBtn, () => {
+      sendLine("GET PID RPM");
+    });
     function pauseTelemForSave() {
       stopTelem();
       setTimeout(() => {
-        if (telemEnabled) {
-          startTelem();
-        }
+        startTelem();
       }, SAVE_TELEM_PAUSE_MS);
     }
 
@@ -783,18 +704,8 @@
       }, TELEM_INTERVAL_MS);
     }
 
-    bindClick(telemToggleBtn, () => {
-      telemEnabled = !telemEnabled;
-      if (telemEnabled) {
-        telemToggleBtn.textContent = "Pause Telemetry";
-        startTelem();
-      } else {
-        telemToggleBtn.textContent = "Start Telemetry";
-        stopTelem();
-      }
-    });
-
     bindClick(logClearBtn, () => {
+      logLines.length = 0;
       if (logEl) logEl.textContent = "";
     });
 
@@ -824,80 +735,6 @@
         outSlider.value = outInput.value;
       });
     }
-
-    bindClick(captureBtn, () => {
-      captureOn = !captureOn;
-      if (captureOn) {
-        captureStartMs = Date.now();
-        captureBtn.textContent = "Stop Capture";
-      } else {
-        captureBtn.textContent = "Start Capture";
-      }
-    });
-    bindClick(clearCaptureBtn, () => {
-      capture.length = 0;
-      drawScatter();
-      updateTable();
-    });
-
-    function updateSweepStatus() {
-      if (!sweepStatus) return;
-      if (!sweep.active) {
-        sweepStatus.textContent = "Sweep: stopped";
-      } else {
-        sweepStatus.textContent = `Sweep: OUT=${sweep.out.toFixed(2)}%`;
-      }
-    }
-
-    function advanceSweep() {
-      sweep.out = Math.round((sweep.out + sweep.step) * 100) / 100;
-      if (sweep.out > 100.0) {
-        stopSweep(true);
-        return;
-      }
-      sendLine("SET OUT " + sweep.out.toFixed(2));
-      sweep.nextSampleAt = Date.now() + sweep.waitMs;
-      sweep.awaitingSample = false;
-      updateSweepStatus();
-    }
-
-    function startSweep() {
-      if (sweep.active) return;
-      capture.length = 0;
-      drawScatter();
-      updateTable();
-      captureStartMs = Date.now();
-      sweep.active = true;
-      sweep.out = 0.0;
-      sweep.awaitingSample = false;
-      sendLine("SET OUT 0");
-      sweep.nextSampleAt = Date.now() + sweep.waitMs;
-      updateSweepStatus();
-      if (sweepTimer) clearInterval(sweepTimer);
-      sweepTimer = setInterval(() => {
-        if (!sweep.active) return;
-        if (Date.now() >= sweep.nextSampleAt) {
-          // wait for next T sample
-          sweep.awaitingSample = true;
-        }
-      }, SWEEP_POLL_MS);
-    }
-
-    function stopSweep(clearOut) {
-      sweep.active = false;
-      sweep.awaitingSample = false;
-      if (sweepTimer) {
-        clearInterval(sweepTimer);
-        sweepTimer = null;
-      }
-      updateSweepStatus();
-      if (clearOut) {
-        sendLine("CLR OUT");
-      }
-    }
-
-    bindClick(sweepBtn, startSweep);
-    bindClick(sweepStopBtn, () => stopSweep(true));
 
     if ("serial" in navigator) {
       navigator.serial.addEventListener("disconnect", () => {

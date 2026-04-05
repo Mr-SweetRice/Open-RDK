@@ -49,68 +49,130 @@
  *    - Example:  SET PID RPM SP 120
  *
  * 7) SET OUT <value>
- *    - Function: forces motor output percent (manual mode).
+ *    - Function: forces motor output percent before the firmware normalization curve.
  *    - Response: OK
  *    - Example:  SET OUT 35
  *
- * 8) CLR OUT
+ * 8) SET OUT RAW <value>
+ *    - Function: forces the real PWM percent sent to the H-bridge, bypassing normalization.
+ *    - Response: OK
+ *    - Example:  SET OUT RAW 55
+ *
+ * 9) CLR OUT
  *    - Function: clears manual output and returns control to PID.
  *    - Response: OK
  *    - Example:  CLR OUT
  *
- * 9) SAVE PID RPM
+ * 10) SAVE PID RPM
  *    - Function: enqueues save of PID/setpoint to NVS.
  *    - Immediate response: S,ENQ + OK
  *    - Async responses: S,START -> S,OK (or S,ERR,<code>) -> S,END
  *    - Example:  SAVE PID RPM
  *
- * 10) GET PID POS
- *    - Function: returns current position PID gains/target and mode.
- *    - Response: PP,<kp>,<ki>,<kd>,<target_rev>,<enabled>
+ * 11) GET PID POS
+ *    - Function: returns current position PID gains/target angle and mode.
+ *    - Response: PP,<kp>,<ki>,<kd>,<target_deg>,<enabled>
  *    - Example:  GET PID POS
  *
- * 11) SET PID POS KP|KI|KD <value>
+ * 12) SET PID POS KP|KI|KD <value>
  *    - Function: updates position PID gains.
  *    - Response: OK + updated PP line.
  *    - Example:  SET PID POS KP 2.0
  *
- * 12) SET PID POS TARGET <value>
- *    - Function: updates position target in output shaft revolutions.
+ * 13) SET PID POS ANGLE <value>
+ *    - Function: updates position target in output shaft degrees.
  *    - Response: OK + updated PP line.
- *    - Example:  SET PID POS TARGET 1.25
+ *    - Example:  SET PID POS ANGLE 180
  *
- * 13) START PID POS / STOP PID POS
+ * 14) START PID POS / STOP PID POS
  *    - Function: enables or disables position mode.
  *    - Response: OK + updated PP line.
  *    - Example:  START PID POS
  *
- * 14) SAVE PID POS
+ * 15) SAVE PID POS
  *    - Function: enqueues save of position PID/target to NVS.
  *    - Immediate response: S,ENQ + OK
  *    - Async responses: S,START -> S,OK (or S,ERR,<code>) -> S,END
  *    - Example:  SAVE PID POS
  *
- * 15) GET TELEM POS
+ * 16) GET TELEM POS
  *    - Function: requests one position telemetry sample.
- *    - Response: TP,<target_rev>,<position_rev>,<output_pwm_pct>,<output_raw_pct>
+ *    - Response: TP,<target_deg>,<position_deg>,<output_pwm_pct>,<output_raw_pct>
  *    - Example:  GET TELEM POS
  *
- * 16) GET PID POS SINE
+ * 17) GET PID POS SINE
  *    - Function: returns firmware sine generator configuration for position target.
  *    - Response: PS,<amp_deg>,<offset_deg>,<period_s>,<enabled>
  *    - Example:  GET PID POS SINE
  *
- * 17) SET PID POS SINE AMP|OFFSET|PERIOD <value>
+ * 18) SET PID POS SINE AMP|OFFSET|PERIOD <value>
  *    - Function: updates sine generator parameters.
  *    - Response: OK + updated PS line.
  *    - Example:  SET PID POS SINE AMP 90
  *
- * 18) START PID POS SINE / STOP PID POS SINE
+ * 19) START PID POS SINE / STOP PID POS SINE
  *    - Function: enables or disables firmware sine target generator.
  *    - Response: OK + updated PS line.
  *    - Example:  START PID POS SINE
  *
- * 19) Unknown/invalid command
+ * 20) GET INVERT
+ *    - Function: returns inversion config.
+ *    - Response: INV,<motor_invert>,<encoder_invert>
+ *    - Example:  GET INVERT
+ *
+ * 21) SET MOTOR INV <0|1>
+ *    - Function: updates motor direction inversion and persists to NVS.
+ *    - Response: OK + updated INV line.
+ *    - Example:  SET MOTOR INV 1
+ *
+ * 22) SET ENCODER INV <0|1>
+ *    - Function: updates encoder direction inversion and persists to NVS.
+ *    - Response: OK + updated INV line.
+ *    - Example:  SET ENCODER INV 1
+ *
+ * 23) GET BRIDGE
+ *    - Function: returns selected motor bridge.
+ *    - Response: BRG,<bridge_type> (0=TB6612, 1=DRV8833)
+ *    - Example:  GET BRIDGE
+ *
+ * 24) GET CURVE
+ *    - Function: returns the fixed 10-point motor curve as RPM values for PWM 10..100%.
+ *    - Response: CV,<rpm@10>,<rpm@20>,...,<rpm@100>
+ *    - Example:  GET CURVE
+ *
+ * 25) SET CURVE <10|20|...|100> <rpm>
+ *    - Function: updates one fixed motor-curve point in RAM.
+ *    - Response: OK + updated CV line.
+ *    - Example:  SET CURVE 40 52.5
+ *
+ * 26) SAVE CURVE
+ *    - Function: enqueues save of the motor curve to NVS.
+ *    - Immediate response: S,ENQ + OK
+ *    - Async responses: S,START -> S,OK (or S,ERR,<code>) -> S,END
+ *    - Example:  SAVE CURVE
+ *
+ * 27) GET CFG
+ *    - Function: returns controller configuration stored in NVS/runtime.
+ *    - Responses:
+ *      CFG,<bridge>,<encoder_mode>,<motor_inv>,<encoder_inv>,<pullup>,<pwm_freq>,<counts>,<gear>,<rpm_max>
+ *      CFGN,<notes>
+ *    - Example:  GET CFG
+ *
+ * 28) SET CFG <field> <value>
+ *    - Fields: BRIDGE, ENCODER_MODE, MOTOR_INV, ENCODER_INV, PULLUP, PWM_FREQ, COUNTS_PER_REV, GEAR_RATIO, RPM_MAX, NOTES
+ *    - Response: OK + updated CFG/CFGN lines
+ *
+ * 29) SAVE CFG
+ *    - Function: enqueues save of controller configuration to NVS.
+ *    - Immediate response: S,ENQ + OK
+ *    - Async responses: S,START -> S,OK (or S,ERR,<code>) -> S,END
+ *
+ * 30) SET BRIDGE <0|1>
+ *    - Function: updates motor bridge and persists to NVS.
+ *    - Response: OK + updated BRG line.
+ *    - Example:  SET BRIDGE 0
+ *
+ * 31) Unknown/invalid command
  *    - Response: ERR
  *
  * Backward compatibility (temporary):
@@ -202,7 +264,7 @@ static void send_pos_snapshot(void)
     }
     traction_comm_send_line("PP,%.4f,%.4f,%.4f,%.4f,%d",
                             (double)st.kp, (double)st.ki, (double)st.kd,
-                            (double)st.target_rev, st.enabled ? 1 : 0);
+                            (double)st.target_deg, st.enabled ? 1 : 0);
 }
 
 static bool get_pos_sine_snapshot(traction_comm_pid_pos_sine_state_t *st)
@@ -224,10 +286,95 @@ static void send_pos_sine_snapshot(void)
                             (double)st.period_s, st.enabled ? 1 : 0);
 }
 
+static bool get_invert_snapshot(traction_comm_invert_state_t *st)
+{
+    if (!st || !s_cfg.get_invert_state) return false;
+    memset(st, 0, sizeof(*st));
+    return s_cfg.get_invert_state(s_cfg.ctx, st);
+}
+
+static void send_invert_snapshot(void)
+{
+    traction_comm_invert_state_t st = {0};
+    if (!get_invert_snapshot(&st)) {
+        traction_comm_send_line("ERR");
+        return;
+    }
+    traction_comm_send_line("INV,%d,%d", st.motor_invert ? 1 : 0, st.encoder_invert ? 1 : 0);
+}
+
+static bool get_bridge_snapshot(traction_comm_bridge_state_t *st)
+{
+    if (!st || !s_cfg.get_bridge_state) return false;
+    memset(st, 0, sizeof(*st));
+    return s_cfg.get_bridge_state(s_cfg.ctx, st);
+}
+
+static void send_bridge_snapshot(void)
+{
+    traction_comm_bridge_state_t st = {0};
+    if (!get_bridge_snapshot(&st)) {
+        traction_comm_send_line("ERR");
+        return;
+    }
+    traction_comm_send_line("BRG,%u", (unsigned)st.bridge_type);
+}
+
+static bool get_curve_snapshot(traction_comm_curve_state_t *st)
+{
+    if (!st || !s_cfg.get_curve_state) return false;
+    memset(st, 0, sizeof(*st));
+    return s_cfg.get_curve_state(s_cfg.ctx, st);
+}
+
+static void send_curve_snapshot(void)
+{
+    traction_comm_curve_state_t st = {0};
+    if (!get_curve_snapshot(&st)) {
+        traction_comm_send_line("ERR");
+        return;
+    }
+    traction_comm_send_line("CV,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
+                            (double)st.rpm_points[0], (double)st.rpm_points[1],
+                            (double)st.rpm_points[2], (double)st.rpm_points[3],
+                            (double)st.rpm_points[4], (double)st.rpm_points[5],
+                            (double)st.rpm_points[6], (double)st.rpm_points[7],
+                            (double)st.rpm_points[8], (double)st.rpm_points[9]);
+}
+
+static bool get_controller_cfg_snapshot(traction_comm_controller_cfg_state_t *st)
+{
+    if (!st || !s_cfg.get_controller_cfg_state) return false;
+    memset(st, 0, sizeof(*st));
+    return s_cfg.get_controller_cfg_state(s_cfg.ctx, st);
+}
+
+static void send_controller_cfg_snapshot(void)
+{
+    traction_comm_controller_cfg_state_t st = {0};
+    if (!get_controller_cfg_snapshot(&st)) {
+        traction_comm_send_line("ERR");
+        return;
+    }
+    st.notes[sizeof(st.notes) - 1U] = '\0';
+    traction_comm_send_line("CFG,%u,%u,%u,%u,%u,%lu,%ld,%ld,%.2f",
+                            (unsigned)st.bridge_type,
+                            (unsigned)st.encoder_mode,
+                            (unsigned)st.motor_invert,
+                            (unsigned)st.encoder_invert,
+                            (unsigned)st.pullup_enabled,
+                            (unsigned long)st.pwm_freq_hz,
+                            (long)st.counts_per_motor_rev,
+                            (long)st.gear_ratio,
+                            (double)st.rpm_max);
+    traction_comm_send_line("CFGN,%s", st.notes);
+}
 
 static void handle_cmd_line(const char *line)
 {
     float val = 0.0f;
+    int ivalue = 0;
+    int curve_pwm_pct = 0;
 
     if (strcmp(line, "GET TELEM POS") == 0) {
         if (s_cfg.request_pos_telem) {
@@ -255,6 +402,114 @@ static void handle_cmd_line(const char *line)
 
     if ((strcmp(line, "GET PID RPM") == 0) || (strcmp(line, "GET") == 0)) {
         send_rpm_snapshot();
+        return;
+    }
+
+    if (strcmp(line, "GET INVERT") == 0) {
+        send_invert_snapshot();
+        return;
+    }
+
+    if (strcmp(line, "GET BRIDGE") == 0) {
+        send_bridge_snapshot();
+        return;
+    }
+
+    if (strcmp(line, "GET CURVE") == 0) {
+        send_curve_snapshot();
+        return;
+    }
+
+    if (strcmp(line, "GET CFG") == 0) {
+        send_controller_cfg_snapshot();
+        return;
+    }
+
+    if (sscanf(line, "SET MOTOR INV %d", &ivalue) == 1) {
+        if (!s_cfg.set_motor_invert) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        s_cfg.set_motor_invert(s_cfg.ctx, ivalue != 0);
+        traction_comm_send_line("OK");
+        send_invert_snapshot();
+        return;
+    }
+
+    if (sscanf(line, "SET BRIDGE %d", &ivalue) == 1) {
+        if (!s_cfg.set_bridge_type || ivalue < 0 || ivalue > 1) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        s_cfg.set_bridge_type(s_cfg.ctx, (uint8_t)ivalue);
+        traction_comm_send_line("OK");
+        send_bridge_snapshot();
+        return;
+    }
+
+    if (sscanf(line, "SET ENCODER INV %d", &ivalue) == 1) {
+        if (!s_cfg.set_encoder_invert) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        s_cfg.set_encoder_invert(s_cfg.ctx, ivalue != 0);
+        traction_comm_send_line("OK");
+        send_invert_snapshot();
+        return;
+    }
+
+    if (sscanf(line, "SET CURVE %d %f", &curve_pwm_pct, &val) == 2) {
+        if (!s_cfg.set_curve_point ||
+            curve_pwm_pct < 10 || curve_pwm_pct > 100 || (curve_pwm_pct % 10) != 0 ||
+            val < 0.0f) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        s_cfg.set_curve_point(s_cfg.ctx, (uint8_t)((curve_pwm_pct / 10) - 1), val);
+        traction_comm_send_line("OK");
+        send_curve_snapshot();
+        return;
+    }
+
+    if (strncmp(line, "SET CFG ", 8) == 0) {
+        traction_comm_controller_cfg_state_t st = {0};
+        if (!get_controller_cfg_snapshot(&st) || !s_cfg.set_controller_cfg_state) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+
+        const char *cfg_line = line + 8;
+        if (sscanf(cfg_line, "BRIDGE %d", &ivalue) == 1) {
+            st.bridge_type = (uint8_t)ivalue;
+        } else if (sscanf(cfg_line, "ENCODER_MODE %d", &ivalue) == 1) {
+            st.encoder_mode = (uint8_t)ivalue;
+        } else if (sscanf(cfg_line, "MOTOR_INV %d", &ivalue) == 1) {
+            st.motor_invert = (uint8_t)(ivalue != 0);
+        } else if (sscanf(cfg_line, "ENCODER_INV %d", &ivalue) == 1) {
+            st.encoder_invert = (uint8_t)(ivalue != 0);
+        } else if (sscanf(cfg_line, "PULLUP %d", &ivalue) == 1) {
+            st.pullup_enabled = (uint8_t)(ivalue != 0);
+        } else if (sscanf(cfg_line, "PWM_FREQ %d", &ivalue) == 1) {
+            st.pwm_freq_hz = (uint32_t)ivalue;
+        } else if (sscanf(cfg_line, "COUNTS_PER_REV %d", &ivalue) == 1) {
+            st.counts_per_motor_rev = ivalue;
+        } else if (sscanf(cfg_line, "GEAR_RATIO %d", &ivalue) == 1) {
+            st.gear_ratio = ivalue;
+        } else if (sscanf(cfg_line, "RPM_MAX %f", &val) == 1) {
+            st.rpm_max = val;
+        } else if (strncmp(cfg_line, "NOTES ", 6) == 0) {
+            snprintf(st.notes, sizeof(st.notes), "%s", cfg_line + 6);
+        } else {
+            traction_comm_send_line("ERR");
+            return;
+        }
+
+        if (!s_cfg.set_controller_cfg_state(s_cfg.ctx, &st)) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        traction_comm_send_line("OK");
+        send_controller_cfg_snapshot();
         return;
     }
 
@@ -339,12 +594,13 @@ static void handle_cmd_line(const char *line)
         return;
     }
 
-    if (sscanf(line, "SET PID POS TARGET %f", &val) == 1) {
-        if (!s_cfg.set_pos_target_rev) {
+    if (sscanf(line, "SET PID POS ANGLE %f", &val) == 1 ||
+        sscanf(line, "SET PID POS TARGET %f", &val) == 1) {
+        if (!s_cfg.set_pos_target_deg) {
             traction_comm_send_line("ERR");
             return;
         }
-        s_cfg.set_pos_target_rev(s_cfg.ctx, val);
+        s_cfg.set_pos_target_deg(s_cfg.ctx, val);
         traction_comm_send_line("OK");
         send_pos_snapshot();
         return;
@@ -444,12 +700,22 @@ static void handle_cmd_line(const char *line)
         return;
     }
 
+    if (sscanf(line, "SET OUT RAW %f", &val) == 1) {
+        if (!s_cfg.set_force_output_raw) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        s_cfg.set_force_output_raw(s_cfg.ctx, val);
+        traction_comm_send_line("OK");
+        return;
+    }
+
     if (sscanf(line, "SET OUT %f", &val) == 1) {
         if (!s_cfg.set_force_output) {
             traction_comm_send_line("ERR");
             return;
         }
-        s_cfg.set_force_output(s_cfg.ctx, (int)val);
+        s_cfg.set_force_output(s_cfg.ctx, val);
         traction_comm_send_line("OK");
         return;
     }
@@ -472,6 +738,40 @@ static void handle_cmd_line(const char *line)
             return;
         }
         if (s_cfg.enqueue_rpm_save(s_cfg.ctx, &st)) {
+            traction_comm_send_line("S,ENQ");
+            traction_comm_send_line("OK");
+        } else {
+            traction_comm_send_line("ERR");
+            traction_comm_send_line("E,%d", (int)ESP_ERR_INVALID_STATE);
+        }
+        return;
+    }
+
+    if (strcmp(line, "SAVE CURVE") == 0) {
+        traction_comm_curve_state_t st = {0};
+        if (!get_curve_snapshot(&st) || !s_cfg.enqueue_curve_save) {
+            traction_comm_send_line("ERR");
+            traction_comm_send_line("E,%d", (int)ESP_ERR_INVALID_STATE);
+            return;
+        }
+        if (s_cfg.enqueue_curve_save(s_cfg.ctx, &st)) {
+            traction_comm_send_line("S,ENQ");
+            traction_comm_send_line("OK");
+        } else {
+            traction_comm_send_line("ERR");
+            traction_comm_send_line("E,%d", (int)ESP_ERR_INVALID_STATE);
+        }
+        return;
+    }
+
+    if (strcmp(line, "SAVE CFG") == 0) {
+        traction_comm_controller_cfg_state_t st = {0};
+        if (!get_controller_cfg_snapshot(&st) || !s_cfg.enqueue_controller_cfg_save) {
+            traction_comm_send_line("ERR");
+            traction_comm_send_line("E,%d", (int)ESP_ERR_INVALID_STATE);
+            return;
+        }
+        if (s_cfg.enqueue_controller_cfg_save(s_cfg.ctx, &st)) {
             traction_comm_send_line("S,ENQ");
             traction_comm_send_line("OK");
         } else {

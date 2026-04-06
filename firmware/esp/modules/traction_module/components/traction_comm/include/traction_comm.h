@@ -22,6 +22,7 @@ typedef struct {
     float ki;
     float kd;
     float target_deg;
+    float integral_window_deg;
     bool enabled;
 } traction_comm_pid_pos_state_t;
 
@@ -81,6 +82,7 @@ typedef struct {
     void (*set_pos_ki)(void *ctx, float value);
     void (*set_pos_kd)(void *ctx, float value);
     void (*set_pos_target_deg)(void *ctx, float value);
+    void (*set_pos_integral_window_deg)(void *ctx, float value);
     void (*set_pos_enabled)(void *ctx, bool enabled);
     bool (*enqueue_pos_save)(void *ctx, const traction_comm_pid_pos_state_t *state);
     bool (*get_pos_sine_state)(void *ctx, traction_comm_pid_pos_sine_state_t *out_state);

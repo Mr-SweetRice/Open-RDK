@@ -10,7 +10,7 @@ extern "C" {
 
 #define TRACTION_MOTOR_CURVE_POINT_COUNT 10U
 #define TRACTION_CONTROLLER_NOTES_MAX_LEN 64U
-#define TRACTION_POS_PID_STORE_VERSION 1U
+#define TRACTION_POS_PID_STORE_VERSION 2U
 
 typedef struct {
     float kp;
@@ -26,6 +26,7 @@ typedef struct {
     float ki;
     float kd;
     float target_deg;
+    float integral_window_deg;
 } traction_pos_pid_store_t;
 
 typedef struct {

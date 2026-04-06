@@ -45,14 +45,20 @@ void traction_pid_reset(traction_pid_t *pid)
     pid->inited = false;
 }
 
-float traction_pid_update(traction_pid_t *pid, float setpoint, float measurement, float dt_s)
+float traction_pid_update_ex(traction_pid_t *pid,
+                             float setpoint,
+                             float measurement,
+                             float dt_s,
+                             bool integral_enabled,
+                             bool anti_windup_enabled,
+                             bool reset_integral_when_disabled)
 {
     if (!pid || dt_s <= 0.0f) return 0.0f;
 
     float err = setpoint - measurement;
     float p = pid->kp * err;
 
-    // Derivada na medida (reduz kick)
+    // Derivative on measurement reduces setpoint kick.
     float d_meas = 0.0f;
     if (pid->inited) {
         d_meas = (measurement - pid->prev_meas) / dt_s;
@@ -66,14 +72,21 @@ float traction_pid_update(traction_pid_t *pid, float setpoint, float measurement
         pid->d_filt += pid->d_alpha * (d_term - pid->d_filt);
     }
 
-    float i_term_new = pid->i_term + (pid->ki * err * dt_s);
-    i_term_new = clampf(i_term_new, pid->i_min, pid->i_max);
+    float i_term_new = pid->i_term;
+    if (integral_enabled) {
+        i_term_new += (pid->ki * err * dt_s);
+        if (anti_windup_enabled) {
+            i_term_new = clampf(i_term_new, pid->i_min, pid->i_max);
+        }
+    } else if (reset_integral_when_disabled) {
+        i_term_new = 0.0f;
+    }
 
-    float out_unclamped = p + i_term_new + pid->d_filt;
+    float i_term_applied = integral_enabled ? i_term_new : 0.0f;
+    float out_unclamped = p + i_term_applied + pid->d_filt;
     float out = clampf(out_unclamped, pid->out_min, pid->out_max);
 
-    // Anti-windup simples: só integra se não saturar na direção do erro
-    if (out != out_unclamped) {
+    if (anti_windup_enabled && out != out_unclamped) {
         if ((out == pid->out_max && err > 0.0f) ||
             (out == pid->out_min && err < 0.0f)) {
             i_term_new = pid->i_term;
@@ -84,4 +97,9 @@ float traction_pid_update(traction_pid_t *pid, float setpoint, float measurement
     pid->prev_meas = measurement;
 
     return out;
+}
+
+float traction_pid_update(traction_pid_t *pid, float setpoint, float measurement, float dt_s)
+{
+    return traction_pid_update_ex(pid, setpoint, measurement, dt_s, true, true, false);
 }

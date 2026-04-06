@@ -22,6 +22,15 @@ typedef struct {
     float target_rev;
 } traction_pos_pid_store_legacy_t;
 
+typedef struct {
+    uint16_t version;
+    uint16_t reserved0;
+    float kp;
+    float ki;
+    float kd;
+    float target_deg;
+} traction_pos_pid_store_v1_t;
+
 esp_err_t traction_storage_init(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -113,6 +122,26 @@ esp_err_t traction_storage_load_pos_pid(traction_pos_pid_store_t *out)
         return ESP_OK;
     }
 
+    if (len == sizeof(traction_pos_pid_store_v1_t)) {
+        traction_pos_pid_store_v1_t v1 = {0};
+        err = nvs_get_blob(h, KEY_PID_POS, &v1, &len);
+        nvs_close(h);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (v1.version != 1U) {
+            return ESP_ERR_INVALID_VERSION;
+        }
+        out->version = TRACTION_POS_PID_STORE_VERSION;
+        out->reserved0 = 0U;
+        out->kp = v1.kp;
+        out->ki = v1.ki;
+        out->kd = v1.kd;
+        out->target_deg = v1.target_deg;
+        out->integral_window_deg = 5.0f;
+        return ESP_OK;
+    }
+
     if (len == sizeof(traction_pos_pid_store_legacy_t)) {
         traction_pos_pid_store_legacy_t legacy = {0};
         err = nvs_get_blob(h, KEY_PID_POS, &legacy, &len);
@@ -126,6 +155,7 @@ esp_err_t traction_storage_load_pos_pid(traction_pos_pid_store_t *out)
         out->ki = legacy.ki;
         out->kd = legacy.kd;
         out->target_deg = legacy.target_rev * 360.0f;
+        out->integral_window_deg = 5.0f;
         return ESP_OK;
     }
     nvs_close(h);

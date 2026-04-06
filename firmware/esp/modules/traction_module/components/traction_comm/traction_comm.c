@@ -71,7 +71,7 @@
  *
  * 11) GET PID POS
  *    - Function: returns current position PID gains/target angle and mode.
- *    - Response: PP,<kp>,<ki>,<kd>,<target_deg>,<enabled>
+ *    - Response: PP,<kp>,<ki>,<kd>,<target_deg>,<enabled>,<integral_window_deg>
  *    - Example:  GET PID POS
  *
  * 12) SET PID POS KP|KI|KD <value>
@@ -97,7 +97,7 @@
  *
  * 16) GET TELEM POS
  *    - Function: requests one position telemetry sample.
- *    - Response: TP,<target_deg>,<position_deg>,<output_pwm_pct>,<output_raw_pct>
+ *    - Response: TP,<target_deg>,<position_deg>,<output_pwm_pct>,<output_raw_pct>,<i_term>
  *    - Example:  GET TELEM POS
  *
  * 17) GET PID POS SINE
@@ -262,9 +262,10 @@ static void send_pos_snapshot(void)
         traction_comm_send_line("ERR");
         return;
     }
-    traction_comm_send_line("PP,%.4f,%.4f,%.4f,%.4f,%d",
+    traction_comm_send_line("PP,%.4f,%.4f,%.4f,%.4f,%d,%.2f",
                             (double)st.kp, (double)st.ki, (double)st.kd,
-                            (double)st.target_deg, st.enabled ? 1 : 0);
+                            (double)st.target_deg, st.enabled ? 1 : 0,
+                            (double)st.integral_window_deg);
 }
 
 static bool get_pos_sine_snapshot(traction_comm_pid_pos_sine_state_t *st)
@@ -589,6 +590,17 @@ static void handle_cmd_line(const char *line)
             return;
         }
         s_cfg.set_pos_kd(s_cfg.ctx, val);
+        traction_comm_send_line("OK");
+        send_pos_snapshot();
+        return;
+    }
+
+    if (sscanf(line, "SET PID POS IWIN %f", &val) == 1) {
+        if (!s_cfg.set_pos_integral_window_deg) {
+            traction_comm_send_line("ERR");
+            return;
+        }
+        s_cfg.set_pos_integral_window_deg(s_cfg.ctx, val);
         traction_comm_send_line("OK");
         send_pos_snapshot();
         return;

@@ -128,6 +128,9 @@
       </div>
       <div class="row">
         <div>Error: <span class="value" id="errVal">0</span> deg</div>
+      </div>
+      <div class="row">
+        <div>Integral Window: <span class="value" id="iWinVal">5</span> deg</div>
         <div style="margin-left:auto;" class="status" id="modeStatus">Mode: disabled</div>
       </div>
     </div>
@@ -159,6 +162,10 @@
       <div class="row">
         <label>KD</label>
         <input id="kdInput" type="number" step="0.01" value="0.10" />
+      </div>
+      <div class="row">
+        <label>I Window</label>
+        <input id="iWindowInput" type="number" min="0" step="0.1" value="5.0" />
       </div>
       <div class="row">
         <label>Angle</label>
@@ -202,6 +209,7 @@
     const outPwmVal = document.getElementById("outPwmVal");
     const outRawVal = document.getElementById("outRawVal");
     const errVal = document.getElementById("errVal");
+    const iWinVal = document.getElementById("iWinVal");
     const modeStatus = document.getElementById("modeStatus");
 
     const connectBtn = document.getElementById("connectBtn");
@@ -217,6 +225,7 @@
     const kpInput = document.getElementById("kpInput");
     const kiInput = document.getElementById("kiInput");
     const kdInput = document.getElementById("kdInput");
+    const iWindowInput = document.getElementById("iWindowInput");
     const angleSlider = document.getElementById("angleSlider");
     const angleInput = document.getElementById("angleInput");
     const sineAmpInput = document.getElementById("sineAmpInput");
@@ -333,7 +342,6 @@
       outPwmVal.textContent = last.outPwm.toFixed(1);
       outRawVal.textContent = last.outRaw.toFixed(1);
       errVal.textContent = (last.target - last.pos).toFixed(3);
-
       let minY = data[0].target;
       let maxY = data[0].target;
       for (const p of data) {
@@ -373,6 +381,7 @@
         else ctx.lineTo(x, y);
       });
       ctx.stroke();
+
     }
 
     function appendData(target, pos, outPwm, outRaw) {
@@ -442,22 +451,28 @@
     }
 
     function handlePosPidLine(parts) {
-      if (parts.length < 6) return;
+      if (parts.length < 7) return;
       kpInput.value = String(parseFloat(parts[1]).toFixed(4));
       kiInput.value = String(parseFloat(parts[2]).toFixed(4));
       kdInput.value = String(parseFloat(parts[3]).toFixed(4));
       const targetDeg = parseFloat(parts[4]);
+      const integralWindowDeg = parseFloat(parts[6]);
       if (Number.isFinite(targetDeg)) syncAngleControls(targetDeg);
+      if (Number.isFinite(integralWindowDeg)) {
+        iWindowInput.value = integralWindowDeg.toFixed(2);
+        iWinVal.textContent = integralWindowDeg.toFixed(2);
+      }
       setModeEnabled(parseInt(parts[5], 10) === 1);
     }
 
     function handlePosTelemLine(parts) {
-      if (parts.length < 5) return;
+      if (parts.length < 6) return;
       const target = parseFloat(parts[1]);
       const pos = parseFloat(parts[2]);
       const outPwm = parseFloat(parts[3]);
       const outRaw = parseFloat(parts[4]);
-      if (!Number.isFinite(target) || !Number.isFinite(pos) || !Number.isFinite(outPwm) || !Number.isFinite(outRaw)) return;
+      const iTerm = parseFloat(parts[5]);
+      if (!Number.isFinite(target) || !Number.isFinite(pos) || !Number.isFinite(outPwm) || !Number.isFinite(outRaw) || !Number.isFinite(iTerm)) return;
       appendData(target, pos, outPwm, outRaw);
     }
 
@@ -683,6 +698,11 @@
     bindNumeric(kpInput, "SET PID POS KP");
     bindNumeric(kiInput, "SET PID POS KI");
     bindNumeric(kdInput, "SET PID POS KD");
+    bindNumeric(iWindowInput, "SET PID POS IWIN");
+    iWindowInput.addEventListener("input", () => {
+      const v = parseFloat(iWindowInput.value);
+      if (Number.isFinite(v)) iWinVal.textContent = v.toFixed(2);
+    });
     syncAngleControls(0);
 
     setModeEnabled(false);

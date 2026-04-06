@@ -46,9 +46,9 @@
 #define POS_KP_DEFAULT             200.0f
 #define POS_KI_DEFAULT             0.0f
 #define POS_KD_DEFAULT             8.0f
-#define POSITION_DEADBAND_DEG      3.6f
+#define POSITION_INTEGRAL_INACTIVE_BAND_DEG 1.0f
+#define POSITION_INTEGRAL_ACTIVE_BAND_DEFAULT_DEG 5.0f
 #define POSITION_BRAKE_HOLD_MIN_PWM_PCT 1.0f
-#define POS_I_WINDUP_LIMIT         12000000.0f
 #define POS_MODE_OUTPUT_BOOST      1.10f
 #define POS_SINE_AMP_DEFAULT_DEG    90.0f
 #define POS_SINE_OFFSET_DEFAULT_DEG 180.0f
@@ -83,6 +83,7 @@ static traction_pid_cfg_t s_pid_cfg;
 static traction_pid_cfg_t s_pos_pid_cfg;
 static float s_setpoint_rpm = SETPOINT_DEFAULT_RPM;
 static float s_target_pos_deg = 0.0f;
+static float s_pos_integral_window_deg = POSITION_INTEGRAL_ACTIVE_BAND_DEFAULT_DEG;
 static bool s_pos_sine_enabled = false;
 static float s_pos_sine_amp_deg = POS_SINE_AMP_DEFAULT_DEG;
 static float s_pos_sine_offset_deg = POS_SINE_OFFSET_DEFAULT_DEG;
@@ -249,6 +250,14 @@ static float sanitize_pos_target_deg(float target_deg)
         return 0.0f;
     }
     return target_deg;
+}
+
+static float sanitize_pos_integral_window_deg(float window_deg)
+{
+    if (!isfinite(window_deg) || window_deg < 0.0f) {
+        return 0.0f;
+    }
+    return window_deg;
 }
 
 static float clamp_angle_deg(float deg)
@@ -468,6 +477,7 @@ static bool comm_get_pos_state(void *ctx, traction_comm_pid_pos_state_t *out_sta
     out_state->ki = s_pos_pid_cfg.ki;
     out_state->kd = s_pos_pid_cfg.kd;
     out_state->target_deg = s_target_pos_deg;
+    out_state->integral_window_deg = s_pos_integral_window_deg;
     out_state->enabled = s_pos_mode_enabled;
     portEXIT_CRITICAL(&s_pid_mux);
 
@@ -508,6 +518,15 @@ static void comm_set_pos_target_deg(void *ctx, float value)
     s_target_pos_deg = sanitize_pos_target_deg(value);
     s_pos_target_explicit = true;
     s_pos_sine_enabled = false;
+    portEXIT_CRITICAL(&s_pid_mux);
+}
+
+static void comm_set_pos_integral_window_deg(void *ctx, float value)
+{
+    (void)ctx;
+    portENTER_CRITICAL(&s_pid_mux);
+    s_pos_integral_window_deg = sanitize_pos_integral_window_deg(value);
+    s_pos_pid_version++;
     portEXIT_CRITICAL(&s_pid_mux);
 }
 
@@ -557,6 +576,7 @@ static bool comm_enqueue_pos_save(void *ctx, const traction_comm_pid_pos_state_t
             .ki = state->ki,
             .kd = state->kd,
             .target_deg = state->target_deg,
+            .integral_window_deg = state->integral_window_deg,
         },
     };
     return (xQueueOverwrite(s_nvs_queue, &req) == pdPASS);
@@ -922,8 +942,8 @@ static void pid_defaults(void)
     s_pos_pid_cfg.d_alpha = PID_D_ALPHA_DEFAULT;
     s_pos_pid_cfg.out_min = -(float)MOTOR_MAX_OUTPUT_PCT;
     s_pos_pid_cfg.out_max = (float)MOTOR_MAX_OUTPUT_PCT;
-    s_pos_pid_cfg.i_min = -POS_I_WINDUP_LIMIT;
-    s_pos_pid_cfg.i_max = POS_I_WINDUP_LIMIT;
+    s_pos_pid_cfg.i_min = 0.0f;
+    s_pos_pid_cfg.i_max = 0.0f;
     s_target_pos_deg = 0.0f;
     s_pos_target_explicit = false;
     s_pos_mode_enabled = false;
@@ -932,6 +952,7 @@ static void pid_defaults(void)
     s_pos_sine_offset_deg = POS_SINE_OFFSET_DEFAULT_DEG;
     s_pos_sine_period_s = POS_SINE_PERIOD_DEFAULT_S;
     s_pos_sine_t0_us = 0;
+    s_pos_integral_window_deg = POSITION_INTEGRAL_ACTIVE_BAND_DEFAULT_DEG;
     controller_cfg_sync_runtime_fields_locked();
     motor_curve_defaults();
 }
@@ -970,9 +991,10 @@ static void pid_load_from_nvs(void)
         s_pos_pid_cfg.d_alpha = PID_D_ALPHA_DEFAULT;
         s_pos_pid_cfg.out_min = -(float)MOTOR_MAX_OUTPUT_PCT;
         s_pos_pid_cfg.out_max = (float)MOTOR_MAX_OUTPUT_PCT;
-        s_pos_pid_cfg.i_min = -POS_I_WINDUP_LIMIT;
-        s_pos_pid_cfg.i_max = POS_I_WINDUP_LIMIT;
+        s_pos_pid_cfg.i_min = 0.0f;
+        s_pos_pid_cfg.i_max = 0.0f;
         s_target_pos_deg = sanitize_pos_target_deg(pos.target_deg);
+        s_pos_integral_window_deg = sanitize_pos_integral_window_deg(pos.integral_window_deg);
         s_pos_target_explicit = true;
         ESP_LOGI(TAG, "POS PID loaded from NVS");
     } else {
@@ -1067,7 +1089,7 @@ static esp_err_t pid_save_to_nvs(float kp, float ki, float kd, float setpoint)
     return err;
 }
 
-static esp_err_t pos_pid_save_to_nvs(float kp, float ki, float kd, float target_deg)
+static esp_err_t pos_pid_save_to_nvs(float kp, float ki, float kd, float target_deg, float integral_window_deg)
 {
     const traction_pos_pid_store_t st = {
         .version = TRACTION_POS_PID_STORE_VERSION,
@@ -1076,6 +1098,7 @@ static esp_err_t pos_pid_save_to_nvs(float kp, float ki, float kd, float target_
         .ki = ki,
         .kd = kd,
         .target_deg = sanitize_pos_target_deg(target_deg),
+        .integral_window_deg = sanitize_pos_integral_window_deg(integral_window_deg),
     };
     esp_err_t err = traction_storage_save_pos_pid(&st);
     if (err == ESP_OK) {
@@ -1195,6 +1218,7 @@ void traction_control_app_make_comm_cfg(traction_comm_cfg_t *out_cfg, uint32_t l
     out_cfg->set_pos_ki = comm_set_pos_ki;
     out_cfg->set_pos_kd = comm_set_pos_kd;
     out_cfg->set_pos_target_deg = comm_set_pos_target_deg;
+    out_cfg->set_pos_integral_window_deg = comm_set_pos_integral_window_deg;
     out_cfg->set_pos_enabled = comm_set_pos_enabled;
     out_cfg->enqueue_pos_save = comm_enqueue_pos_save;
     out_cfg->get_pos_sine_state = comm_get_pos_sine_state;
@@ -1235,9 +1259,10 @@ void traction_control_app_nvs_save_task(void *arg)
                      (double)req.rpm.kp, (double)req.rpm.ki,
                      (double)req.rpm.kd, (double)req.rpm.setpoint_rpm);
         } else if (req.kind == NVS_SAVE_KIND_POS) {
-            ESP_LOGI(TAG, "save POS req: KP=%.3f KI=%.3f KD=%.3f TARGET=%.2f deg",
+            ESP_LOGI(TAG, "save POS req: KP=%.3f KI=%.3f KD=%.3f TARGET=%.2f deg IWIN=%.2f",
                      (double)req.pos.kp, (double)req.pos.ki,
-                     (double)req.pos.kd, (double)req.pos.target_deg);
+                     (double)req.pos.kd, (double)req.pos.target_deg,
+                     (double)req.pos.integral_window_deg);
         } else if (req.kind == NVS_SAVE_KIND_INVERT) {
             ESP_LOGI(TAG, "save invert req: motor=%d encoder=%d",
                      req.invert.motor_invert ? 1 : 0,
@@ -1279,7 +1304,8 @@ void traction_control_app_nvs_save_task(void *arg)
         if (req.kind == NVS_SAVE_KIND_RPM) {
             werr = pid_save_to_nvs(req.rpm.kp, req.rpm.ki, req.rpm.kd, req.rpm.setpoint_rpm);
         } else if (req.kind == NVS_SAVE_KIND_POS) {
-            werr = pos_pid_save_to_nvs(req.pos.kp, req.pos.ki, req.pos.kd, req.pos.target_deg);
+            werr = pos_pid_save_to_nvs(req.pos.kp, req.pos.ki, req.pos.kd,
+                                      req.pos.target_deg, req.pos.integral_window_deg);
         } else if (req.kind == NVS_SAVE_KIND_INVERT) {
             werr = invert_save_to_nvs(req.invert.motor_invert != 0U, req.invert.encoder_invert != 0U);
         } else if (req.kind == NVS_SAVE_KIND_BRIDGE) {
@@ -1357,11 +1383,13 @@ void traction_control_app_speed_task(void *arg)
         float pos_sine_amp_deg = 0.0f;
         float pos_sine_offset_deg = 0.0f;
         float pos_sine_period_s = POS_SINE_PERIOD_DEFAULT_S;
+        float pos_integral_window_deg = POSITION_INTEGRAL_ACTIVE_BAND_DEFAULT_DEG;
         int64_t pos_sine_t0_us = 0;
         float force_out = -1.0f;
         bool force_out_is_raw = false;
         bool send_rpm_telem = false;
         bool send_pos_telem = false;
+        float pos_i_term = 0.0f;
 
         portENTER_CRITICAL(&s_pid_mux);
         cfg_rpm = s_pid_cfg;
@@ -1373,6 +1401,7 @@ void traction_control_app_speed_task(void *arg)
         pos_sine_amp_deg = s_pos_sine_amp_deg;
         pos_sine_offset_deg = s_pos_sine_offset_deg;
         pos_sine_period_s = s_pos_sine_period_s;
+        pos_integral_window_deg = s_pos_integral_window_deg;
         pos_sine_t0_us = s_pos_sine_t0_us;
         force_out = s_force_out_pct;
         force_out_is_raw = s_force_out_is_raw;
@@ -1449,20 +1478,28 @@ void traction_control_app_speed_task(void *arg)
             traction_motor_set((int)cmd_pwm_mag, applied_dir);
         } else if (pos_mode) {
             const float pos_err_deg = target_pos_deg - pos_deg;
-            if (fabsf(pos_err_deg) <= POSITION_DEADBAND_DEG) {
+            const float pos_abs_err_deg = fabsf(pos_err_deg);
+            if (pos_abs_err_deg <= POSITION_INTEGRAL_INACTIVE_BAND_DEG) {
                 if (!motor_awake) {
                     traction_motor_sleep(false);
                     motor_awake = true;
                 }
                 traction_motor_brake();
-                traction_pid_reset(&pid_pos);
+                pos_i_term = pid_pos.i_term;
                 cmd_raw = 0.0f;
+                cmd_pwm_mag = 0.0f;
                 cmd_pwm_signed = 0.0f;
             } else {
-                cmd_raw = traction_pid_update(&pid_pos,
-                                              deg_to_pos_rev(target_pos_deg),
-                                              deg_to_pos_rev(pos_deg),
-                                              dt);
+                const bool pos_integral_enabled =
+                    pos_abs_err_deg <= pos_integral_window_deg;
+                cmd_raw = traction_pid_update_ex(&pid_pos,
+                                                 deg_to_pos_rev(target_pos_deg),
+                                                 deg_to_pos_rev(pos_deg),
+                                                 dt,
+                                                 pos_integral_enabled,
+                                                 false,
+                                                 true);
+                pos_i_term = pid_pos.i_term;
                 dir = (cmd_raw >= 0.0f) ? TRACTION_DIR_CW : TRACTION_DIR_CCW;
                 const float cmd_abs = fabsf(cmd_raw);
 #if ENABLE_OUTPUT_LINEARIZATION
@@ -1524,9 +1561,10 @@ void traction_control_app_speed_task(void *arg)
                                     (double)cmd_pwm_signed, (double)cmd_raw);
         }
         if (send_pos_telem) {
-            traction_comm_send_line("TP,%.4f,%.4f,%.2f,%.2f",
+            traction_comm_send_line("TP,%.4f,%.4f,%.2f,%.2f,%.4f",
                                     (double)target_pos_deg, (double)pos_deg,
-                                    (double)cmd_pwm_signed, (double)cmd_raw);
+                                    (double)cmd_pwm_signed, (double)cmd_raw,
+                                    (double)pos_i_term);
         }
 
         last_count = c;

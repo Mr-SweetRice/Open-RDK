@@ -1,5 +1,9 @@
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    REQUIRES driver esp_timer
+    REQUIRES
+        esp_timer
+        traction_control
+        traction_comm
+        traction_hal
 )

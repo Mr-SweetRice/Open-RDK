@@ -11,9 +11,12 @@ const state = {
   supportedBaudRates: [],
   activeTractionOutValue: 0,
   tractionOutSending: false,
+  activeCmdText: "GET PID RPM",
+  cmdSending: false,
 };
 
 const TRACTION_OUT_MESSAGE_TYPE = "TRACTION_OUT";
+const CMD_MESSAGE_TYPE = "CMD";
 
 const elements = {
   devices: document.getElementById("devices"),
@@ -31,6 +34,8 @@ const elements = {
   clearDevices: document.getElementById("clearDevices"),
   tractionOutValueInput: document.getElementById("tractionOutValueInput"),
   tractionOutSend: document.getElementById("tractionOutSend"),
+  cmdInput: document.getElementById("cmdInput"),
+  cmdSend: document.getElementById("cmdSend"),
 };
 
 function setWsStatus(isOnline) {
@@ -81,6 +86,10 @@ function isTractionOutMessageType(value) {
   return normalizeMessageType(value) === TRACTION_OUT_MESSAGE_TYPE;
 }
 
+function isCmdMessageType(value) {
+  return normalizeMessageType(value) === CMD_MESSAGE_TYPE;
+}
+
 function resolveDeviceMessageType(device) {
   const normalized = normalizeMessageType(device?.message_type);
   if (normalized) {
@@ -110,6 +119,14 @@ function normalizeTractionOutValue(value) {
     return 100;
   }
   return parsed;
+}
+
+function normalizeCmdText(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "GET PID RPM";
+  }
+  return text.slice(0, 200);
 }
 
 function resolveDeviceTractionOutValue(device) {
@@ -330,6 +347,7 @@ function renderDevices() {
   }
   elements.devices.appendChild(fragment);
   renderTractionOutInput();
+  renderCmdInput();
   renderTelemetryControls();
 }
 
@@ -430,6 +448,23 @@ function renderTractionOutInput() {
   }
 }
 
+function renderCmdInput() {
+  if (!elements.cmdInput) {
+    return;
+  }
+  const hasSelected = Boolean(selectedDevice()?.serial_number);
+  const enabled = hasSelected && isCmdMessageType(state.activeMessageType);
+  elements.cmdInput.disabled = !enabled;
+  const isTyping = document.activeElement === elements.cmdInput;
+  if (!isTyping) {
+    elements.cmdInput.value = String(normalizeCmdText(state.activeCmdText));
+  }
+  if (elements.cmdSend) {
+    elements.cmdSend.disabled = !enabled || state.cmdSending;
+    elements.cmdSend.textContent = state.cmdSending ? "Sending..." : "Send";
+  }
+}
+
 function renderBaudRateSelect() {
   if (!elements.baudRateSelect) {
     return;
@@ -471,6 +506,7 @@ async function updateActiveMessageType(nextType) {
   if (!selected?.serial_number) {
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     return;
   }
   try {
@@ -506,10 +542,12 @@ async function updateActiveMessageType(nextType) {
     renderEvents();
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     renderTelemetryControls();
   } catch (_err) {
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     renderTelemetryControls();
     window.alert("Failed to update message type.");
   }
@@ -639,6 +677,59 @@ async function sendTractionOutCommand() {
   }
 }
 
+async function sendCmdCommand() {
+  const selected = selectedDevice();
+  if (!selected?.serial_number) {
+    window.alert("Select a device first.");
+    return;
+  }
+  if (!isCmdMessageType(resolveDeviceMessageType(selected))) {
+    window.alert("Set this device Type to CMD first.");
+    return;
+  }
+  if (state.cmdSending) {
+    return;
+  }
+
+  const inputValue = elements.cmdInput ? elements.cmdInput.value : state.activeCmdText;
+  const commandText = normalizeCmdText(inputValue);
+  state.cmdSending = true;
+  state.activeCmdText = commandText;
+  renderCmdInput();
+
+  try {
+    const response = await fetch(
+      `/api/devices/${encodeURIComponent(selected.serial_number)}/cmd/send`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: commandText }),
+      },
+    );
+    if (!response.ok) {
+      let detail = `status ${response.status}`;
+      try {
+        const payload = await response.json();
+        if (payload?.detail) {
+          detail = String(payload.detail);
+        }
+      } catch (_err) {
+      }
+      throw new Error(detail);
+    }
+
+    const payload = await response.json();
+    state.activeCmdText = normalizeCmdText(payload.command ?? commandText);
+    renderCmdInput();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "unknown error";
+    window.alert(`Failed to send CMD: ${detail}.`);
+  } finally {
+    state.cmdSending = false;
+    renderCmdInput();
+  }
+}
+
 async function refreshMessageTypeConfig() {
   const selected = selectedDevice();
   if (!selected?.serial_number) {
@@ -646,6 +737,7 @@ async function refreshMessageTypeConfig() {
     syncSelectedDeviceTractionOutValue();
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     renderTelemetryControls();
     return;
   }
@@ -674,6 +766,7 @@ async function refreshMessageTypeConfig() {
     renderEvents();
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     renderTelemetryControls();
   } catch (_err) {
   }
@@ -792,6 +885,7 @@ async function clearDevicesRegistry() {
     renderEvents();
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     renderTelemetryControls();
   } catch (_err) {
     window.alert("Failed to clear devices JSON.");
@@ -822,6 +916,7 @@ async function refreshDevices() {
     renderEvents();
     renderMessageTypeSelect();
     renderTractionOutInput();
+    renderCmdInput();
     renderTelemetryControls();
   } catch (_err) {
   }
@@ -866,6 +961,7 @@ function connectWebSocket() {
       renderEvents();
       renderMessageTypeSelect();
       renderTractionOutInput();
+      renderCmdInput();
       renderBaudRateSelect();
       renderTelemetryControls();
       return;
@@ -897,6 +993,7 @@ function start() {
   renderAutoScrollToggle();
   renderMessageTypeSelect();
   renderTractionOutInput();
+  renderCmdInput();
   renderBaudRateSelect();
   renderTelemetryControls();
   elements.clearStream.addEventListener("click", clearVisualStream);
@@ -924,6 +1021,21 @@ function start() {
   }
   if (elements.tractionOutSend) {
     elements.tractionOutSend.addEventListener("click", () => sendTractionOutCommand());
+  }
+  if (elements.cmdInput) {
+    elements.cmdInput.addEventListener("change", (event) => {
+      state.activeCmdText = normalizeCmdText(event.target.value);
+      renderCmdInput();
+    });
+    elements.cmdInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        sendCmdCommand();
+      }
+    });
+  }
+  if (elements.cmdSend) {
+    elements.cmdSend.addEventListener("click", () => sendCmdCommand());
   }
   if (elements.telemetryStart) {
     elements.telemetryStart.addEventListener("click", () => sendTelemetryCommand("start"));

@@ -1,0 +1,889 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Traction PID Tuner</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #151b22;
+      --accent: #4cc9f0;
+      --muted: #7a8699;
+      --text: #e6edf3;
+    }
+    body {
+      margin: 0;
+      font-family: "Fira Sans", Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 10% 10%, #1f2a37 0%, var(--bg) 60%);
+      color: var(--text);
+    }
+    header {
+      padding: 16px 20px;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      padding: 0 20px 20px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid #232b36;
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    }
+    canvas {
+      width: 100%;
+      height: 360px;
+      background: #0b1116;
+      border-radius: 10px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .row label {
+      width: 40px;
+      color: var(--muted);
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    input[type="number"] {
+      width: 90px;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 6px;
+      padding: 6px;
+    }
+    select {
+      width: 100%;
+      background: #0b1116;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 6px;
+      padding: 6px;
+    }
+    button {
+      background: #1f2937;
+      color: var(--text);
+      border: 1px solid #2a3340;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #071018;
+      border-color: transparent;
+      font-weight: 600;
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status.ok { color: #84cc16; }
+    .status.err { color: #ef4444; }
+    .log {
+      background: #0b1116;
+      border: 1px solid #232b36;
+      border-radius: 8px;
+      padding: 8px;
+      height: 140px;
+      overflow: auto;
+      font-family: "Fira Mono", "Consolas", monospace;
+      font-size: 12px;
+      color: #c7d2fe;
+      white-space: pre-wrap;
+    }
+    .value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    Traction PID Tuner (USB/Serial)
+    <a href="../position_tuner/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Position Page</a>
+    <a href="../motor_config/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Motor Config</a>
+  </header>
+  <div class="grid">
+    <div class="panel">
+      <canvas id="chart" width="800" height="360"></canvas>
+      <div class="row">
+        <div>Setpoint: <span class="value" id="spVal">0</span> rpm</div>
+        <div style="margin-left:auto;">Speed: <span class="value" id="rpmVal">0</span> rpm</div>
+      </div>
+      <div class="row">
+        <div>Applied PWM: <span class="value" id="outVal">0</span> %</div>
+        <div style="margin-left:auto;">Pre-Curve Cmd: <span class="value" id="outRawVal">0</span> %</div>
+      </div>
+      <div class="row">
+        <div style="margin-left:auto;" class="status">Output is not plotted</div>
+      </div>
+      <div class="row">
+        <div class="status">PID: KP=<span id="kpLegend">0</span> KI=<span id="kiLegend">0</span> KD=<span id="kdLegend">0</span></div>
+      </div>
+      <div class="row">
+        <label>SP</label>
+        <input id="spSlider" type="range" min="-150" max="150" step="1" value="0">
+        <input id="spInput" type="number" min="-150" max="150" step="1" value="0">
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="getBtn">Read PID</button>
+        <button id="saveBtn">Save</button>
+      </div>
+      <div class="row">
+        <button id="startStopBtn" class="primary">START</button>
+      </div>
+      <div class="row">
+        <div class="status" id="status">Disconnected</div>
+      </div>
+      <div class="status" id="cmdStatus">No commands</div>
+      <hr style="border-color:#232b36; margin:12px 0;">
+      <div class="row">
+        <label>KP</label>
+        <input id="kpSlider" type="range" min="0" max="100" step="0.01" value="1.00">
+        <input id="kpInput" type="number" min="0" max="100" step="0.01" value="1.00">
+      </div>
+      <div class="row">
+        <label>KI</label>
+        <input id="kiSlider" type="range" min="0" max="100" step="0.01" value="2.20">
+        <input id="kiInput" type="number" min="0" max="100" step="0.01" value="2.20">
+      </div>
+      <div class="row">
+        <label>KD</label>
+        <input id="kdSlider" type="range" min="0" max="100" step="0.01" value="0.00">
+        <input id="kdInput" type="number" min="0" max="100" step="0.01" value="0.00">
+      </div>
+      <hr style="border-color:#232b36; margin:12px 0;">
+      <div class="row">
+        <label>OUT</label>
+        <input id="outSlider" type="range" min="0" max="100" step="1" value="0">
+        <input id="outInput" type="number" min="0" max="100" step="1" value="0">
+      </div>
+      <div class="row">
+        <button id="outEnableBtn">Force Output</button>
+        <button id="outClearBtn">Resume PID</button>
+      </div>
+      <div class="row">
+        <div class="status">ESP32-C3 Log</div>
+        <button id="logClearBtn" style="margin-left:auto;">Clear Log</button>
+      </div>
+      <div id="log" class="log"></div>
+      <div class="status">Chart update: 30 Hz</div>
+    </div>
+  </div>
+
+  <script>
+    const chart = document.getElementById("chart");
+    const ctx = chart.getContext("2d");
+    const spVal = document.getElementById("spVal");
+    const rpmVal = document.getElementById("rpmVal");
+    const statusEl = document.getElementById("status");
+    const outVal = document.getElementById("outVal");
+    const outRawVal = document.getElementById("outRawVal");
+    const kpLegend = document.getElementById("kpLegend");
+    const kiLegend = document.getElementById("kiLegend");
+    const kdLegend = document.getElementById("kdLegend");
+    const logEl = document.getElementById("log");
+    const cmdStatusEl = document.getElementById("cmdStatus");
+    let lastRxAt = 0;
+    const connectBtn = document.getElementById("connectBtn");
+    const getBtn = document.getElementById("getBtn");
+    const saveBtn = document.getElementById("saveBtn");
+    const startStopBtn = document.getElementById("startStopBtn");
+
+    const spSlider = document.getElementById("spSlider");
+    const spInput = document.getElementById("spInput");
+    const kpSlider = document.getElementById("kpSlider");
+    const kpInput = document.getElementById("kpInput");
+    const kiSlider = document.getElementById("kiSlider");
+    const kiInput = document.getElementById("kiInput");
+    const kdSlider = document.getElementById("kdSlider");
+    const kdInput = document.getElementById("kdInput");
+    const outSlider = document.getElementById("outSlider");
+    const outInput = document.getElementById("outInput");
+    const outEnableBtn = document.getElementById("outEnableBtn");
+    const outClearBtn = document.getElementById("outClearBtn");
+    const logClearBtn = document.getElementById("logClearBtn");
+
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let buffer = "";
+    let frameSeq = 0;
+    let frameRxBytes = [];
+    let closingSerial = false;
+    let connectingSerial = false;
+    let telemTimer = null;
+    let chartRefreshTimer = null;
+    const logLines = [];
+    let latestTelem = { sp: 0, rpm: 0, out: 0, outRaw: 0, ts: 0 };
+
+    const MAX_POINTS = 600;
+    const MAX_LOG_LINES = 300;
+    const RX_TIMEOUT_MS = 3000;
+    const RX_WATCHDOG_MS = 1000;
+    const TELEM_INTERVAL_MS = 50;
+    const CHART_REFRESH_MS = 66;
+    const SAVE_TELEM_PAUSE_MS = 1000;
+    const START_STOP_SP_START = 150;
+    const START_STOP_SP_STOP = 0;
+    const START_STOP_THRESHOLD_RPM = 10;
+    const FRAME_SYNC_BYTES = [0xAA, 0x55, 0xAA, 0x55];
+    const FRAME_MAX_LEN = 200;
+    const FRAME_RX_MAX_BYTES = 4096;
+    const FRAME_MSG_TYPE_CODE = {
+      CMD: 0x01,
+      TEST: 0x02,
+      TELEMETRY: 0x03,
+      TRACTION_OUT: 0x04,
+    };
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const data = [];
+
+    function nextFrameSeq() {
+      frameSeq = (frameSeq + 1) & 0x00ffffff;
+      return frameSeq;
+    }
+
+    function messageTypeForCommand(text) {
+      const upper = String(text || "").trim().toUpperCase();
+      if (upper.startsWith("SET OUT") || upper.startsWith("CLR OUT")) {
+        return "TRACTION_OUT";
+      }
+      return "CMD";
+    }
+
+    function appendFrameRxChunk(value) {
+      if (!value || !value.length) return;
+      for (const b of value) {
+        frameRxBytes.push(b & 0xff);
+      }
+      if (frameRxBytes.length > FRAME_RX_MAX_BYTES) {
+        frameRxBytes.splice(0, frameRxBytes.length - FRAME_RX_MAX_BYTES);
+      }
+    }
+
+    function trimFrameRxToSyncPrefix() {
+      if (!frameRxBytes.length) return;
+      let keep = 0;
+      const maxPrefix = Math.min(frameRxBytes.length, FRAME_SYNC_BYTES.length - 1);
+      for (let prefixLen = maxPrefix; prefixLen > 0; prefixLen--) {
+        let matches = true;
+        for (let i = 0; i < prefixLen; i++) {
+          if (frameRxBytes[frameRxBytes.length - prefixLen + i] !== FRAME_SYNC_BYTES[i]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) {
+          keep = prefixLen;
+          break;
+        }
+      }
+      if (keep > 0) {
+        frameRxBytes.splice(0, frameRxBytes.length - keep);
+      } else {
+        frameRxBytes = [];
+      }
+    }
+
+    function findFrameSyncStart() {
+      const maxStart = frameRxBytes.length - FRAME_SYNC_BYTES.length;
+      for (let i = 0; i <= maxStart; i++) {
+        let ok = true;
+        for (let j = 0; j < FRAME_SYNC_BYTES.length; j++) {
+          if (frameRxBytes[i + j] !== FRAME_SYNC_BYTES[j]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return i;
+      }
+      return -1;
+    }
+
+    function consumeFramedMessages(onMessageText) {
+      while (true) {
+        const syncStart = findFrameSyncStart();
+        if (syncStart < 0) {
+          trimFrameRxToSyncPrefix();
+          return;
+        }
+        if (syncStart > 0) {
+          frameRxBytes.splice(0, syncStart);
+        }
+
+        const base = FRAME_SYNC_BYTES.length;
+        if (frameRxBytes.length < base + 1) {
+          return;
+        }
+
+        const msgLen = frameRxBytes[base];
+        if (msgLen <= 0 || msgLen > FRAME_MAX_LEN) {
+          frameRxBytes.splice(0, 1);
+          continue;
+        }
+
+        const frameLen = base + 1 + msgLen + 1 + 3;
+        if (frameRxBytes.length < frameLen) {
+          return;
+        }
+
+        const frame = frameRxBytes.splice(0, frameLen);
+        const payloadStart = base + 1;
+        const payloadEnd = payloadStart + msgLen;
+        const payload = frame.slice(payloadStart, payloadEnd);
+        const text = decoder.decode(Uint8Array.from(payload)).trim();
+        if (text) {
+          onMessageText(text);
+        }
+      }
+    }
+
+    function drawChart() {
+      const w = chart.width;
+      const h = chart.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "#263241";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        const y = (h / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      if (data.length < 2) return;
+      const sp = data[data.length - 1].sp;
+      const rpm = data[data.length - 1].rpm;
+      const out = data[data.length - 1].out;
+      const outRaw = data[data.length - 1].outRaw;
+      spVal.textContent = sp.toFixed(1);
+      rpmVal.textContent = rpm.toFixed(1);
+      outVal.textContent = out.toFixed(1);
+      if (Number.isFinite(outRaw)) {
+        outRawVal.textContent = outRaw.toFixed(1);
+      }
+
+      const minY = -300;
+      const maxY = 300;
+      const range = maxY - minY;
+
+      function yScale(v) {
+        return h - ((v - minY) / range) * h;
+      }
+
+      ctx.strokeStyle = "#4cc9f0";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      data.forEach((p, i) => {
+        const x = (i / (MAX_POINTS - 1)) * w;
+        const y = yScale(p.rpm);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.strokeStyle = "#fca311";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      data.forEach((p, i) => {
+        const x = (i / (MAX_POINTS - 1)) * w;
+        const y = yScale(p.sp);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    function scheduleChartRefresh() {
+      if (chartRefreshTimer) return;
+      chartRefreshTimer = setTimeout(() => {
+        chartRefreshTimer = null;
+        drawChart();
+      }, CHART_REFRESH_MS);
+    }
+
+    function appendData(sp, rpm, out, outRaw) {
+      data.push({ sp, rpm, out, outRaw });
+      if (data.length > MAX_POINTS) data.shift();
+      scheduleChartRefresh();
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+    function setCmdStatus(text, ok = true) {
+      if (!cmdStatusEl) return;
+      cmdStatusEl.textContent = text;
+      cmdStatusEl.classList.toggle("ok", ok);
+      cmdStatusEl.classList.toggle("err", !ok);
+    }
+
+    function setConnectionState(connected) {
+      setStatus(connected ? "Connected" : "Disconnected");
+      connectBtn.textContent = connected ? "Disconnect" : "Connect";
+      appendLog(connected ? "PORT: connected" : "PORT: disconnected");
+    }
+
+    function fmtTime(ts) {
+      const d = new Date(ts);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      const ms = String(d.getMilliseconds()).padStart(3, "0");
+      return `${hh}:${mm}:${ss}.${ms}`;
+    }
+
+    function appendLog(line) {
+      if (!logEl) return;
+      logLines.push(`[${fmtTime(Date.now())}] ${line}`);
+      if (logLines.length > MAX_LOG_LINES) {
+        logLines.splice(0, logLines.length - MAX_LOG_LINES);
+      }
+      logEl.textContent = logLines.join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function delayMs(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function releaseSerialHandlesForUnload() {
+      stopTelem();
+      buffer = "";
+      frameRxBytes = [];
+
+      if (reader) {
+        try {
+          void reader.cancel();
+        } catch (_err) {
+          // ignore
+        }
+        try {
+          reader.releaseLock();
+        } catch (_err) {
+          // ignore
+        }
+        reader = null;
+      }
+
+      if (writer) {
+        try {
+          writer.releaseLock();
+        } catch (_err) {
+          // ignore
+        }
+        writer = null;
+      }
+
+      if (port) {
+        const openedPort = port;
+        port = null;
+        try {
+          void openedPort.close();
+        } catch (_err) {
+          // ignore
+        }
+      }
+      connectBtn.textContent = "Connect";
+      statusEl.textContent = "Disconnected";
+    }
+
+    async function closeSerial(options = {}) {
+      const { logDisconnect = true, reportErrors = true } = options;
+      if (closingSerial) return;
+      if (!port && !reader && !writer) {
+        if (logDisconnect && statusEl.textContent !== "Disconnected") {
+          setConnectionState(false);
+        }
+        return;
+      }
+      closingSerial = true;
+      connectingSerial = false;
+
+      try {
+        stopTelem();
+        buffer = "";
+        frameRxBytes = [];
+
+        if (reader) {
+          try {
+            await reader.cancel();
+          } catch (_err) {
+            // ignore: cancel may fail if stream is already closed/disconnected
+          }
+          try {
+            reader.releaseLock();
+          } catch (_err) {
+            // ignore: lock may already be released
+          }
+          reader = null;
+        }
+
+        if (writer) {
+          try {
+            writer.releaseLock();
+          } catch (_err) {
+            // ignore: lock may already be released
+          }
+          writer = null;
+        }
+
+        if (port) {
+          const openedPort = port;
+          port = null;
+          try {
+            await openedPort.close();
+          } catch (err) {
+            if (reportErrors) {
+              setStatus("Error: " + (err && err.message ? err.message : err));
+              appendLog("Error: " + (err && err.message ? err.message : err));
+            }
+          }
+        }
+
+        if (logDisconnect) {
+          setConnectionState(false);
+        } else {
+          setStatus("Disconnected");
+          connectBtn.textContent = "Connect";
+        }
+      } finally {
+        closingSerial = false;
+      }
+    }
+
+    async function connect(useChooser = true, options = {}) {
+      const { reportErrors = true, openRetries = 1 } = options;
+      if (connectingSerial || closingSerial) return;
+      connectingSerial = true;
+      try {
+        if (!("serial" in navigator)) {
+          setStatus("Web Serial not supported");
+          return;
+        }
+        if (useChooser) {
+          port = await navigator.serial.requestPort();
+        } else {
+          const ports = await navigator.serial.getPorts();
+          if (!ports.length) {
+            setStatus("No paired ports");
+            return;
+          }
+          port = ports[0];
+        }
+        let lastOpenErr = null;
+        for (let attempt = 0; attempt < openRetries; attempt++) {
+          try {
+            await port.open({ baudRate: 115200 });
+            lastOpenErr = null;
+            break;
+          } catch (err) {
+            lastOpenErr = err;
+            if (attempt + 1 < openRetries) {
+              await delayMs(200);
+            }
+          }
+        }
+        if (lastOpenErr) throw lastOpenErr;
+        reader = port.readable.getReader();
+        writer = port.writable.getWriter();
+        setConnectionState(true);
+        lastRxAt = Date.now();
+        void readLoop();
+        sendLine("GET PID RPM");
+        stopTelem();
+        startTelem();
+      } catch (err) {
+        if (reportErrors) {
+          setStatus("Error: " + (err && err.message ? err.message : err));
+          appendLog("Error: " + (err && err.message ? err.message : err));
+        }
+        await closeSerial({ logDisconnect: false, reportErrors: false });
+      } finally {
+        connectingSerial = false;
+      }
+    }
+
+    async function disconnect() {
+      await closeSerial({ logDisconnect: true, reportErrors: true });
+    }
+
+    async function readLoop() {
+      try {
+        while (true) {
+          if (!reader) break;
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.length) {
+            lastRxAt = Date.now();
+          }
+          appendFrameRxChunk(value);
+          consumeFramedMessages((line) => handleLine(line));
+        }
+      } catch (err) {
+        if (!closingSerial) {
+          appendLog("RX ERROR: " + (err && err.message ? err.message : err));
+        }
+      } finally {
+        if (!closingSerial && (port || reader || writer)) {
+          await closeSerial({ logDisconnect: true, reportErrors: false });
+        }
+      }
+    }
+
+    function handleTelemLine(parts) {
+      if (parts.length < 4) return;
+      const sp = parseFloat(parts[1]);
+      const rpm = parseFloat(parts[2]);
+      const out = parseFloat(parts[3]);
+      const outRawParsed = parseFloat(parts[4]);
+      const outRaw = Number.isFinite(outRawParsed) ? outRawParsed : out;
+      latestTelem = {
+        sp: Number.isFinite(sp) ? sp : 0,
+        rpm: Number.isFinite(rpm) ? rpm : 0,
+        out: Number.isFinite(out) ? out : 0,
+        outRaw: Number.isFinite(outRaw) ? outRaw : 0,
+        ts: Date.now(),
+      };
+
+      appendData(sp, rpm, out, outRaw);
+    }
+
+    function handlePidLine(parts) {
+      if (parts.length < 5) return;
+      setValue(kpSlider, kpInput, parts[1]);
+      setValue(kiSlider, kiInput, parts[2]);
+      setValue(kdSlider, kdInput, parts[3]);
+      setValue(spSlider, spInput, parts[4]);
+      updateStartStopButton(parseFloat(parts[4]));
+      kpLegend.textContent = String(parts[1]).trim();
+      kiLegend.textContent = String(parts[2]).trim();
+      kdLegend.textContent = String(parts[3]).trim();
+    }
+
+    function handleLine(line) {
+      const isTelem = line.startsWith("T,");
+      if (!isTelem) appendLog("<< " + line);
+
+      if (line === "OK") {
+        setCmdStatus("OK", true);
+        return;
+      }
+      if (line === "ERR") {
+        setCmdStatus("ERR", false);
+        return;
+      }
+      if (line.startsWith("S,OK")) {
+        setCmdStatus("NVS saved", true);
+        return;
+      }
+      if (line.startsWith("S,ERR")) {
+        setCmdStatus("NVS Error: " + line, false);
+        return;
+      }
+      if (isTelem) {
+        handleTelemLine(line.split(","));
+        return;
+      }
+      if (line.startsWith("P,")) {
+        handlePidLine(line.split(","));
+      }
+    }
+
+    function setValue(slider, input, val) {
+      const raw = String(val).trim();
+      const v = parseFloat(raw);
+      if (Number.isFinite(v)) {
+        slider.value = v;
+        input.value = raw;
+      }
+    }
+
+    function sendLine(text) {
+      if (!writer) return;
+      const payloadText = String(text || "").trim();
+      if (!payloadText) return;
+      const rawPayload = encoder.encode(payloadText);
+      const payload = rawPayload.length > FRAME_MAX_LEN ? rawPayload.slice(0, FRAME_MAX_LEN) : rawPayload;
+      const msgTypeName = messageTypeForCommand(payloadText);
+      const msgTypeCode = FRAME_MSG_TYPE_CODE[msgTypeName] || FRAME_MSG_TYPE_CODE.CMD;
+      const seq = nextFrameSeq();
+
+      const frameLen = FRAME_SYNC_BYTES.length + 1 + payload.length + 1 + 3;
+      const frame = new Uint8Array(frameLen);
+      let i = 0;
+      for (const b of FRAME_SYNC_BYTES) frame[i++] = b;
+      frame[i++] = payload.length & 0xff;
+      frame.set(payload, i);
+      i += payload.length;
+      frame[i++] = msgTypeCode & 0xff;
+      frame[i++] = (seq >> 16) & 0xff;
+      frame[i++] = (seq >> 8) & 0xff;
+      frame[i++] = seq & 0xff;
+      writer.write(frame);
+    }
+
+    function bindClick(el, handler) {
+      if (!el) return false;
+      el.addEventListener("click", handler);
+      return true;
+    }
+
+    function isRunningSetpoint(sp) {
+      return Number.isFinite(sp) && (sp >= START_STOP_THRESHOLD_RPM || sp <= -START_STOP_THRESHOLD_RPM);
+    }
+
+    function updateStartStopButton(sp) {
+      if (!startStopBtn) return;
+      startStopBtn.textContent = isRunningSetpoint(sp) ? "STOP" : "START";
+    }
+
+    function setSetpointFromStartStop(nextSp) {
+      setValue(spSlider, spInput, nextSp);
+      sendLine("SET PID RPM SP " + nextSp);
+      updateStartStopButton(nextSp);
+    }
+
+    function bindPair(slider, input, cmd) {
+      if (!slider || !input) return;
+      let lastSent = 0;
+      function send(v) {
+        const now = Date.now();
+        if (now - lastSent < 100) return;
+        lastSent = now;
+        sendLine(cmd + " " + v);
+      }
+      slider.addEventListener("input", () => {
+        input.value = slider.value;
+        send(slider.value);
+      });
+      input.addEventListener("change", () => {
+        slider.value = input.value;
+        input.value = slider.value;
+        send(slider.value);
+      });
+    }
+
+    bindClick(connectBtn, () => {
+      if (port) {
+        disconnect();
+      } else {
+        connect(true);
+      }
+    });
+    bindClick(getBtn, () => {
+      sendLine("GET PID RPM");
+    });
+    function pauseTelemForSave() {
+      stopTelem();
+      setTimeout(() => {
+        startTelem();
+      }, SAVE_TELEM_PAUSE_MS);
+    }
+
+    bindClick(saveBtn, () => {
+      sendLine("SAVE PID RPM");
+      pauseTelemForSave();
+    });
+
+    bindClick(startStopBtn, () => {
+      const currentSp = parseFloat(spInput.value);
+      if (isRunningSetpoint(currentSp)) {
+        setSetpointFromStartStop(START_STOP_SP_STOP);
+      } else {
+        setSetpointFromStartStop(START_STOP_SP_START);
+      }
+    });
+
+    function stopTelem() {
+      if (telemTimer) {
+        clearInterval(telemTimer);
+        telemTimer = null;
+      }
+    }
+
+    function startTelem() {
+      if (!writer || telemTimer) return;
+      sendLine("GET TELEM");
+      telemTimer = setInterval(() => {
+        if (writer) sendLine("GET TELEM");
+      }, TELEM_INTERVAL_MS);
+    }
+
+    bindClick(logClearBtn, () => {
+      logLines.length = 0;
+      if (logEl) logEl.textContent = "";
+    });
+
+    bindPair(kpSlider, kpInput, "SET PID RPM KP");
+    bindPair(kiSlider, kiInput, "SET PID RPM KI");
+    bindPair(kdSlider, kdInput, "SET PID RPM KD");
+    bindPair(spSlider, spInput, "SET PID RPM SP");
+    if (spSlider) {
+      spSlider.addEventListener("input", () => updateStartStopButton(parseFloat(spSlider.value)));
+    }
+    if (spInput) {
+      spInput.addEventListener("change", () => updateStartStopButton(parseFloat(spInput.value)));
+      updateStartStopButton(parseFloat(spInput.value));
+    }
+
+    bindClick(outEnableBtn, () => {
+      sendLine("SET OUT " + outSlider.value);
+    });
+    bindClick(outClearBtn, () => {
+      sendLine("CLR OUT");
+    });
+    if (outSlider && outInput) {
+      outSlider.addEventListener("input", () => {
+        outInput.value = outSlider.value;
+      });
+      outInput.addEventListener("change", () => {
+        outSlider.value = outInput.value;
+      });
+    }
+
+    if ("serial" in navigator) {
+      navigator.serial.addEventListener("disconnect", () => {
+        void closeSerial({ logDisconnect: true, reportErrors: false });
+      });
+      setInterval(() => {
+        if (port && Date.now() - lastRxAt > RX_TIMEOUT_MS) {
+          setCmdStatus("No RX (check COM port)", false);
+        }
+      }, RX_WATCHDOG_MS);
+      window.addEventListener("pagehide", () => {
+        releaseSerialHandlesForUnload();
+      });
+      window.addEventListener("beforeunload", () => {
+        releaseSerialHandlesForUnload();
+      });
+      window.addEventListener("unload", () => {
+        releaseSerialHandlesForUnload();
+      });
+      // try auto-connect on a previously paired port
+      void connect(false, { reportErrors: false, openRetries: 8 });
+    }
+  </script>
+</body>
+</html>

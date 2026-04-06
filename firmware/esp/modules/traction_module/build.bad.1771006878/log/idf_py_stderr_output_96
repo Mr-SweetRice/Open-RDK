@@ -1,0 +1,10 @@
+CMake Error at /opt/esp/idf/tools/cmake/build.cmake:268 (message):
+  Failed to resolve component 'esp_driver_uart'.
+Call Stack (most recent call first):
+  /opt/esp/idf/tools/cmake/build.cmake:304 (__build_resolve_and_add_req)
+  /opt/esp/idf/tools/cmake/build.cmake:305 (__build_expand_requirements)
+  /opt/esp/idf/tools/cmake/build.cmake:599 (__build_expand_requirements)
+  /opt/esp/idf/tools/cmake/project.cmake:605 (idf_build_process)
+  CMakeLists.txt:8 (project)
+
+

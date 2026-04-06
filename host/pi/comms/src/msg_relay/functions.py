@@ -33,6 +33,7 @@ from .constants import (
     MESSAGE_TYPES,
     MESSAGE_TYPE_CODE_TO_NAME,
     MESSAGE_TYPE_DEFAULT_BYTES,
+    MESSAGE_TYPE_CMD,
     MESSAGE_TYPE_TELEMETRY,
     MESSAGE_TYPE_TRACTION_OUT,
     DEFAULT_ACTIVE_MESSAGE_TYPE,
@@ -77,6 +78,9 @@ _KEEPALIVE_WAKES: dict[str, threading.Event] = {}
 _TRACTION_OUT_LOCK = threading.Lock()
 _TRACTION_OUT_PENDING: dict[str, dict] = {}
 _TRACTION_OUT_REQUEST_ID = 0
+_CMD_REQUEST_LOCK = threading.Lock()
+_CMD_REQUEST_PENDING: dict[str, dict] = {}
+_CMD_REQUEST_ID = 0
 _COMMS_LOG_PATH = DEFAULT_COMMS_LOG_PATH
 _COMMS_LOG_QUEUE: queue.Queue[str] = queue.Queue(maxsize=max(256, int(COMMS_LOG_QUEUE_MAX)))
 _COMMS_LOG_WRITER_THREAD: threading.Thread | None = None
@@ -455,11 +459,61 @@ def _device_node(dev: pyudev.Device) -> str | None:
         return f"/dev/{dev.sys_name}"
     return None
 
+
+def _usb_parent_device(dev: pyudev.Device) -> pyudev.Device | None:
+    try:
+        return dev.find_parent("usb", "usb_device")
+    except Exception:
+        return None
+
+
+def _read_usb_attr_text(dev: pyudev.Device | None, attr_name: str) -> str | None:
+    if dev is None:
+        return None
+    try:
+        raw = dev.attributes.get(attr_name)
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    if isinstance(raw, (bytes, bytearray)):
+        text = raw.decode(errors="ignore").strip()
+    else:
+        text = str(raw).strip()
+    return text or None
+
+
+def _device_property_with_fallback(dev: pyudev.Device, key: str) -> str | None:
+    value = dev.properties.get(key)
+    if value and str(value).strip():
+        return str(value).strip()
+
+    usb_parent = _usb_parent_device(dev)
+    if key in ("ID_SERIAL_SHORT", "ID_USB_SERIAL_SHORT"):
+        return _read_usb_attr_text(usb_parent, "serial")
+    if key == "ID_SERIAL":
+        serial = _read_usb_attr_text(usb_parent, "serial")
+        manufacturer = _read_usb_attr_text(usb_parent, "manufacturer")
+        product = _read_usb_attr_text(usb_parent, "product")
+        if serial and manufacturer and product:
+            product_norm = product.replace(" ", "_").replace("/", "_")
+            return f"{manufacturer}_{product_norm}_{serial}"
+        return serial
+    if key == "ID_VENDOR":
+        return _read_usb_attr_text(usb_parent, "manufacturer")
+    if key == "ID_VENDOR_ID":
+        value = _read_usb_attr_text(usb_parent, "idVendor")
+        return value.lower() if value else None
+    if key == "ID_MODEL_ID":
+        value = _read_usb_attr_text(usb_parent, "idProduct")
+        return value.lower() if value else None
+    return None
+
+
 def _extract_serial(dev: pyudev.Device) -> str | None:
-    props = dev.properties
     for key in ("ID_SERIAL_SHORT", "ID_USB_SERIAL_SHORT", "ID_SERIAL"):
-        value = props.get(key)
-        if value and value.strip():
+        value = _device_property_with_fallback(dev, key)
+        if value:
             text = value.strip()
             if key == "ID_SERIAL" and "_" in text and ":" in text:
                 return text.rsplit("_", 1)[-1]
@@ -1364,6 +1418,166 @@ def send_device_traction_out_once(
     return merged
 
 
+def _complete_cmd_request(request: dict | None, result: dict):
+    if not isinstance(request, dict):
+        return
+    done_event = request.get("done_event")
+    request["result"] = dict(result or {})
+    if isinstance(done_event, threading.Event):
+        done_event.set()
+
+
+def _enqueue_cmd_request(serial_number: str, command: str) -> dict:
+    global _CMD_REQUEST_ID
+    text = str(command or "").strip()
+    request = {
+        "serial_number": serial_number,
+        "command": text,
+        "queued_at_monotonic_ns": time.perf_counter_ns(),
+        "done_event": threading.Event(),
+        "result": None,
+    }
+
+    superseded = None
+    with _CMD_REQUEST_LOCK:
+        _CMD_REQUEST_ID += 1
+        request["request_id"] = int(_CMD_REQUEST_ID)
+        superseded = _CMD_REQUEST_PENDING.get(serial_number)
+        _CMD_REQUEST_PENDING[serial_number] = request
+
+    if isinstance(superseded, dict):
+        _complete_cmd_request(
+            superseded,
+            {
+                "ok": False,
+                "serial_number": serial_number,
+                "command": str(superseded.get("command") or ""),
+                "response": "SUPERSEDED",
+                "error_kind": "cmd_superseded",
+                "latency_ms": None,
+            },
+        )
+    _wake_keepalive_monitor(serial_number)
+    return request
+
+
+def _pop_cmd_request(serial_number: str) -> dict | None:
+    with _CMD_REQUEST_LOCK:
+        return _CMD_REQUEST_PENDING.pop(serial_number, None)
+
+
+def _cancel_cmd_request(serial_number: str, error_kind: str):
+    request = _pop_cmd_request(serial_number)
+    if not isinstance(request, dict):
+        return
+    _complete_cmd_request(
+        request,
+        {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": str(request.get("command") or ""),
+            "response": "CANCELLED",
+            "error_kind": str(error_kind or "cmd_cancelled"),
+            "latency_ms": None,
+        },
+    )
+
+
+def send_device_cmd_once(
+    db_path: str,
+    serial_number: str,
+    command: str,
+    timeout_sec: float = 1.5,
+) -> dict | None:
+    if not serial_number:
+        return None
+    command_text = str(command or "").strip()
+    if not command_text:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": "",
+            "response": "EMPTY",
+            "error_kind": "cmd_empty",
+            "latency_ms": None,
+        }
+
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+        status_value = str(item.get("status") or "")
+        message_type_value = _normalize_message_type_name(item.get("message_type"))
+        device_node_value = str(item.get("device_node") or "").strip()
+
+    if message_type_value != MESSAGE_TYPE_CMD:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "response": "MODE REQUIRED",
+            "error_kind": "cmd_mode_required",
+            "latency_ms": None,
+        }
+    if status_value != STATUS_ONLINE_CONNECTED:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "response": "OFFLINE",
+            "error_kind": "device_offline",
+            "latency_ms": None,
+        }
+
+    with _MONITOR_LOCK:
+        monitor_thread = _KEEPALIVE_THREADS.get(serial_number)
+    if (not monitor_thread or not monitor_thread.is_alive()) and device_node_value:
+        _start_keepalive_monitor(
+            serial_number=serial_number,
+            device_node=device_node_value,
+            db_path=db_path,
+        )
+        time.sleep(0.05)
+        with _MONITOR_LOCK:
+            monitor_thread = _KEEPALIVE_THREADS.get(serial_number)
+    if not monitor_thread or not monitor_thread.is_alive():
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "response": "NO MONITOR",
+            "error_kind": "keepalive_not_running",
+            "latency_ms": None,
+        }
+
+    request = _enqueue_cmd_request(serial_number, command_text)
+    done_event = request.get("done_event")
+    wait_timeout = max(0.1, float(timeout_sec))
+    if isinstance(done_event, threading.Event):
+        done_event.wait(wait_timeout)
+
+    result = request.get("result")
+    if not isinstance(result, dict):
+        with _CMD_REQUEST_LOCK:
+            pending = _CMD_REQUEST_PENDING.get(serial_number)
+            if pending is request:
+                _CMD_REQUEST_PENDING.pop(serial_number, None)
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "response": "TIMEOUT",
+            "error_kind": "cmd_send_timeout",
+            "latency_ms": None,
+        }
+
+    merged = dict(result)
+    merged.setdefault("serial_number", serial_number)
+    merged.setdefault("command", command_text)
+    return merged
+
+
 def _send_and_wait(
     ser: serial.Serial,
     port: str,
@@ -1883,7 +2097,8 @@ def _probe_link_via_handshake(
             rtscts=False,
         ) as ser:
             try:
-                ser.dtr = False
+                # Keep DTR asserted to avoid resetting ESP32-C3 USB Serial/JTAG.
+                ser.dtr = True
                 ser.rts = False
             except Exception:
                 pass
@@ -1941,6 +2156,7 @@ def _stop_keepalive_monitor(serial_number: str | None):
     if wake_event:
         wake_event.set()
     _cancel_traction_out_request(serial_number, "keepalive_stopped")
+    _cancel_cmd_request(serial_number, "keepalive_stopped")
     # print(f"[keepalive] stop requested for {serial_number}", flush=True)
 
 
@@ -1995,11 +2211,15 @@ def _keepalive_loop(
                 last_db_refresh_at = now_mono
             telemetry_mode = device_message_type == MESSAGE_TYPE_TELEMETRY
             traction_out_mode = device_message_type == MESSAGE_TYPE_TRACTION_OUT
+            cmd_mode = device_message_type == MESSAGE_TYPE_CMD
             if not traction_out_mode:
                 _cancel_traction_out_request(serial_number, "traction_out_mode_inactive")
+            if not cmd_mode:
+                _cancel_cmd_request(serial_number, "cmd_mode_inactive")
 
             if not device_node:
                 _cancel_traction_out_request(serial_number, "device_node_missing")
+                _cancel_cmd_request(serial_number, "device_node_missing")
                 if stream_reader is not None:
                     stream_reader.clear_frames()
                     stream_reader.stop()
@@ -2083,10 +2303,13 @@ def _keepalive_loop(
                         rtscts=False,
                     )
                     try:
-                        keepalive_serial.dtr = False
+                        # Keep DTR asserted to avoid resetting ESP32-C3 USB Serial/JTAG.
+                        keepalive_serial.dtr = True
                         keepalive_serial.rts = False
                     except Exception:
                         pass
+                    if HELLO_OPEN_DELAY_SEC > 0:
+                        time.sleep(HELLO_OPEN_DELAY_SEC)
                     keepalive_port = device_node
                     keepalive_line_mode = traction_out_mode
                     stream_seq = FRAME_SEQUENCE_MIN
@@ -2094,61 +2317,52 @@ def _keepalive_loop(
                     last_telemetry_rx_at = 0.0
                     last_telemetry_sync_at = 0.0
                     last_telemetry_timeout_error_at = 0.0
-                    if traction_out_mode:
-                        _update_registry_by_serial(
-                            serial_number=serial_number,
-                            db_path=db_path,
-                            device_node=device_node,
-                            telemetry_requested=False,
-                            telemetry_active=False,
-                        )
-                        stream_reader = None
-                    else:
-                        ack_ok, rx_module_id = _send_and_wait(
-                            ser=keepalive_serial,
-                            port=device_node,
-                            tx_bytes=HELLO_MESSAGE_BYTES,
-                            expected_bytes=HELLO_ACK_BYTES,
-                            timeout_sec=HELLO_ACK_TIMEOUT_SEC,
-                            phase="hello",
-                            db_path=db_path,
-                            serial_number=serial_number,
-                            sync_bytes=FRAME_SYNC_BYTES,
-                        )
-                        if not ack_ok:
-                            raise RuntimeError("hello handshake timeout")
+                    ack_ok, rx_module_id = _send_and_wait(
+                        ser=keepalive_serial,
+                        port=device_node,
+                        tx_bytes=HELLO_MESSAGE_BYTES,
+                        expected_bytes=HELLO_ACK_BYTES,
+                        timeout_sec=HELLO_ACK_TIMEOUT_SEC,
+                        phase="hello",
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        sync_bytes=FRAME_SYNC_BYTES,
+                    )
+                    if not ack_ok:
+                        raise RuntimeError("hello handshake timeout")
 
-                        module_type, query_module_id = _query_module_type(
-                            ser=keepalive_serial,
-                            port=device_node,
-                            query_bytes=MODULE_QUERY_MESSAGE_BYTES,
-                            response_prefix_byte=MODULE_INFO_PREFIX_BYTE,
-                            timeout_sec=MODULE_QUERY_TIMEOUT_SEC,
-                            max_payload_bytes=MODULE_TYPE_MAX_BYTES,
-                            db_path=db_path,
-                            serial_number=serial_number,
-                            sync_bytes=FRAME_SYNC_BYTES,
-                        )
-                        if query_module_id is not None:
-                            rx_module_id = query_module_id
-                        if module_type == DEFAULT_MODULE_TYPE:
-                            module_type = _normalize_module_type(_module_id_to_type(rx_module_id))
-                        _update_registry_by_serial(
-                            serial_number=serial_number,
-                            db_path=db_path,
-                            device_node=device_node,
-                            module_type=module_type,
-                            module_id=rx_module_id,
-                            telemetry_active=False,
-                        )
-                        stream_reader = _SerialFrameReader(
-                            ser=keepalive_serial,
-                            sync_bytes=FRAME_SYNC_BYTES,
-                            queue_size=FRAME_READER_QUEUE_MAX,
-                        )
-                        stream_reader.start()
-                        last_telemetry_rx_at = 0.0
-                        last_telemetry_sync_at = 0.0
+                    module_type, query_module_id = _query_module_type(
+                        ser=keepalive_serial,
+                        port=device_node,
+                        query_bytes=MODULE_QUERY_MESSAGE_BYTES,
+                        response_prefix_byte=MODULE_INFO_PREFIX_BYTE,
+                        timeout_sec=MODULE_QUERY_TIMEOUT_SEC,
+                        max_payload_bytes=MODULE_TYPE_MAX_BYTES,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        sync_bytes=FRAME_SYNC_BYTES,
+                    )
+                    if query_module_id is not None:
+                        rx_module_id = query_module_id
+                    if module_type == DEFAULT_MODULE_TYPE:
+                        module_type = _normalize_module_type(_module_id_to_type(rx_module_id))
+                    _update_registry_by_serial(
+                        serial_number=serial_number,
+                        db_path=db_path,
+                        device_node=device_node,
+                        module_type=module_type,
+                        module_id=rx_module_id,
+                        telemetry_active=False,
+                        telemetry_requested=False if traction_out_mode else None,
+                    )
+                    stream_reader = _SerialFrameReader(
+                        ser=keepalive_serial,
+                        sync_bytes=FRAME_SYNC_BYTES,
+                        queue_size=FRAME_READER_QUEUE_MAX,
+                    )
+                    stream_reader.start()
+                    last_telemetry_rx_at = 0.0
+                    last_telemetry_sync_at = 0.0
                 except Exception as exc:
                     print(
                         f"[keepalive] serial open failed on {device_node}: {exc}",
@@ -2177,6 +2391,7 @@ def _keepalive_loop(
                     keepalive_port = None
                     keepalive_line_mode = False
                     _cancel_traction_out_request(serial_number, "serial_open_failed")
+                    _cancel_cmd_request(serial_number, "serial_open_failed")
                     wake_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC)
                     wake_event.clear()
                     if stop_event.is_set():
@@ -2189,6 +2404,7 @@ def _keepalive_loop(
                 error_delta = 0
                 error_kind: str | None = None
                 current_traction_request = None
+                current_cmd_request = None
                 if traction_out_mode:
                     if telemetry_requested:
                         telemetry_requested = False
@@ -2198,30 +2414,43 @@ def _keepalive_loop(
                     if not isinstance(current_traction_request, dict):
                         link_live = bool(keepalive_serial and keepalive_serial.is_open)
                     else:
+                        if stream_reader is None:
+                            error_kind = "stream_reader_unavailable"
+                            raise RuntimeError("stream reader unavailable")
                         request_value = _normalize_traction_out_value(
                             current_traction_request.get("value")
                         )
                         command_bytes = _build_traction_out_payload(request_value)
-                        command_text = command_bytes.decode("utf-8", errors="replace")
+                        stream_reader.clear_frames()
+                        try:
+                            keepalive_serial.reset_input_buffer()
+                        except Exception:
+                            pass
+                        tx_seq = stream_seq
                         tx_seq_abs = stream_seq_abs
-                        line_ok, line_ack, line_errors = _send_line_command_and_wait(
+                        frame_ok, frame_ack, frame_errors = _send_stream_frame_and_wait(
                             ser=keepalive_serial,
+                            stream_reader=stream_reader,
                             port=device_node,
                             db_path=db_path,
                             serial_number=serial_number,
-                            command_text=command_text,
                             message_type_name=MESSAGE_TYPE_TRACTION_OUT,
+                            sequence=tx_seq,
                             sequence_abs=tx_seq_abs,
+                            message_bytes=command_bytes,
                             timeout_sec=min(max(FRAME_RESPONSE_TIMEOUT_SEC, 0.15), 0.75),
                             max_attempts=1,
+                            sync_bytes=FRAME_SYNC_BYTES,
                         )
-                        error_delta += line_errors
-                        ack_text = str((line_ack or {}).get("message_text") or "").strip().upper()
-                        line_latency_ms = (line_ack or {}).get("latency_ms")
-                        if line_ok:
-                            link_live = True
-                            rx_frame = line_ack
+                        error_delta += frame_errors
+                        ack_text = str((frame_ack or {}).get("message_text") or "").strip().upper()
+                        frame_latency_ms = (frame_ack or {}).get("latency_ms")
+                        if frame_ok:
+                            stream_seq = _next_sequence_value(stream_seq)
                             stream_seq_abs += 1
+                        if frame_ok and ack_text == "OK":
+                            link_live = True
+                            rx_frame = frame_ack
                             _complete_traction_out_request(
                                 current_traction_request,
                                 {
@@ -2230,8 +2459,8 @@ def _keepalive_loop(
                                     "traction_out_value": int(request_value),
                                     "ack": ack_text or "OK",
                                     "latency_ms": (
-                                        float(line_latency_ms)
-                                        if isinstance(line_latency_ms, (int, float))
+                                        float(frame_latency_ms)
+                                        if isinstance(frame_latency_ms, (int, float))
                                         else None
                                     ),
                                     "seq_abs": int(tx_seq_abs),
@@ -2239,11 +2468,11 @@ def _keepalive_loop(
                             )
                             current_traction_request = None
                         else:
-                            if line_errors <= 0:
+                            if (not frame_ok) and frame_errors <= 0:
                                 error_delta += 1
                             if ack_text.startswith("ERR"):
                                 error_kind = error_kind or "traction_out_error"
-                            elif ack_text:
+                            elif frame_ok and ack_text:
                                 error_kind = error_kind or "traction_out_unexpected_ack"
                             else:
                                 error_kind = error_kind or "traction_out_timeout"
@@ -2257,8 +2486,8 @@ def _keepalive_loop(
                                     "ack": ack_text or "TIMEOUT",
                                     "error_kind": error_kind,
                                     "latency_ms": (
-                                        float(line_latency_ms)
-                                        if isinstance(line_latency_ms, (int, float))
+                                        float(frame_latency_ms)
+                                        if isinstance(frame_latency_ms, (int, float))
                                         else None
                                     ),
                                     "seq_abs": int(tx_seq_abs),
@@ -2454,6 +2683,25 @@ def _keepalive_loop(
                     active_payload = None
                     if active_type == MESSAGE_TYPE_TRACTION_OUT:
                         active_payload = _build_traction_out_payload(device_traction_out_value)
+                    elif active_type == MESSAGE_TYPE_CMD:
+                        current_cmd_request = _pop_cmd_request(serial_number)
+                        if isinstance(current_cmd_request, dict):
+                            command_text = str(current_cmd_request.get("command") or "").strip()
+                            if command_text:
+                                active_payload = command_text.encode("utf-8")
+                            else:
+                                _complete_cmd_request(
+                                    current_cmd_request,
+                                    {
+                                        "ok": False,
+                                        "serial_number": serial_number,
+                                        "command": command_text,
+                                        "response": "EMPTY",
+                                        "error_kind": "cmd_empty",
+                                        "latency_ms": None,
+                                    },
+                                )
+                                current_cmd_request = None
                     link_live, rx_frame, frame_errors = _send_stream_frame_and_wait(
                         ser=keepalive_serial,
                         stream_reader=stream_reader,
@@ -2473,10 +2721,62 @@ def _keepalive_loop(
                         stream_seq = _next_sequence_value(stream_seq)
                         stream_seq_abs += 1
                         last_telemetry_timeout_error_at = 0.0
+                        if isinstance(current_cmd_request, dict):
+                            ack_text = str((rx_frame or {}).get("message_text") or "").strip()
+                            ack_upper = ack_text.upper()
+                            frame_latency_ms = (rx_frame or {}).get("latency_ms")
+                            if ack_upper.startswith("ERR"):
+                                _complete_cmd_request(
+                                    current_cmd_request,
+                                    {
+                                        "ok": False,
+                                        "serial_number": serial_number,
+                                        "command": str(current_cmd_request.get("command") or ""),
+                                        "response": ack_text or "ERR",
+                                        "error_kind": "cmd_error",
+                                        "latency_ms": (
+                                            float(frame_latency_ms)
+                                            if isinstance(frame_latency_ms, (int, float))
+                                            else None
+                                        ),
+                                        "seq_abs": int(stream_seq_abs - 1),
+                                    },
+                                )
+                            else:
+                                _complete_cmd_request(
+                                    current_cmd_request,
+                                    {
+                                        "ok": True,
+                                        "serial_number": serial_number,
+                                        "command": str(current_cmd_request.get("command") or ""),
+                                        "response": ack_text,
+                                        "latency_ms": (
+                                            float(frame_latency_ms)
+                                            if isinstance(frame_latency_ms, (int, float))
+                                            else None
+                                        ),
+                                        "seq_abs": int(stream_seq_abs - 1),
+                                    },
+                                )
+                            current_cmd_request = None
                     elif not link_live:
                         if frame_errors <= 0:
                             error_delta += 1
                         error_kind = error_kind or "stream_exchange_timeout"
+                        if isinstance(current_cmd_request, dict):
+                            _complete_cmd_request(
+                                current_cmd_request,
+                                {
+                                    "ok": False,
+                                    "serial_number": serial_number,
+                                    "command": str(current_cmd_request.get("command") or ""),
+                                    "response": "TIMEOUT",
+                                    "error_kind": "cmd_timeout",
+                                    "latency_ms": None,
+                                    "seq_abs": int(stream_seq_abs),
+                                },
+                            )
+                            current_cmd_request = None
             except Exception as exc:
                 print(f"[keepalive] probe error on {device_node}: {exc}", flush=True)
                 link_live = False
@@ -2502,6 +2802,20 @@ def _keepalive_loop(
                     )
                     current_traction_request = None
                 _cancel_traction_out_request(serial_number, "keepalive_exception")
+                if isinstance(current_cmd_request, dict):
+                    _complete_cmd_request(
+                        current_cmd_request,
+                        {
+                            "ok": False,
+                            "serial_number": serial_number,
+                            "command": str(current_cmd_request.get("command") or ""),
+                            "response": "EXCEPTION",
+                            "error_kind": "keepalive_exception",
+                            "latency_ms": None,
+                        },
+                    )
+                    current_cmd_request = None
+                _cancel_cmd_request(serial_number, "keepalive_exception")
                 if keepalive_serial is not None:
                     try:
                         keepalive_serial.reset_input_buffer()
@@ -2572,6 +2886,7 @@ def _keepalive_loop(
                 break
     finally:
         _cancel_traction_out_request(serial_number, "keepalive_stopped")
+        _cancel_cmd_request(serial_number, "keepalive_stopped")
         if stream_reader is not None:
             stream_reader.stop()
         if keepalive_serial is not None:
@@ -2617,22 +2932,22 @@ def _start_keepalive_monitor(
 
 
 def matches(dev: pyudev.Device) -> bool:
-    props = dev.properties
-
-    serial_short = props.get("ID_SERIAL_SHORT")
+    serial_short = _device_property_with_fallback(dev, "ID_SERIAL_SHORT")
     if SERIAL_NUMBER_ESP32_SHORT and serial_short == SERIAL_NUMBER_ESP32_SHORT:
         return True
 
-    vendor = props.get("ID_VENDOR") or ""
+    vendor = _device_property_with_fallback(dev, "ID_VENDOR") or ""
     if MANUFACTURER_ESP32 and MANUFACTURER_ESP32.lower() in vendor.lower():
         return True
 
-    if ID_VENDOR_ESP32 and props.get("ID_VENDOR_ID") == ID_VENDOR_ESP32:
+    vendor_id = _device_property_with_fallback(dev, "ID_VENDOR_ID")
+    model_id = _device_property_with_fallback(dev, "ID_MODEL_ID")
+
+    if ID_VENDOR_ESP32 and vendor_id == ID_VENDOR_ESP32:
         return True
 
     if ID_VENDOR_ESP32 and ID_MODEL_ESP32:
-        if (props.get("ID_VENDOR_ID") == ID_VENDOR_ESP32 and
-                props.get("ID_MODEL_ID") == ID_MODEL_ESP32):
+        if (vendor_id == ID_VENDOR_ESP32 and model_id == ID_MODEL_ESP32):
             return True
 
     return False

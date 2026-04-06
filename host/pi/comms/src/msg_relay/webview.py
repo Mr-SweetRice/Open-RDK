@@ -18,6 +18,7 @@ from .functions import (
     get_device_message_type,
     get_device_traction_out_value,
     get_active_serial_baud,
+    send_device_cmd_once,
     set_active_message_type,
     set_device_message_type,
     send_device_traction_out_once,
@@ -336,6 +337,10 @@ class TractionOutSendPayload(BaseModel):
     value: int | None = None
 
 
+class CmdSendPayload(BaseModel):
+    command: str = ""
+
+
 def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -502,6 +507,36 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
         if not bool(result.get("ok")):
             detail = str(result.get("error_kind") or "traction_out_send_failed")
             if detail == "traction_out_send_timeout":
+                raise HTTPException(status_code=504, detail=detail)
+            raise HTTPException(status_code=409, detail=detail)
+        return result
+
+    @app.post("/api/devices/{serial_number}/cmd/send")
+    async def send_device_cmd(serial_number: str, payload: CmdSendPayload):
+        message_type = get_device_message_type(
+            db_path=db_path,
+            serial_number=serial_number,
+        )
+        if message_type is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if message_type != "CMD":
+            raise HTTPException(status_code=409, detail="set message type to CMD first")
+
+        command_text = str(payload.command or "").strip()
+        if not command_text:
+            raise HTTPException(status_code=400, detail="command is required")
+
+        result = send_device_cmd_once(
+            db_path=db_path,
+            serial_number=serial_number,
+            command=command_text,
+            timeout_sec=1.5,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if not bool(result.get("ok")):
+            detail = str(result.get("error_kind") or "cmd_send_failed")
+            if detail == "cmd_send_timeout":
                 raise HTTPException(status_code=504, detail=detail)
             raise HTTPException(status_code=409, detail=detail)
         return result

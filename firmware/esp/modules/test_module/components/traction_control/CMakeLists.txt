@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "traction_control.c"
+        "traction_control_app.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_timer
+        traction_comm
+        traction_hal
+        traction_storage
+)

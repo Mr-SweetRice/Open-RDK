@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "traction_hal_motor.c"
+        "traction_hal_encoder.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        driver
+        traction_bridge
+)

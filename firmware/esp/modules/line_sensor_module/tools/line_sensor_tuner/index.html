@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Line Sensor Monitor</title>
+  <style>
+    :root {
+      --bg: #10161d;
+      --panel: #16202a;
+      --edge: #233244;
+      --text: #ebf2f7;
+      --muted: #8da2b8;
+      --accent: #7dd3fc;
+      --accent-2: #f59e0b;
+      --ok: #84cc16;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Fira Sans", Arial, sans-serif;
+      background:
+        radial-gradient(900px 500px at 10% 5%, #203042 0%, transparent 60%),
+        linear-gradient(180deg, #0d141b 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+    header {
+      padding: 18px 22px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1.3fr 360px;
+      gap: 16px;
+      padding: 0 22px 22px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--err); }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 8px 0;
+      flex-wrap: wrap;
+    }
+    button, select, input[type="number"] {
+      background: #0d141b;
+      color: var(--text);
+      border: 1px solid #2a3d50;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    button { cursor: pointer; }
+    button.primary {
+      background: var(--accent);
+      color: #07202c;
+      border-color: transparent;
+      font-weight: 700;
+    }
+    .bars {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .sensor {
+      background: #0d141b;
+      border: 1px solid #223040;
+      border-radius: 12px;
+      padding: 10px;
+    }
+    .sensor h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .barbox {
+      height: 160px;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #172231 0%, #0a1118 100%);
+      border: 1px solid #223040;
+      display: flex;
+      align-items: end;
+      padding: 10px;
+      margin-bottom: 8px;
+    }
+    .bar {
+      width: 100%;
+      border-radius: 8px 8px 4px 4px;
+      background: linear-gradient(180deg, var(--accent) 0%, #0284c7 100%);
+      min-height: 4px;
+      transition: height 0.08s linear;
+    }
+    .digital {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      display: inline-block;
+      border: 1px solid #29405a;
+      color: var(--muted);
+    }
+    .digital.on {
+      background: rgba(132, 204, 22, 0.12);
+      border-color: rgba(132, 204, 22, 0.45);
+      color: var(--ok);
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .metric {
+      background: #0d141b;
+      border: 1px solid #223040;
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .metric .value {
+      font-size: 26px;
+      font-weight: 700;
+    }
+    .position-wrap {
+      margin-top: 18px;
+      padding-top: 12px;
+      border-top: 1px solid #223040;
+    }
+    .position-track {
+      position: relative;
+      height: 56px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #13202d 0%, #0b1118 100%);
+      border: 1px solid #223040;
+      margin-top: 10px;
+    }
+    .position-center {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: calc(50% - 1px);
+      width: 2px;
+      background: rgba(255,255,255,0.15);
+    }
+    .position-dot {
+      position: absolute;
+      top: 50%;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent-2) 0%, #f97316 100%);
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 0 6px rgba(245,158,11,0.14);
+      transition: left 0.08s linear;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid #223040;
+      padding: 7px 6px;
+      text-align: center;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .log {
+      background: #0d141b;
+      border: 1px solid #223040;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 12px;
+      min-height: 180px;
+      max-height: 240px;
+      overflow: auto;
+      font-family: "Fira Mono", Consolas, monospace;
+      white-space: pre-wrap;
+      font-size: 12px;
+      color: #c7d2fe;
+    }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>Line Sensor Module Monitor</header>
+  <div class="layout">
+    <div class="panel">
+      <div class="row">
+        <div class="status" id="stateText">Disconnected</div>
+        <div class="status" id="cmdStatus">Idle</div>
+      </div>
+      <div class="summary">
+        <div class="metric"><div class="label">Line Position</div><div class="value" id="positionVal">0.000</div></div>
+        <div class="metric"><div class="label">Line Strength</div><div class="value" id="strengthVal">0.000</div></div>
+        <div class="metric"><div class="label">Track</div><div class="value" id="trackVal">White</div></div>
+        <div class="metric"><div class="label">Calibration</div><div class="value" id="calStateVal">Idle</div></div>
+      </div>
+
+      <div class="position-wrap">
+        <div class="status">Bezier position estimate in the normalized sensor span (-1 left to +1 right)</div>
+        <div class="position-track">
+          <div class="position-center"></div>
+          <div class="position-dot" id="positionDot" style="left:50%;"></div>
+        </div>
+      </div>
+
+      <div class="bars">
+        <div class="sensor"><h3>S0 / GPIO4</h3><div class="barbox"><div class="bar" id="bar0" style="height:4px;"></div></div><div class="status">Raw: <span id="raw0">0</span></div><div class="status">Response: <span id="val0">0.000</span></div><div class="digital" id="dig0">DIGITAL 0</div></div>
+        <div class="sensor"><h3>S1 / GPIO3</h3><div class="barbox"><div class="bar" id="bar1" style="height:4px;"></div></div><div class="status">Raw: <span id="raw1">0</span></div><div class="status">Response: <span id="val1">0.000</span></div><div class="digital" id="dig1">DIGITAL 0</div></div>
+        <div class="sensor"><h3>S2 / GPIO2</h3><div class="barbox"><div class="bar" id="bar2" style="height:4px;"></div></div><div class="status">Raw: <span id="raw2">0</span></div><div class="status">Response: <span id="val2">0.000</span></div><div class="digital" id="dig2">DIGITAL 0</div></div>
+        <div class="sensor"><h3>S3 / GPIO1</h3><div class="barbox"><div class="bar" id="bar3" style="height:4px;"></div></div><div class="status">Raw: <span id="raw3">0</span></div><div class="status">Response: <span id="val3">0.000</span></div><div class="digital" id="dig3">DIGITAL 0</div></div>
+        <div class="sensor"><h3>S4 / GPIO0</h3><div class="barbox"><div class="bar" id="bar4" style="height:4px;"></div></div><div class="status">Raw: <span id="raw4">0</span></div><div class="status">Response: <span id="val4">0.000</span></div><div class="digital" id="dig4">DIGITAL 0</div></div>
+      </div>
+
+      <table>
+        <thead><tr><th>Sensor</th><th>Min</th><th>Max</th></tr></thead>
+        <tbody>
+          <tr><td>S0</td><td id="min0">0</td><td id="max0">4095</td></tr>
+          <tr><td>S1</td><td id="min1">0</td><td id="max1">4095</td></tr>
+          <tr><td>S2</td><td id="min2">0</td><td id="max2">4095</td></tr>
+          <tr><td>S3</td><td id="min3">0</td><td id="max3">4095</td></tr>
+          <tr><td>S4</td><td id="min4">0</td><td id="max4">4095</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <div class="row">
+        <button id="startCalBtn" class="primary">Start Calibration</button>
+        <button id="stopCalBtn">Stop Calibration</button>
+      </div>
+      <div class="row">
+        <button id="saveCfgBtn">Save Config</button>
+        <button id="saveCalBtn">Save Calibration</button>
+        <button id="clearLogBtn">Clear Log</button>
+      </div>
+
+      <hr style="border-color:#223040; margin:14px 0;">
+
+      <div class="row"><label style="width:110px; color:var(--muted);">Track Type</label><select id="trackSelect"><option value="0">Dark Line</option><option value="1" selected>White Line</option></select><button id="toggleTrackBtn">Toggle</button></div>
+      <div class="row"><label style="width:110px; color:var(--muted);">Digital Th</label><input id="digitalThInput" type="number" min="0.05" max="0.95" step="0.01" value="0.45" /></div>
+      <div class="row"><label style="width:110px; color:var(--muted);">Detect Th</label><input id="detectThInput" type="number" min="0.05" max="0.95" step="0.01" value="0.20" /></div>
+      <div class="row"><label style="width:110px; color:var(--muted);">Cal Time ms</label><input id="calTimeInput" type="number" min="100" step="100" value="3000" /></div>
+      <div class="status" id="calStatus">Calibration idle</div>
+
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <script>
+    const connectBtn = document.getElementById("connectBtn");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const startCalBtn = document.getElementById("startCalBtn");
+    const stopCalBtn = document.getElementById("stopCalBtn");
+    const saveCfgBtn = document.getElementById("saveCfgBtn");
+    const saveCalBtn = document.getElementById("saveCalBtn");
+    const clearLogBtn = document.getElementById("clearLogBtn");
+    const stateText = document.getElementById("stateText");
+    const cmdStatus = document.getElementById("cmdStatus");
+    const positionVal = document.getElementById("positionVal");
+    const strengthVal = document.getElementById("strengthVal");
+    const trackVal = document.getElementById("trackVal");
+    const calStateVal = document.getElementById("calStateVal");
+    const calStatus = document.getElementById("calStatus");
+    const positionDot = document.getElementById("positionDot");
+    const logEl = document.getElementById("log");
+    const trackSelect = document.getElementById("trackSelect");
+    const toggleTrackBtn = document.getElementById("toggleTrackBtn");
+    const digitalThInput = document.getElementById("digitalThInput");
+    const detectThInput = document.getElementById("detectThInput");
+    const calTimeInput = document.getElementById("calTimeInput");
+    const bars = Array.from({ length: 5 }, (_, i) => document.getElementById(`bar${i}`));
+    const raws = Array.from({ length: 5 }, (_, i) => document.getElementById(`raw${i}`));
+    const vals = Array.from({ length: 5 }, (_, i) => document.getElementById(`val${i}`));
+    const digs = Array.from({ length: 5 }, (_, i) => document.getElementById(`dig${i}`));
+    const mins = Array.from({ length: 5 }, (_, i) => document.getElementById(`min${i}`));
+    const maxs = Array.from({ length: 5 }, (_, i) => document.getElementById(`max${i}`));
+
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let buffer = "";
+    let closingSerial = false;
+    let telemTimer = null;
+    let lastRxAt = 0;
+    const logLines = [];
+    const RX_TIMEOUT_MS = 3000;
+    const TELEM_INTERVAL_MS = 80;
+    const MAX_LOG_LINES = 300;
+
+    function appendLog(line) {
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      const ms = String(d.getMilliseconds()).padStart(3, "0");
+      logLines.push(`[${hh}:${mm}:${ss}.${ms}] ${line}`);
+      if (logLines.length > MAX_LOG_LINES) logLines.splice(0, logLines.length - MAX_LOG_LINES);
+      logEl.textContent = logLines.join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setCmdStatus(text, ok = true) {
+      cmdStatus.textContent = text;
+      cmdStatus.classList.toggle("ok", ok);
+      cmdStatus.classList.toggle("err", !ok);
+    }
+
+    function setConnectionState(connected) {
+      stateText.textContent = connected ? "Connected" : "Disconnected";
+      connectBtn.textContent = connected ? "Disconnect" : "Connect";
+    }
+
+    function sendLine(line) {
+      if (!writer) return;
+      writer.write(new TextEncoder().encode(line + "\n"));
+    }
+
+    function setTrackLabel(trackType) {
+      trackVal.textContent = parseInt(trackType, 10) === 1 ? "White" : "Dark";
+    }
+
+    function renderSensorState(parts) {
+      if (parts.length < 21) return;
+      const raw = parts.slice(1, 6).map((v) => parseInt(v, 10));
+      const values = parts.slice(6, 11).map((v) => parseFloat(v));
+      const digital = parts.slice(11, 16).map((v) => parseInt(v, 10));
+      const position = parseFloat(parts[16]);
+      const strength = parseFloat(parts[17]);
+      const lineDetected = parseInt(parts[18], 10) === 1;
+      const calibrating = parseInt(parts[19], 10) === 1;
+      const remainingMs = parseInt(parts[20], 10);
+
+      raw.forEach((v, i) => raws[i].textContent = Number.isFinite(v) ? String(v) : "0");
+      values.forEach((v, i) => {
+        const safe = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+        vals[i].textContent = safe.toFixed(3);
+        bars[i].style.height = `${Math.max(4, safe * 140)}px`;
+      });
+      digital.forEach((v, i) => {
+        const on = v === 1;
+        digs[i].textContent = on ? "DIGITAL 1" : "DIGITAL 0";
+        digs[i].classList.toggle("on", on);
+      });
+
+      positionVal.textContent = Number.isFinite(position) ? position.toFixed(3) : "0.000";
+      strengthVal.textContent = Number.isFinite(strength) ? strength.toFixed(3) : "0.000";
+      calStateVal.textContent = calibrating ? `${Math.max(0, remainingMs)} ms` : "Idle";
+      calStatus.textContent = calibrating ? `Calibration running, ${Math.max(0, remainingMs)} ms remaining` : (lineDetected ? "Line detected" : "No line detected");
+      const clampedPos = Number.isFinite(position) ? Math.max(-1, Math.min(1, position)) : 0;
+      positionDot.style.left = `${((clampedPos + 1) / 2) * 100}%`;
+      positionDot.style.opacity = lineDetected ? "1" : "0.35";
+    }
+
+    function renderConfig(parts) {
+      if (parts.length < 5) return;
+      trackSelect.value = String(parseInt(parts[1], 10) || 0);
+      digitalThInput.value = Number(parseFloat(parts[2]) || 0.45).toFixed(2);
+      detectThInput.value = Number(parseFloat(parts[3]) || 0.20).toFixed(2);
+      calTimeInput.value = String(parseInt(parts[4], 10) || 3000);
+      setTrackLabel(trackSelect.value);
+    }
+
+    function renderCalibration(parts) {
+      if (parts.length < 11) return;
+      parts.slice(1, 6).forEach((v, i) => mins[i].textContent = v);
+      parts.slice(6, 11).forEach((v, i) => maxs[i].textContent = v);
+    }
+
+    function handleLine(line) {
+      if (!line.startsWith("LS,")) appendLog("<< " + line);
+      if (line === "OK") return setCmdStatus("OK", true);
+      if (line === "ERR") return setCmdStatus("ERR", false);
+      if (line.startsWith("LS,")) return renderSensorState(line.split(","));
+      if (line.startsWith("CFG,")) return renderConfig(line.split(","));
+      if (line.startsWith("CAL,")) return renderCalibration(line.split(","));
+    }
+
+    async function readLoop() {
+      try {
+        while (reader) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          if (chunk && chunk.length) lastRxAt = Date.now();
+          buffer += chunk;
+          let idx;
+          while ((idx = buffer.search(/[\r\n]/)) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (line.length) handleLine(line);
+          }
+        }
+      } catch (err) {
+        if (!closingSerial) appendLog("RX ERROR: " + (err && err.message ? err.message : err));
+      } finally {
+        if (!closingSerial && (port || reader || writer)) await closeSerial(false);
+      }
+    }
+
+    function startPolling() {
+      if (!writer || telemTimer) return;
+      sendLine("GET DATA");
+      telemTimer = setInterval(() => {
+        if (writer) sendLine("GET DATA");
+      }, TELEM_INTERVAL_MS);
+    }
+
+    function stopPolling() {
+      if (telemTimer) {
+        clearInterval(telemTimer);
+        telemTimer = null;
+      }
+    }
+
+    async function closeSerial(logDisconnect = true) {
+      if (closingSerial) return;
+      closingSerial = true;
+      try {
+        stopPolling();
+        if (reader) {
+          try { await reader.cancel(); } catch (_err) {}
+          try { reader.releaseLock(); } catch (_err) {}
+          reader = null;
+        }
+        if (writer) {
+          try { writer.releaseLock(); } catch (_err) {}
+          writer = null;
+        }
+        if (port) {
+          const opened = port;
+          port = null;
+          try { await opened.close(); } catch (_err) {}
+        }
+        setConnectionState(false);
+        if (logDisconnect) appendLog("PORT: disconnected");
+      } finally {
+        closingSerial = false;
+      }
+    }
+
+    async function connect() {
+      if (!("serial" in navigator)) {
+        stateText.textContent = "Web Serial unsupported";
+        return;
+      }
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        reader = port.readable.getReader();
+        writer = port.writable.getWriter();
+        setConnectionState(true);
+        appendLog("PORT: connected");
+        lastRxAt = Date.now();
+        void readLoop();
+        sendLine("GET CFG");
+        sendLine("GET CAL");
+        startPolling();
+      } catch (err) {
+        appendLog("ERROR: " + (err && err.message ? err.message : err));
+        await closeSerial(false);
+      }
+    }
+
+    connectBtn.addEventListener("click", () => {
+      if (port) void closeSerial(true);
+      else void connect();
+    });
+    refreshBtn.addEventListener("click", () => {
+      sendLine("GET CFG");
+      sendLine("GET CAL");
+      sendLine("GET DATA");
+    });
+    startCalBtn.addEventListener("click", () => {
+      sendLine("START CAL");
+      setCmdStatus("Calibration started", true);
+    });
+    stopCalBtn.addEventListener("click", () => {
+      sendLine("STOP CAL");
+      setCmdStatus("Calibration stopped", true);
+    });
+    saveCfgBtn.addEventListener("click", () => sendLine("SAVE CFG"));
+    saveCalBtn.addEventListener("click", () => sendLine("SAVE CAL"));
+    clearLogBtn.addEventListener("click", () => {
+      logLines.length = 0;
+      logEl.textContent = "";
+    });
+    toggleTrackBtn.addEventListener("click", () => {
+      trackSelect.value = trackSelect.value === "1" ? "0" : "1";
+      setTrackLabel(trackSelect.value);
+      sendLine(`SET CFG TRACK ${trackSelect.value}`);
+    });
+    trackSelect.addEventListener("change", () => {
+      setTrackLabel(trackSelect.value);
+      sendLine(`SET CFG TRACK ${trackSelect.value}`);
+    });
+    digitalThInput.addEventListener("change", () => sendLine(`SET CFG DIGITAL_TH ${parseFloat(digitalThInput.value).toFixed(2)}`));
+    detectThInput.addEventListener("change", () => sendLine(`SET CFG DETECT_TH ${parseFloat(detectThInput.value).toFixed(2)}`));
+    calTimeInput.addEventListener("change", () => sendLine(`SET CFG CAL_TIME_MS ${parseInt(calTimeInput.value, 10)}`));
+
+    setInterval(() => {
+      if (port && Date.now() - lastRxAt > RX_TIMEOUT_MS) {
+        setCmdStatus("No RX", false);
+      }
+    }, 1000);
+
+    if ("serial" in navigator) {
+      navigator.serial.addEventListener("disconnect", () => {
+        void closeSerial(true);
+      });
+    }
+  </script>
+</body>
+</html>

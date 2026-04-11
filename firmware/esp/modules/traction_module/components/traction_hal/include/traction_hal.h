@@ -23,7 +23,7 @@ typedef struct {
     bool invert_direction;
     traction_encoder_mode_t mode;
     int32_t counts_per_motor_rev;
-    int32_t gear_ratio;
+    float gear_ratio;
 } traction_encoder_cfg_t;
 
 esp_err_t traction_encoder_init(const traction_encoder_cfg_t *cfg);
@@ -31,17 +31,17 @@ esp_err_t traction_encoder_set_runtime_config(bool pullup,
                                               bool invert_direction,
                                               traction_encoder_mode_t mode,
                                               int32_t counts_per_motor_rev,
-                                              int32_t gear_ratio);
+                                              float gear_ratio);
 esp_err_t traction_encoder_get_runtime_config(traction_encoder_cfg_t *out_cfg);
 void      traction_encoder_reset(int64_t value);
 esp_err_t traction_encoder_get_count(int64_t *out_count);
 esp_err_t traction_encoder_set_irq_enabled(bool enabled);
 
 int32_t traction_encoder_counts_per_motor_rev(void);
-int32_t traction_encoder_counts_per_output_rev(void);
+float traction_encoder_counts_per_output_rev(void);
 
 static inline float traction_counts_to_output_rev(int64_t counts) {
-    return (float)counts / (float)traction_encoder_counts_per_output_rev();
+    return (float)counts / traction_encoder_counts_per_output_rev();
 }
 
 static inline float traction_counts_to_output_deg(int64_t counts) {
@@ -54,7 +54,7 @@ static inline float traction_counts_to_output_rad(int64_t counts) {
 }
 
 static inline float traction_delta_counts_to_output_rpm(int64_t delta_counts, float dt_s) {
-    return ((float)delta_counts / dt_s) * (60.0f / (float)traction_encoder_counts_per_output_rev());
+    return ((float)delta_counts / dt_s) * (60.0f / traction_encoder_counts_per_output_rev());
 }
 
 typedef struct {

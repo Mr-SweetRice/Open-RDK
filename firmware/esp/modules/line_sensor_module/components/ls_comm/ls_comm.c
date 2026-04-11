@@ -7,6 +7,7 @@
 #include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_timer.h"
 #include "esp_vfs_dev.h"
 #include "freertos/FreeRTOS.h"
@@ -18,6 +19,9 @@ static ls_comm_cfg_t s_cfg = {0};
 static bool s_inited = false;
 static bool s_usb_jtag_ready = false;
 static SemaphoreHandle_t s_tx_mutex = NULL;
+static bool s_link_active = false;
+static int64_t s_last_event_us = 0;
+static int64_t s_last_link_check_us = 0;
 
 static bool feed_char_cmd(char ch, char *buf, size_t *len, size_t max_len)
 {
@@ -96,6 +100,60 @@ static bool get_cal_snapshot(ls_comm_cal_state_t *state)
     return s_cfg.get_cal_state(s_cfg.ctx, state);
 }
 
+static bool get_info_snapshot(ls_comm_info_state_t *state)
+{
+    if (!state || !s_cfg.get_info_state) {
+        return false;
+    }
+    memset(state, 0, sizeof(*state));
+    return s_cfg.get_info_state(s_cfg.ctx, state);
+}
+
+static void sanitize_text_field(char *text, size_t len)
+{
+    if (!text || len == 0U) {
+        return;
+    }
+    text[len - 1U] = '\0';
+    for (size_t i = 0; i < len && text[i] != '\0'; ++i) {
+        if (text[i] == ',') {
+            text[i] = '-';
+        }
+    }
+}
+
+static void format_hms_from_us(int64_t time_us, char *out, size_t out_len)
+{
+    if (!out || out_len == 0U) {
+        return;
+    }
+    if (time_us < 0) {
+        time_us = 0;
+    }
+
+    const uint32_t total_sec = (uint32_t)(time_us / 1000000LL);
+    const uint32_t hh = (total_sec / 3600U) % 100U;
+    const uint32_t mm = (total_sec / 60U) % 60U;
+    const uint32_t ss = total_sec % 60U;
+    snprintf(out, out_len, "%02lu:%02lu:%02lu",
+             (unsigned long)hh,
+             (unsigned long)mm,
+             (unsigned long)ss);
+}
+
+static float calc_sensor_input_lag_ms(const ls_comm_sensor_state_t *state)
+{
+    if (!state || state->sample_started_us <= 0 || state->sample_ready_us <= 0) {
+        return 0.0f;
+    }
+
+    const int64_t lag_us = state->sample_ready_us - state->sample_started_us;
+    if (lag_us <= 0) {
+        return 0.0f;
+    }
+    return (float)lag_us / 1000.0f;
+}
+
 static void send_sensor_snapshot(void)
 {
     ls_comm_sensor_state_t state = {0};
@@ -104,8 +162,10 @@ static void send_sensor_snapshot(void)
         return;
     }
 
+    const float input_lag_ms = calc_sensor_input_lag_ms(&state);
+
     ls_comm_send_line(
-        "LS,%u,%u,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%u,%u,%u,%u,%.4f,%.4f,%u,%u,%lu",
+        "LS,%u,%u,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%u,%u,%u,%u,%.4f,%.4f,%u,%u,%lu,%.3f",
         (unsigned)state.raw[0], (unsigned)state.raw[1], (unsigned)state.raw[2],
         (unsigned)state.raw[3], (unsigned)state.raw[4],
         (double)state.value[0], (double)state.value[1], (double)state.value[2],
@@ -115,7 +175,8 @@ static void send_sensor_snapshot(void)
         (double)state.position, (double)state.strength,
         state.line_detected ? 1U : 0U,
         state.calibrating ? 1U : 0U,
-        (unsigned long)state.calibration_remaining_ms);
+        (unsigned long)state.calibration_remaining_ms,
+        (double)input_lag_ms);
 }
 
 static void send_cfg_snapshot(void)
@@ -125,11 +186,13 @@ static void send_cfg_snapshot(void)
         ls_comm_send_line("ERR");
         return;
     }
-    ls_comm_send_line("CFG,%u,%.4f,%.4f,%lu",
+    sanitize_text_field(state.sensor_name, sizeof(state.sensor_name));
+    ls_comm_send_line("CFG,%u,%.4f,%.4f,%lu,%s",
                       (unsigned)state.track_type,
                       (double)state.digital_threshold,
                       (double)state.detect_threshold,
-                      (unsigned long)state.calibration_time_ms);
+                      (unsigned long)state.calibration_time_ms,
+                      state.sensor_name);
 }
 
 static void send_cal_snapshot(void)
@@ -145,6 +208,51 @@ static void send_cal_snapshot(void)
                       (unsigned)state.min_raw[4], (unsigned)state.max_raw[0],
                       (unsigned)state.max_raw[1], (unsigned)state.max_raw[2],
                       (unsigned)state.max_raw[3], (unsigned)state.max_raw[4]);
+}
+
+static void send_info_snapshot(void)
+{
+    ls_comm_info_state_t state = {0};
+    if (!get_info_snapshot(&state)) {
+        ls_comm_send_line("ERR");
+        return;
+    }
+
+    uint8_t mac[6] = {0};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+        memset(mac, 0, sizeof(mac));
+    }
+
+    char serial_number[18];
+    char module_id_hex[11];
+    char last_event_at[16];
+    char last_link_check_at[16];
+    const char *link_status = s_link_active ? "live" : "idle";
+    const char *status = s_link_active ? "online connected" : "online idle";
+
+    snprintf(serial_number, sizeof(serial_number), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(module_id_hex, sizeof(module_id_hex), "0x%02lX", (unsigned long)(state.module_id & 0xFFU));
+    format_hms_from_us(s_last_event_us, last_event_at, sizeof(last_event_at));
+    format_hms_from_us(s_last_link_check_us, last_link_check_at, sizeof(last_link_check_at));
+
+    sanitize_text_field(state.name, sizeof(state.name));
+    sanitize_text_field(state.module_type, sizeof(state.module_type));
+    sanitize_text_field(state.firmware_module, sizeof(state.firmware_module));
+
+    ls_comm_send_line("INFO,%s,%s,%s,%s,%s,%s,%lu,%s,%u,%s,%s,%s",
+                      serial_number,
+                      state.name,
+                      status,
+                      "n/a",
+                      state.module_type,
+                      state.firmware_module,
+                      (unsigned long)state.module_id,
+                      module_id_hex,
+                      s_link_active ? 1U : 0U,
+                      link_status,
+                      last_event_at,
+                      last_link_check_at);
 }
 
 static void handle_cmd_line(const char *line)
@@ -165,6 +273,11 @@ static void handle_cmd_line(const char *line)
 
     if (strcmp(line, "GET CAL") == 0) {
         send_cal_snapshot();
+        return;
+    }
+
+    if (strcmp(line, "GET INFO") == 0) {
+        send_info_snapshot();
         return;
     }
 
@@ -221,6 +334,13 @@ static void handle_cmd_line(const char *line)
                 return;
             }
             state.track_type = (uint8_t)ivalue;
+        } else if (strncmp(cfg_line, "NAME ", 5) == 0) {
+            const char *name = cfg_line + 5;
+            while (*name == ' ') {
+                ++name;
+            }
+            snprintf(state.sensor_name, sizeof(state.sensor_name), "%s", name);
+            sanitize_text_field(state.sensor_name, sizeof(state.sensor_name));
         } else if (sscanf(cfg_line, "DIGITAL_TH %f", &fvalue) == 1) {
             state.digital_threshold = fvalue;
         } else if (sscanf(cfg_line, "DETECT_TH %f", &fvalue) == 1) {
@@ -306,7 +426,6 @@ void ls_comm_task(void *arg)
     char line[128];
     size_t line_len = 0U;
     int64_t last_rx_us = 0;
-    bool link_active = false;
 
     while (true) {
         bool got_line = false;
@@ -321,14 +440,18 @@ void ls_comm_task(void *arg)
         }
         if (n > 0) {
             last_rx_us = esp_timer_get_time();
-            link_active = true;
+            s_last_event_us = last_rx_us;
+            s_last_link_check_us = last_rx_us;
+            s_link_active = true;
             got_line = feed_char_cmd((char)ch, line, &line_len, sizeof(line));
         }
 
-        if (link_active && s_cfg.link_timeout_ms > 0U) {
+        if (s_link_active && s_cfg.link_timeout_ms > 0U) {
             const int64_t now_us = esp_timer_get_time();
+            s_last_link_check_us = now_us;
             if ((now_us - last_rx_us) > ((int64_t)s_cfg.link_timeout_ms * 1000LL)) {
-                link_active = false;
+                s_link_active = false;
+                s_last_event_us = now_us;
                 if (s_cfg.on_link_timeout) {
                     s_cfg.on_link_timeout(s_cfg.ctx);
                 }

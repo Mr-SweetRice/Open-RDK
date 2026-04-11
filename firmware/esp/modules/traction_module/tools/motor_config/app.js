@@ -19,7 +19,7 @@
     rpmMax: 199.89,
     pwmFreq: 20000,
     countsPerRev: 44,
-    gearRatio: 45,
+    gearRatio: 45.0,
     pullupMode: "Enabled",
     notes: "Bench profile / default firmware values",
   };
@@ -115,6 +115,12 @@
     return 0;
   }
 
+  function parseDecimalInput(value, fallback = 0) {
+    const normalized = String(value ?? "").trim().replace(",", ".");
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   function collectConfig() {
     return {
       bridgeMode: bridgeMode.value,
@@ -124,7 +130,7 @@
       rpmMax: Number(rpmMax.value) || 0,
       pwmFreq: Number(pwmFreq.value) || 0,
       countsPerRev: Number(countsPerRev.value) || 0,
-      gearRatio: Number(gearRatio.value) || 0,
+      gearRatio: parseDecimalInput(gearRatio.value, 0),
       pullupMode: pullupMode.value,
       notes: notes.value.trim(),
     };
@@ -138,7 +144,7 @@
     rpmMax.value = Number(cfg.rpmMax || 0).toFixed(2);
     pwmFreq.value = Number(cfg.pwmFreq || 0);
     countsPerRev.value = Number(cfg.countsPerRev || 0);
-    gearRatio.value = Number(cfg.gearRatio || 0);
+    gearRatio.value = parseDecimalInput(cfg.gearRatio, 0).toFixed(3);
     pullupMode.value = cfg.pullupMode;
     notes.value = cfg.notes || "";
     syncConfigTable();
@@ -151,7 +157,7 @@
     cfgRpmValue.textContent = cfg.rpmMax.toFixed(2);
     cfgPwmValue.textContent = `${cfg.pwmFreq} Hz`;
     cfgCountsValue.textContent = String(cfg.countsPerRev);
-    cfgGearValue.textContent = String(cfg.gearRatio);
+    cfgGearValue.textContent = parseDecimalInput(cfg.gearRatio, 0).toFixed(3);
   }
 
   function normalizeCurveRows(rows) {
@@ -330,7 +336,7 @@
       pullupMode: Number(parts[5]) ? "Enabled" : "Disabled",
       pwmFreq: Number(parts[6]) || 0,
       countsPerRev: Number(parts[7]) || 0,
-      gearRatio: Number(parts[8]) || 0,
+      gearRatio: parseDecimalInput(parts[8], 0),
       rpmMax: Number(parts[9]) || 0,
       notes: notes.value.trim(),
     };
@@ -505,7 +511,7 @@
       `SET CFG PULLUP ${cfg.pullupMode === "Enabled" ? 1 : 0}`,
       `SET CFG PWM_FREQ ${Math.max(1, Math.round(cfg.pwmFreq))}`,
       `SET CFG COUNTS_PER_REV ${Math.max(1, Math.round(cfg.countsPerRev))}`,
-      `SET CFG GEAR_RATIO ${Math.max(1, Math.round(cfg.gearRatio))}`,
+      `SET CFG GEAR_RATIO ${Math.max(0.001, cfg.gearRatio).toFixed(3)}`,
       `SET CFG RPM_MAX ${Math.max(0, cfg.rpmMax).toFixed(2)}`,
       `SET CFG NOTES ${cfg.notes}`,
     ];

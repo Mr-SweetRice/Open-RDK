@@ -10,8 +10,9 @@
 extern "C" {
 #endif
 
-#define LS_STORAGE_CFG_VERSION 1U
+#define LS_STORAGE_CFG_VERSION 2U
 #define LS_STORAGE_CAL_VERSION 1U
+#define LS_SENSOR_NAME_MAX_LEN 32U
 
 typedef struct {
     uint16_t version;
@@ -21,6 +22,7 @@ typedef struct {
     float digital_threshold;
     float detect_threshold;
     uint32_t calibration_time_ms;
+    char sensor_name[LS_SENSOR_NAME_MAX_LEN];
 } ls_storage_cfg_t;
 
 typedef struct {

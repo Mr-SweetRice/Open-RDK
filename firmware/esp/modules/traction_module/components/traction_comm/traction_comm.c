@@ -154,7 +154,7 @@
  * 27) GET CFG
  *    - Function: returns controller configuration stored in NVS/runtime.
  *    - Responses:
- *      CFG,<bridge>,<encoder_mode>,<motor_inv>,<encoder_inv>,<pullup>,<pwm_freq>,<counts>,<gear>,<rpm_max>
+ *      CFG,<bridge>,<encoder_mode>,<motor_inv>,<encoder_inv>,<pullup>,<pwm_freq>,<counts>,<gear_ratio>,<rpm_max>
  *      CFGN,<notes>
  *    - Example:  GET CFG
  *
@@ -358,7 +358,7 @@ static void send_controller_cfg_snapshot(void)
         return;
     }
     st.notes[sizeof(st.notes) - 1U] = '\0';
-    traction_comm_send_line("CFG,%u,%u,%u,%u,%u,%lu,%ld,%ld,%.2f",
+    traction_comm_send_line("CFG,%u,%u,%u,%u,%u,%lu,%ld,%.3f,%.2f",
                             (unsigned)st.bridge_type,
                             (unsigned)st.encoder_mode,
                             (unsigned)st.motor_invert,
@@ -366,7 +366,7 @@ static void send_controller_cfg_snapshot(void)
                             (unsigned)st.pullup_enabled,
                             (unsigned long)st.pwm_freq_hz,
                             (long)st.counts_per_motor_rev,
-                            (long)st.gear_ratio,
+                            (double)st.gear_ratio,
                             (double)st.rpm_max);
     traction_comm_send_line("CFGN,%s", st.notes);
 }
@@ -494,8 +494,8 @@ static void handle_cmd_line(const char *line)
             st.pwm_freq_hz = (uint32_t)ivalue;
         } else if (sscanf(cfg_line, "COUNTS_PER_REV %d", &ivalue) == 1) {
             st.counts_per_motor_rev = ivalue;
-        } else if (sscanf(cfg_line, "GEAR_RATIO %d", &ivalue) == 1) {
-            st.gear_ratio = ivalue;
+        } else if (sscanf(cfg_line, "GEAR_RATIO %f", &val) == 1) {
+            st.gear_ratio = val;
         } else if (sscanf(cfg_line, "RPM_MAX %f", &val) == 1) {
             st.rpm_max = val;
         } else if (strncmp(cfg_line, "NOTES ", 6) == 0) {

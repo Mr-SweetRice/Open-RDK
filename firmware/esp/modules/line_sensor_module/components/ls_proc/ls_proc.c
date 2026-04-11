@@ -1,6 +1,5 @@
 #include "ls_proc.h"
 
-#include <math.h>
 #include <string.h>
 
 static float clampf(float value, float min_value, float max_value)
@@ -12,12 +11,6 @@ static float clampf(float value, float min_value, float max_value)
         return max_value;
     }
     return value;
-}
-
-static float bezier_x(float x0, float x1, float x2, float t)
-{
-    const float omt = 1.0f - t;
-    return (omt * omt * x0) + (2.0f * omt * t * x1) + (t * t * x2);
 }
 
 void ls_proc_get_default_cfg(ls_proc_cfg_t *out_cfg)
@@ -44,7 +37,6 @@ esp_err_t ls_proc_process(const uint16_t raw[LS_SENSOR_COUNT],
     memset(out_result, 0, sizeof(*out_result));
 
     float peak_value = 0.0f;
-    size_t peak_index = 0U;
     float weighted_sum = 0.0f;
     float total_weight = 0.0f;
 
@@ -64,7 +56,6 @@ esp_err_t ls_proc_process(const uint16_t raw[LS_SENSOR_COUNT],
 
         if (out_result->line_value[i] > peak_value) {
             peak_value = out_result->line_value[i];
-            peak_index = i;
         }
 
         weighted_sum += sensor_x[i] * out_result->line_value[i];
@@ -80,27 +71,6 @@ esp_err_t ls_proc_process(const uint16_t raw[LS_SENSOR_COUNT],
         return ESP_OK;
     }
 
-    if (peak_index == 0U || peak_index == (LS_SENSOR_COUNT - 1U)) {
-        out_result->position = sensor_x[peak_index];
-        return ESP_OK;
-    }
-
-    const float y0 = out_result->line_value[peak_index - 1U];
-    const float y1 = out_result->line_value[peak_index];
-    const float y2 = out_result->line_value[peak_index + 1U];
-    const float denom = y0 - (2.0f * y1) + y2;
-
-    if (fabsf(denom) <= 1e-5f) {
-        out_result->position = (total_weight > 1e-5f) ? clampf(weighted_sum / total_weight, -1.0f, 1.0f) : 0.0f;
-        return ESP_OK;
-    }
-
-    const float t = clampf((y0 - y1) / denom, 0.0f, 1.0f);
-    out_result->position = clampf(bezier_x(sensor_x[peak_index - 1U],
-                                           sensor_x[peak_index],
-                                           sensor_x[peak_index + 1U],
-                                           t),
-                                  -1.0f,
-                                  1.0f);
+    out_result->position = (total_weight > 1e-5f) ? clampf(weighted_sum / total_weight, -1.0f, 1.0f) : 0.0f;
     return ESP_OK;
 }

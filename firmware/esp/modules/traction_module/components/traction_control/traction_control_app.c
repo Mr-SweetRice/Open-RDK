@@ -30,7 +30,6 @@
 #define LIN_A 0.5855839f
 #define LIN_B 1.42f
 #define CURVE_STORE_VERSION 1U
-#define CONTROLLER_CFG_STORE_VERSION 1U
 
 // Speed control
 #define CONTROL_PERIOD_MS          33
@@ -174,7 +173,7 @@ static void motor_curve_defaults(void)
 static void controller_cfg_defaults(void)
 {
     memset(&s_controller_cfg, 0, sizeof(s_controller_cfg));
-    s_controller_cfg.version = CONTROLLER_CFG_STORE_VERSION;
+    s_controller_cfg.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     s_controller_cfg.bridge_type = (uint8_t)TRACTION_MOTOR_BRIDGE_TB6612;
     s_controller_cfg.encoder_mode = (uint8_t)TRACTION_ENCODER_MODE_QUADRATURE_X4;
     s_controller_cfg.motor_invert = 0U;
@@ -182,7 +181,7 @@ static void controller_cfg_defaults(void)
     s_controller_cfg.pullup_enabled = 1U;
     s_controller_cfg.pwm_freq_hz = 20000U;
     s_controller_cfg.counts_per_motor_rev = 44;
-    s_controller_cfg.gear_ratio = 45;
+    s_controller_cfg.gear_ratio = 45.0f;
     s_controller_cfg.rpm_max = RPM_AT_100_PCT;
     snprintf(s_controller_cfg.notes, sizeof(s_controller_cfg.notes),
              "Bench profile / default firmware values");
@@ -834,7 +833,7 @@ static bool controller_cfg_state_is_valid(const traction_comm_controller_cfg_sta
            encoder_mode_is_valid_u8(state->encoder_mode) &&
            state->pwm_freq_hz > 0 &&
            state->counts_per_motor_rev > 0 &&
-           state->gear_ratio > 0 &&
+           state->gear_ratio > 0.0f &&
            state->rpm_max >= 0.0f;
 }
 
@@ -846,7 +845,7 @@ static bool comm_set_controller_cfg_state(void *ctx, const traction_comm_control
     }
 
     portENTER_CRITICAL(&s_pid_mux);
-    s_controller_cfg.version = CONTROLLER_CFG_STORE_VERSION;
+    s_controller_cfg.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     s_controller_cfg.bridge_type = state->bridge_type;
     s_controller_cfg.encoder_mode = state->encoder_mode;
     s_controller_cfg.motor_invert = state->motor_invert ? 1U : 0U;
@@ -873,7 +872,7 @@ static bool comm_enqueue_controller_cfg_save(void *ctx, const traction_comm_cont
 
     nvs_save_req_t req = {0};
     req.kind = NVS_SAVE_KIND_CONTROLLER_CFG;
-    req.controller_cfg.version = CONTROLLER_CFG_STORE_VERSION;
+    req.controller_cfg.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     req.controller_cfg.bridge_type = state->bridge_type;
     req.controller_cfg.encoder_mode = state->encoder_mode;
     req.controller_cfg.motor_invert = state->motor_invert ? 1U : 0U;
@@ -1048,12 +1047,12 @@ static void pid_load_from_nvs(void)
     traction_controller_cfg_store_t cfg = {0};
     err = traction_storage_load_controller_cfg(&cfg);
     if (err == ESP_OK &&
-        cfg.version == CONTROLLER_CFG_STORE_VERSION &&
+        cfg.version == TRACTION_CONTROLLER_CFG_STORE_VERSION &&
         bridge_type_is_valid_u8(cfg.bridge_type) &&
         encoder_mode_is_valid_u8(cfg.encoder_mode) &&
         cfg.pwm_freq_hz > 0 &&
         cfg.counts_per_motor_rev > 0 &&
-        cfg.gear_ratio > 0) {
+        cfg.gear_ratio > 0.0f) {
         cfg.notes[sizeof(cfg.notes) - 1U] = '\0';
         s_controller_cfg = cfg;
         ESP_LOGI(TAG, "controller config loaded from NVS");
@@ -1169,7 +1168,7 @@ static esp_err_t controller_cfg_save_to_nvs(const traction_controller_cfg_store_
     }
 
     traction_controller_cfg_store_t st = *cfg;
-    st.version = CONTROLLER_CFG_STORE_VERSION;
+    st.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     st.notes[sizeof(st.notes) - 1U] = '\0';
     esp_err_t err = traction_storage_save_controller_cfg(&st);
     if (err == ESP_OK) {
@@ -1275,12 +1274,12 @@ void traction_control_app_nvs_save_task(void *arg)
                      (double)req.curve.rpm_points[0],
                      (double)req.curve.rpm_points[TRACTION_MOTOR_CURVE_POINT_COUNT - 1U]);
         } else if (req.kind == NVS_SAVE_KIND_CONTROLLER_CFG) {
-            ESP_LOGI(TAG, "save cfg req: bridge=%u mode=%u pwm=%lu counts=%ld gear=%ld",
+            ESP_LOGI(TAG, "save cfg req: bridge=%u mode=%u pwm=%lu counts=%ld gear=%.3f",
                      (unsigned)req.controller_cfg.bridge_type,
                      (unsigned)req.controller_cfg.encoder_mode,
                      (unsigned long)req.controller_cfg.pwm_freq_hz,
                      (long)req.controller_cfg.counts_per_motor_rev,
-                     (long)req.controller_cfg.gear_ratio);
+                     (double)req.controller_cfg.gear_ratio);
         }
 
         if (!traction_storage_is_ready()) {

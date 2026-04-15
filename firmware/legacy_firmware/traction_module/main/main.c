@@ -81,7 +81,7 @@ void app_main(void)
         .invert_direction = false,
         .mode = TRACTION_ENCODER_MODE_QUADRATURE_X4,
         .counts_per_motor_rev = 44,
-        .gear_ratio = 45,
+        .gear_ratio = 45.0f,
     };
     ESP_ERROR_CHECK(traction_encoder_init(&enc_cfg));
 

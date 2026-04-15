@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "traction_comm.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_timer
+        driver
+        vfs
+)

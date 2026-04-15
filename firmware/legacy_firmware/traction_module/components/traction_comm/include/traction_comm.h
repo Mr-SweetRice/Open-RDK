@@ -18,21 +18,6 @@ typedef struct {
 } traction_comm_pid_rpm_state_t;
 
 typedef struct {
-    float target_rpm;
-    float measured_rpm;
-    float cmd_pwm_signed;
-    float cmd_raw;
-} traction_comm_rpm_telem_state_t;
-
-typedef struct {
-    float target_deg;
-    float position_deg;
-    float cmd_pwm_signed;
-    float cmd_raw;
-    float i_term;
-} traction_comm_pos_telem_state_t;
-
-typedef struct {
     float kp;
     float ki;
     float kd;
@@ -69,7 +54,7 @@ typedef struct {
     uint8_t pullup_enabled;
     uint32_t pwm_freq_hz;
     int32_t counts_per_motor_rev;
-    int32_t gear_ratio;
+    float gear_ratio;
     float rpm_max;
     char notes[64];
 } traction_comm_controller_cfg_state_t;
@@ -81,8 +66,6 @@ typedef struct {
     void (*on_link_timeout)(void *ctx);
     void (*request_rpm_telem)(void *ctx);
     void (*request_pos_telem)(void *ctx);
-    bool (*get_rpm_telem_state)(void *ctx, traction_comm_rpm_telem_state_t *out_state);
-    bool (*get_pos_telem_state)(void *ctx, traction_comm_pos_telem_state_t *out_state);
 
     bool (*get_rpm_state)(void *ctx, traction_comm_pid_rpm_state_t *out_state);
     void (*set_rpm_kp)(void *ctx, float value);

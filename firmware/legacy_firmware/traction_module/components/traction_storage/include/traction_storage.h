@@ -11,6 +11,7 @@ extern "C" {
 #define TRACTION_MOTOR_CURVE_POINT_COUNT 10U
 #define TRACTION_CONTROLLER_NOTES_MAX_LEN 64U
 #define TRACTION_POS_PID_STORE_VERSION 2U
+#define TRACTION_CONTROLLER_CFG_STORE_VERSION 2U
 
 typedef struct {
     float kp;
@@ -60,7 +61,7 @@ typedef struct {
     uint8_t reserved1;
     uint32_t pwm_freq_hz;
     int32_t counts_per_motor_rev;
-    int32_t gear_ratio;
+    float gear_ratio;
     float rpm_max;
     char notes[TRACTION_CONTROLLER_NOTES_MAX_LEN];
 } traction_controller_cfg_store_t;

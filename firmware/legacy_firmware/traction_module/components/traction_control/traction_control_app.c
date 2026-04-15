@@ -30,7 +30,6 @@
 #define LIN_A 0.5855839f
 #define LIN_B 1.42f
 #define CURVE_STORE_VERSION 1U
-#define CONTROLLER_CFG_STORE_VERSION 1U
 
 // Speed control
 #define CONTROL_PERIOD_MS          33
@@ -106,15 +105,6 @@ static bool s_telem_req = false;
 static bool s_pos_telem_req = false;
 static TaskHandle_t s_speed_task = NULL;
 static TaskHandle_t s_enc_task = NULL;
-static float s_last_telem_target_rpm = 0.0f;
-static float s_last_telem_measured_rpm = 0.0f;
-static float s_last_telem_cmd_pwm_signed = 0.0f;
-static float s_last_telem_cmd_raw = 0.0f;
-static float s_last_pos_telem_target_deg = 0.0f;
-static float s_last_pos_telem_position_deg = 0.0f;
-static float s_last_pos_telem_cmd_pwm_signed = 0.0f;
-static float s_last_pos_telem_cmd_raw = 0.0f;
-static float s_last_pos_telem_i_term = 0.0f;
 
 static void apply_startup_motor_output(void)
 {
@@ -183,7 +173,7 @@ static void motor_curve_defaults(void)
 static void controller_cfg_defaults(void)
 {
     memset(&s_controller_cfg, 0, sizeof(s_controller_cfg));
-    s_controller_cfg.version = CONTROLLER_CFG_STORE_VERSION;
+    s_controller_cfg.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     s_controller_cfg.bridge_type = (uint8_t)TRACTION_MOTOR_BRIDGE_TB6612;
     s_controller_cfg.encoder_mode = (uint8_t)TRACTION_ENCODER_MODE_QUADRATURE_X4;
     s_controller_cfg.motor_invert = 0U;
@@ -191,7 +181,7 @@ static void controller_cfg_defaults(void)
     s_controller_cfg.pullup_enabled = 1U;
     s_controller_cfg.pwm_freq_hz = 20000U;
     s_controller_cfg.counts_per_motor_rev = 44;
-    s_controller_cfg.gear_ratio = 45;
+    s_controller_cfg.gear_ratio = 45.0f;
     s_controller_cfg.rpm_max = RPM_AT_100_PCT;
     snprintf(s_controller_cfg.notes, sizeof(s_controller_cfg.notes),
              "Bench profile / default firmware values");
@@ -457,41 +447,6 @@ static void comm_request_rpm_telem(void *ctx)
     portENTER_CRITICAL(&s_pid_mux);
     s_telem_req = true;
     portEXIT_CRITICAL(&s_pid_mux);
-}
-
-static bool comm_get_rpm_telem_state(void *ctx, traction_comm_rpm_telem_state_t *out_state)
-{
-    (void)ctx;
-    if (!out_state) {
-        return false;
-    }
-
-    portENTER_CRITICAL(&s_pid_mux);
-    out_state->target_rpm = s_last_telem_target_rpm;
-    out_state->measured_rpm = s_last_telem_measured_rpm;
-    out_state->cmd_pwm_signed = s_last_telem_cmd_pwm_signed;
-    out_state->cmd_raw = s_last_telem_cmd_raw;
-    portEXIT_CRITICAL(&s_pid_mux);
-
-    return true;
-}
-
-static bool comm_get_pos_telem_state(void *ctx, traction_comm_pos_telem_state_t *out_state)
-{
-    (void)ctx;
-    if (!out_state) {
-        return false;
-    }
-
-    portENTER_CRITICAL(&s_pid_mux);
-    out_state->target_deg = s_last_pos_telem_target_deg;
-    out_state->position_deg = s_last_pos_telem_position_deg;
-    out_state->cmd_pwm_signed = s_last_pos_telem_cmd_pwm_signed;
-    out_state->cmd_raw = s_last_pos_telem_cmd_raw;
-    out_state->i_term = s_last_pos_telem_i_term;
-    portEXIT_CRITICAL(&s_pid_mux);
-
-    return true;
 }
 
 static bool comm_enqueue_rpm_save(void *ctx, const traction_comm_pid_rpm_state_t *state)
@@ -878,7 +833,7 @@ static bool controller_cfg_state_is_valid(const traction_comm_controller_cfg_sta
            encoder_mode_is_valid_u8(state->encoder_mode) &&
            state->pwm_freq_hz > 0 &&
            state->counts_per_motor_rev > 0 &&
-           state->gear_ratio > 0 &&
+           state->gear_ratio > 0.0f &&
            state->rpm_max >= 0.0f;
 }
 
@@ -890,7 +845,7 @@ static bool comm_set_controller_cfg_state(void *ctx, const traction_comm_control
     }
 
     portENTER_CRITICAL(&s_pid_mux);
-    s_controller_cfg.version = CONTROLLER_CFG_STORE_VERSION;
+    s_controller_cfg.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     s_controller_cfg.bridge_type = state->bridge_type;
     s_controller_cfg.encoder_mode = state->encoder_mode;
     s_controller_cfg.motor_invert = state->motor_invert ? 1U : 0U;
@@ -917,7 +872,7 @@ static bool comm_enqueue_controller_cfg_save(void *ctx, const traction_comm_cont
 
     nvs_save_req_t req = {0};
     req.kind = NVS_SAVE_KIND_CONTROLLER_CFG;
-    req.controller_cfg.version = CONTROLLER_CFG_STORE_VERSION;
+    req.controller_cfg.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     req.controller_cfg.bridge_type = state->bridge_type;
     req.controller_cfg.encoder_mode = state->encoder_mode;
     req.controller_cfg.motor_invert = state->motor_invert ? 1U : 0U;
@@ -1092,12 +1047,12 @@ static void pid_load_from_nvs(void)
     traction_controller_cfg_store_t cfg = {0};
     err = traction_storage_load_controller_cfg(&cfg);
     if (err == ESP_OK &&
-        cfg.version == CONTROLLER_CFG_STORE_VERSION &&
+        cfg.version == TRACTION_CONTROLLER_CFG_STORE_VERSION &&
         bridge_type_is_valid_u8(cfg.bridge_type) &&
         encoder_mode_is_valid_u8(cfg.encoder_mode) &&
         cfg.pwm_freq_hz > 0 &&
         cfg.counts_per_motor_rev > 0 &&
-        cfg.gear_ratio > 0) {
+        cfg.gear_ratio > 0.0f) {
         cfg.notes[sizeof(cfg.notes) - 1U] = '\0';
         s_controller_cfg = cfg;
         ESP_LOGI(TAG, "controller config loaded from NVS");
@@ -1213,7 +1168,7 @@ static esp_err_t controller_cfg_save_to_nvs(const traction_controller_cfg_store_
     }
 
     traction_controller_cfg_store_t st = *cfg;
-    st.version = CONTROLLER_CFG_STORE_VERSION;
+    st.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
     st.notes[sizeof(st.notes) - 1U] = '\0';
     esp_err_t err = traction_storage_save_controller_cfg(&st);
     if (err == ESP_OK) {
@@ -1248,8 +1203,6 @@ void traction_control_app_make_comm_cfg(traction_comm_cfg_t *out_cfg, uint32_t l
     out_cfg->on_link_timeout = comm_on_link_timeout;
     out_cfg->request_rpm_telem = comm_request_rpm_telem;
     out_cfg->request_pos_telem = comm_request_pos_telem;
-    out_cfg->get_rpm_telem_state = comm_get_rpm_telem_state;
-    out_cfg->get_pos_telem_state = comm_get_pos_telem_state;
     out_cfg->get_rpm_state = comm_get_rpm_state;
     out_cfg->set_rpm_kp = comm_set_rpm_kp;
     out_cfg->set_rpm_ki = comm_set_rpm_ki;
@@ -1321,12 +1274,12 @@ void traction_control_app_nvs_save_task(void *arg)
                      (double)req.curve.rpm_points[0],
                      (double)req.curve.rpm_points[TRACTION_MOTOR_CURVE_POINT_COUNT - 1U]);
         } else if (req.kind == NVS_SAVE_KIND_CONTROLLER_CFG) {
-            ESP_LOGI(TAG, "save cfg req: bridge=%u mode=%u pwm=%lu counts=%ld gear=%ld",
+            ESP_LOGI(TAG, "save cfg req: bridge=%u mode=%u pwm=%lu counts=%ld gear=%.3f",
                      (unsigned)req.controller_cfg.bridge_type,
                      (unsigned)req.controller_cfg.encoder_mode,
                      (unsigned long)req.controller_cfg.pwm_freq_hz,
                      (long)req.controller_cfg.counts_per_motor_rev,
-                     (long)req.controller_cfg.gear_ratio);
+                     (double)req.controller_cfg.gear_ratio);
         }
 
         if (!traction_storage_is_ready()) {
@@ -1600,18 +1553,6 @@ void traction_control_app_speed_task(void *arg)
             cmd_pwm_signed = (applied_dir == TRACTION_DIR_CW) ? cmd_pwm_mag : -cmd_pwm_mag;
             traction_motor_set((int)cmd_pwm_mag, applied_dir);
         }
-
-        portENTER_CRITICAL(&s_pid_mux);
-        s_last_telem_target_rpm = target_rpm;
-        s_last_telem_measured_rpm = rpm;
-        s_last_telem_cmd_pwm_signed = cmd_pwm_signed;
-        s_last_telem_cmd_raw = cmd_raw;
-        s_last_pos_telem_target_deg = target_pos_deg;
-        s_last_pos_telem_position_deg = pos_deg;
-        s_last_pos_telem_cmd_pwm_signed = cmd_pwm_signed;
-        s_last_pos_telem_cmd_raw = cmd_raw;
-        s_last_pos_telem_i_term = pos_i_term;
-        portEXIT_CRITICAL(&s_pid_mux);
 
         if (send_rpm_telem) {
             traction_comm_send_line("T,%.2f,%.2f,%.2f,%.2f",

@@ -1,5 +1,7 @@
 #include "traction_storage.h"
 
+#include <string.h>
+
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
@@ -30,6 +32,22 @@ typedef struct {
     float kd;
     float target_deg;
 } traction_pos_pid_store_v1_t;
+
+typedef struct {
+    uint16_t version;
+    uint8_t bridge_type;
+    uint8_t encoder_mode;
+    uint8_t motor_invert;
+    uint8_t encoder_invert;
+    uint8_t pullup_enabled;
+    uint8_t reserved0;
+    uint8_t reserved1;
+    uint32_t pwm_freq_hz;
+    int32_t counts_per_motor_rev;
+    int32_t gear_ratio;
+    float rpm_max;
+    char notes[TRACTION_CONTROLLER_NOTES_MAX_LEN];
+} traction_controller_cfg_store_v1_t;
 
 esp_err_t traction_storage_init(void)
 {
@@ -316,14 +334,57 @@ esp_err_t traction_storage_load_controller_cfg(traction_controller_cfg_store_t *
         return err;
     }
 
-    size_t len = sizeof(*out);
-    err = nvs_get_blob(h, KEY_CONTROLLER_CFG, out, &len);
-    nvs_close(h);
-
-    if (err == ESP_OK && len != sizeof(*out)) {
-        return ESP_ERR_INVALID_SIZE;
+    size_t len = 0;
+    err = nvs_get_blob(h, KEY_CONTROLLER_CFG, NULL, &len);
+    if (err != ESP_OK) {
+        nvs_close(h);
+        return err;
     }
-    return err;
+
+    if (len == sizeof(*out)) {
+        err = nvs_get_blob(h, KEY_CONTROLLER_CFG, out, &len);
+        nvs_close(h);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (out->version != TRACTION_CONTROLLER_CFG_STORE_VERSION) {
+            return ESP_ERR_INVALID_VERSION;
+        }
+        out->notes[sizeof(out->notes) - 1U] = '\0';
+        return ESP_OK;
+    }
+
+    if (len == sizeof(traction_controller_cfg_store_v1_t)) {
+        traction_controller_cfg_store_v1_t legacy = {0};
+        err = nvs_get_blob(h, KEY_CONTROLLER_CFG, &legacy, &len);
+        nvs_close(h);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (legacy.version != 1U) {
+            return ESP_ERR_INVALID_VERSION;
+        }
+
+        memset(out, 0, sizeof(*out));
+        out->version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
+        out->bridge_type = legacy.bridge_type;
+        out->encoder_mode = legacy.encoder_mode;
+        out->motor_invert = legacy.motor_invert;
+        out->encoder_invert = legacy.encoder_invert;
+        out->pullup_enabled = legacy.pullup_enabled;
+        out->reserved0 = 0U;
+        out->reserved1 = 0U;
+        out->pwm_freq_hz = legacy.pwm_freq_hz;
+        out->counts_per_motor_rev = legacy.counts_per_motor_rev;
+        out->gear_ratio = (float)legacy.gear_ratio;
+        out->rpm_max = legacy.rpm_max;
+        memcpy(out->notes, legacy.notes, sizeof(out->notes));
+        out->notes[sizeof(out->notes) - 1U] = '\0';
+        return ESP_OK;
+    }
+
+    nvs_close(h);
+    return ESP_ERR_INVALID_SIZE;
 }
 
 esp_err_t traction_storage_save_controller_cfg(const traction_controller_cfg_store_t *in)
@@ -337,7 +398,11 @@ esp_err_t traction_storage_save_controller_cfg(const traction_controller_cfg_sto
         return err;
     }
 
-    err = nvs_set_blob(h, KEY_CONTROLLER_CFG, in, sizeof(*in));
+    traction_controller_cfg_store_t st = *in;
+    st.version = TRACTION_CONTROLLER_CFG_STORE_VERSION;
+    st.notes[sizeof(st.notes) - 1U] = '\0';
+
+    err = nvs_set_blob(h, KEY_CONTROLLER_CFG, &st, sizeof(st));
     if (err == ESP_OK) {
         err = nvs_commit(h);
     }

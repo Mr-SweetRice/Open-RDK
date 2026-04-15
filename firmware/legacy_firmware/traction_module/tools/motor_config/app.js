@@ -10,15 +10,6 @@
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const FRAME_SYNC_BYTES = [0xAA, 0x55, 0xAA, 0x55];
-  const FRAME_MAX_LEN = 200;
-  const FRAME_RX_MAX_BYTES = 4096;
-  const FRAME_MSG_TYPE_CODE = {
-    CMD: 0x01,
-    TEST: 0x02,
-    TELEMETRY: 0x03,
-    TRACTION_OUT: 0x04,
-  };
 
   const configDefaults = {
     bridgeMode: "TB6612",
@@ -28,7 +19,7 @@
     rpmMax: 199.89,
     pwmFreq: 20000,
     countsPerRev: 44,
-    gearRatio: 45,
+    gearRatio: 45.0,
     pullupMode: "Enabled",
     notes: "Bench profile / default firmware values",
   };
@@ -83,8 +74,6 @@
   let reader = null;
   let writer = null;
   let buffer = "";
-  let frameSeq = 0;
-  let frameRxBytes = [];
   let closingSerial = false;
   let connectingSerial = false;
   let curveRun = false;
@@ -95,106 +84,6 @@
 
   function saveStatus(text) {
     configStatus.textContent = text;
-  }
-
-  function nextFrameSeq() {
-    frameSeq = (frameSeq + 1) & 0x00ffffff;
-    return frameSeq;
-  }
-
-  function messageTypeForCommand(text) {
-    const upper = String(text || "").trim().toUpperCase();
-    if (upper.startsWith("SET OUT") || upper.startsWith("CLR OUT")) {
-      return "TRACTION_OUT";
-    }
-    return "CMD";
-  }
-
-  function appendFrameRxChunk(value) {
-    if (!value || !value.length) return;
-    for (const b of value) {
-      frameRxBytes.push(b & 0xff);
-    }
-    if (frameRxBytes.length > FRAME_RX_MAX_BYTES) {
-      frameRxBytes.splice(0, frameRxBytes.length - FRAME_RX_MAX_BYTES);
-    }
-  }
-
-  function trimFrameRxToSyncPrefix() {
-    if (!frameRxBytes.length) return;
-    let keep = 0;
-    const maxPrefix = Math.min(frameRxBytes.length, FRAME_SYNC_BYTES.length - 1);
-    for (let prefixLen = maxPrefix; prefixLen > 0; prefixLen--) {
-      let matches = true;
-      for (let i = 0; i < prefixLen; i++) {
-        if (frameRxBytes[frameRxBytes.length - prefixLen + i] !== FRAME_SYNC_BYTES[i]) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) {
-        keep = prefixLen;
-        break;
-      }
-    }
-    if (keep > 0) {
-      frameRxBytes.splice(0, frameRxBytes.length - keep);
-    } else {
-      frameRxBytes = [];
-    }
-  }
-
-  function findFrameSyncStart() {
-    const maxStart = frameRxBytes.length - FRAME_SYNC_BYTES.length;
-    for (let i = 0; i <= maxStart; i++) {
-      let ok = true;
-      for (let j = 0; j < FRAME_SYNC_BYTES.length; j++) {
-        if (frameRxBytes[i + j] !== FRAME_SYNC_BYTES[j]) {
-          ok = false;
-          break;
-        }
-      }
-      if (ok) return i;
-    }
-    return -1;
-  }
-
-  function consumeFramedMessages(onMessageText) {
-    while (true) {
-      const syncStart = findFrameSyncStart();
-      if (syncStart < 0) {
-        trimFrameRxToSyncPrefix();
-        return;
-      }
-      if (syncStart > 0) {
-        frameRxBytes.splice(0, syncStart);
-      }
-
-      const base = FRAME_SYNC_BYTES.length;
-      if (frameRxBytes.length < base + 1) {
-        return;
-      }
-
-      const msgLen = frameRxBytes[base];
-      if (msgLen <= 0 || msgLen > FRAME_MAX_LEN) {
-        frameRxBytes.splice(0, 1);
-        continue;
-      }
-
-      const frameLen = base + 1 + msgLen + 1 + 3;
-      if (frameRxBytes.length < frameLen) {
-        return;
-      }
-
-      const frame = frameRxBytes.splice(0, frameLen);
-      const payloadStart = base + 1;
-      const payloadEnd = payloadStart + msgLen;
-      const payload = frame.slice(payloadStart, payloadEnd);
-      const text = decoder.decode(Uint8Array.from(payload)).trim();
-      if (text) {
-        onMessageText(text);
-      }
-    }
   }
 
   function setSerialStatus(text) {
@@ -226,6 +115,12 @@
     return 0;
   }
 
+  function parseDecimalInput(value, fallback = 0) {
+    const normalized = String(value ?? "").trim().replace(",", ".");
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   function collectConfig() {
     return {
       bridgeMode: bridgeMode.value,
@@ -235,7 +130,7 @@
       rpmMax: Number(rpmMax.value) || 0,
       pwmFreq: Number(pwmFreq.value) || 0,
       countsPerRev: Number(countsPerRev.value) || 0,
-      gearRatio: Number(gearRatio.value) || 0,
+      gearRatio: parseDecimalInput(gearRatio.value, 0),
       pullupMode: pullupMode.value,
       notes: notes.value.trim(),
     };
@@ -249,7 +144,7 @@
     rpmMax.value = Number(cfg.rpmMax || 0).toFixed(2);
     pwmFreq.value = Number(cfg.pwmFreq || 0);
     countsPerRev.value = Number(cfg.countsPerRev || 0);
-    gearRatio.value = Number(cfg.gearRatio || 0);
+    gearRatio.value = parseDecimalInput(cfg.gearRatio, 0).toFixed(3);
     pullupMode.value = cfg.pullupMode;
     notes.value = cfg.notes || "";
     syncConfigTable();
@@ -262,7 +157,7 @@
     cfgRpmValue.textContent = cfg.rpmMax.toFixed(2);
     cfgPwmValue.textContent = `${cfg.pwmFreq} Hz`;
     cfgCountsValue.textContent = String(cfg.countsPerRev);
-    cfgGearValue.textContent = String(cfg.gearRatio);
+    cfgGearValue.textContent = parseDecimalInput(cfg.gearRatio, 0).toFixed(3);
   }
 
   function normalizeCurveRows(rows) {
@@ -331,27 +226,7 @@
 
   function sendLine(text) {
     if (!writer) return;
-    const payloadText = String(text || "").trim();
-    if (!payloadText) return;
-    const rawPayload = encoder.encode(payloadText);
-    const payload = rawPayload.length > FRAME_MAX_LEN ? rawPayload.slice(0, FRAME_MAX_LEN) : rawPayload;
-    const msgTypeName = messageTypeForCommand(payloadText);
-    const msgTypeCode = FRAME_MSG_TYPE_CODE[msgTypeName] || FRAME_MSG_TYPE_CODE.CMD;
-    const seq = nextFrameSeq();
-
-    const frameLen = FRAME_SYNC_BYTES.length + 1 + payload.length + 1 + 3;
-    const frame = new Uint8Array(frameLen);
-    let i = 0;
-    for (const b of FRAME_SYNC_BYTES) frame[i++] = b;
-    frame[i++] = payload.length & 0xff;
-    frame.set(payload, i);
-    i += payload.length;
-    frame[i++] = msgTypeCode & 0xff;
-    frame[i++] = (seq >> 16) & 0xff;
-    frame[i++] = (seq >> 8) & 0xff;
-    frame[i++] = seq & 0xff;
-
-    writer.write(frame);
+    writer.write(encoder.encode(text + "\n"));
   }
 
   function rejectPendingCurve(message) {
@@ -461,7 +336,7 @@
       pullupMode: Number(parts[5]) ? "Enabled" : "Disabled",
       pwmFreq: Number(parts[6]) || 0,
       countsPerRev: Number(parts[7]) || 0,
-      gearRatio: Number(parts[8]) || 0,
+      gearRatio: parseDecimalInput(parts[8], 0),
       rpmMax: Number(parts[9]) || 0,
       notes: notes.value.trim(),
     };
@@ -528,8 +403,13 @@
       while (reader) {
         const { value, done } = await reader.read();
         if (done) break;
-        appendFrameRxChunk(value);
-        consumeFramedMessages((line) => handleLine(line));
+        buffer += decoder.decode(value);
+        let idx;
+        while ((idx = buffer.search(/[\r\n]/)) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (line) handleLine(line);
+        }
       }
     } catch (err) {
       if (!closingSerial) {
@@ -565,7 +445,6 @@
       }
     } finally {
       buffer = "";
-      frameRxBytes = [];
       closingSerial = false;
       connectBtn.textContent = "Connect Controller";
       setSerialStatus("Controller disconnected.");
@@ -632,7 +511,7 @@
       `SET CFG PULLUP ${cfg.pullupMode === "Enabled" ? 1 : 0}`,
       `SET CFG PWM_FREQ ${Math.max(1, Math.round(cfg.pwmFreq))}`,
       `SET CFG COUNTS_PER_REV ${Math.max(1, Math.round(cfg.countsPerRev))}`,
-      `SET CFG GEAR_RATIO ${Math.max(1, Math.round(cfg.gearRatio))}`,
+      `SET CFG GEAR_RATIO ${Math.max(0.001, cfg.gearRatio).toFixed(3)}`,
       `SET CFG RPM_MAX ${Math.max(0, cfg.rpmMax).toFixed(2)}`,
       `SET CFG NOTES ${cfg.notes}`,
     ];

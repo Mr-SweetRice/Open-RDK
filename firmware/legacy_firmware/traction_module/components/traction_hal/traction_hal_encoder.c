@@ -106,10 +106,10 @@ esp_err_t traction_encoder_set_runtime_config(bool pullup,
                                               bool invert_direction,
                                               traction_encoder_mode_t mode,
                                               int32_t counts_per_motor_rev,
-                                              int32_t gear_ratio)
+                                              float gear_ratio)
 {
     if (!s_inited) return ESP_ERR_INVALID_STATE;
-    if (counts_per_motor_rev <= 0 || gear_ratio <= 0) return ESP_ERR_INVALID_ARG;
+    if (counts_per_motor_rev <= 0 || gear_ratio <= 0.0f) return ESP_ERR_INVALID_ARG;
 
     gpio_pull_mode_t pull_mode = pullup ? GPIO_PULLUP_ONLY : GPIO_FLOATING;
     esp_err_t err = gpio_set_pull_mode(s_enc_cfg.pin_a, pull_mode);
@@ -174,8 +174,7 @@ int32_t traction_encoder_counts_per_motor_rev(void)
     return s_enc_cfg.counts_per_motor_rev;
 }
 
-int32_t traction_encoder_counts_per_output_rev(void)
+float traction_encoder_counts_per_output_rev(void)
 {
-    // Ex.: 44 * 45 = 1980
-    return s_enc_cfg.counts_per_motor_rev * s_enc_cfg.gear_ratio;
+    return (float)s_enc_cfg.counts_per_motor_rev * s_enc_cfg.gear_ratio;
 }

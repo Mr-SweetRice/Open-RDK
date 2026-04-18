@@ -10,7 +10,8 @@ RETRY_DELAY_SEC = 2.0
 # 0x01 = SOH, 0x06 = ACK, 0x04 = EOT (module query), 0x05 = ENQ (module info prefix).
 FRAME_SYNC_BYTES = b"\xAA\x55\xAA\x55"
 HOST_MODULE_ID = 0x00
-TEST_MODULE_ID = 0x11
+TRACTION_MODULE_ID = 0x11
+TEST_MODULE_ID = 0x12
 HELLO_MESSAGE_BYTES = b"\x01"
 HELLO_ACK_BYTES = b"\x06"
 MODULE_QUERY_MESSAGE_BYTES = b"\x04"
@@ -143,6 +144,7 @@ HOST_TIMESTAMP_FORMAT = "%H:%M:%S"
 # Module type shown in DB when firmware does not identify itself.
 DEFAULT_MODULE_TYPE = "NOT-RDK-MODULE"
 MODULE_ID_TO_TYPE = {
+    TRACTION_MODULE_ID: "traction_module",
     TEST_MODULE_ID: "test_module",
 }
 

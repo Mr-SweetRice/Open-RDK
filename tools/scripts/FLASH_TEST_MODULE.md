@@ -1,6 +1,6 @@
-# Flash Runbook (ESP32-C3 Test Module)
+# Flash Runbook (ESP32-C3 Line Sensor Module)
 
-This is the reproducible sequence used to flash `firmware/esp/modules/test_module` on an ESP32-C3 from this repo.
+This is the reproducible sequence used to flash `firmware/esp/modules/line_sensor_module` on an ESP32-C3 from this repo.
 
 ## 1) Confirm device port
 
@@ -30,14 +30,14 @@ docker run --rm --privileged --network=host \
   bash -lc 'source /opt/esp/idf/export.sh >/dev/null && idf.py --version'
 ```
 
-## 4) Flash test firmware (ESP32-C3)
+## 4) Flash line sensor firmware (ESP32-C3)
 
 ```bash
 docker run --rm --privileged --network=host \
   -v /dev:/dev -v "$PWD":/work -w /work \
   rdk-idf-dev:latest \
   bash -lc 'source /opt/esp/idf/export.sh >/dev/null && \
-    bash tools/scripts/flash.sh firmware/esp/modules/test_module /dev/ttyACM0'
+    bash tools/scripts/flash.sh firmware/esp/modules/line_sensor_module /dev/ttyACM0'
 ```
 
 Successful flash indicator from output:
@@ -53,7 +53,7 @@ docker run --rm -it --privileged --network=host \
   -v /dev:/dev -v "$PWD":/work -w /work \
   rdk-idf-dev:latest \
   bash -lc 'source /opt/esp/idf/export.sh >/dev/null && \
-    cd firmware/esp/modules/test_module && idf.py -p /dev/ttyACM0 monitor'
+    cd firmware/esp/modules/line_sensor_module && idf.py -p /dev/ttyACM0 monitor'
 ```
 
 Exit monitor with `Ctrl+]`.

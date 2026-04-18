@@ -76,7 +76,7 @@ Host source files:
 ### 2.1 Module IDs used in host
 
 - `0x11` -> `traction_module`
-- `0x12` -> `test_module`
+- `0x12` -> `line_sensor_module`
 
 Note: module-name query (`0x04`) is the primary identity signal; module-id mapping is fallback.
 
@@ -183,13 +183,9 @@ Expected firmware ACK strings:
   - `TELEMETRY_STOP`
 - Streams periodic telemetry payloads as text in framed messages.
 
-## 3.2 Line-sensor-derived firmware
+## 3.2 `line_sensor_module` (`firmware/esp/modules/line_sensor_module`)
 
-Applies to:
-- `line_sensor_module` command set (line protocol)
-- `test_module` command set (same command set; adapted to framed host protocol)
-
-### `test_module` framed common responses
+### Framed common responses
 - `TEST` message type: `I RECIEVED TEST`
 - Unknown `CMD`: `I RECIEVED CMD`
 - `TRACTION_OUT` accepted/valid: `OK`
@@ -238,7 +234,7 @@ Current placeholder implementation does not define protocol command handlers yet
 - `traction_module`:
   - line fallback parser is compile-time gated (`TRACTION_COMM_ENABLE_LINE_FALLBACK`)
   - default is `OFF`
-- `test_module`:
+- `line_sensor_module`:
   - line fallback parser is compile-time gated (`LS_COMM_ENABLE_LINE_FALLBACK`)
   - default is `OFF`
 

@@ -14,8 +14,8 @@
 #define LINE_SENSOR_SAMPLE_PERIOD_MS 20U
 #define LINE_SENSOR_DEFAULT_CAL_TIME_MS 3000U
 #define LINE_SENSOR_DEFAULT_NAME "line-sensor-esp"
-#define LINE_SENSOR_MODULE_TYPE "test_module"
-#define LINE_SENSOR_FIRMWARE_MODULE "test_module"
+#define LINE_SENSOR_MODULE_TYPE "line_sensor_module"
+#define LINE_SENSOR_FIRMWARE_MODULE "line_sensor_module"
 #define LINE_SENSOR_MODULE_ID 0x12U
 
 static const char *TAG = "line_sensor_main";
@@ -320,5 +320,5 @@ void app_main(void)
     xTaskCreate(ls_comm_task, "ls_comm", 4096, NULL, 5, NULL);
     xTaskCreate(line_sensor_task, "ls_task", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "test_module line sensor firmware ready");
+    ESP_LOGI(TAG, "line_sensor_module ready");
 }

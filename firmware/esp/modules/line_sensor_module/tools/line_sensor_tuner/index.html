@@ -406,16 +406,29 @@
     let port = null;
     let reader = null;
     let writer = null;
-    let buffer = "";
+    let frameSeq = 0;
+    let frameRxBytes = [];
     let closingSerial = false;
-    let telemTimer = null;
+    let telemSyncTimer = null;
     let lastRxAt = 0;
     const logLines = [];
     const RX_TIMEOUT_MS = 3000;
-    const TELEM_INTERVAL_MS = 80;
+    const TELEMETRY_SYNC_INTERVAL_MS = 2000;
     const MAX_LOG_LINES = 300;
     const MAX_LAG_SAMPLES = 120;
     const lagSamples = [];
+
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const FRAME_SYNC_BYTES = [0xAA, 0x55, 0xAA, 0x55];
+    const FRAME_MAX_LEN = 200;
+    const FRAME_RX_MAX_BYTES = 4096;
+    const FRAME_MSG_TYPE_CODE = {
+      CMD: 0x01,
+      TEST: 0x02,
+      TELEMETRY: 0x03,
+      TRACTION_OUT: 0x04,
+    };
 
     function appendLog(line) {
       const d = new Date();
@@ -440,9 +453,124 @@
       connectBtn.textContent = connected ? "Disconnect" : "Connect";
     }
 
-    function sendLine(line) {
+    function nextFrameSeq() {
+      frameSeq = (frameSeq + 1) & 0x00ffffff;
+      return frameSeq;
+    }
+
+    function appendFrameRxChunk(value) {
+      if (!value || !value.length) return;
+      for (const b of value) {
+        frameRxBytes.push(b & 0xff);
+      }
+      if (frameRxBytes.length > FRAME_RX_MAX_BYTES) {
+        frameRxBytes.splice(0, frameRxBytes.length - FRAME_RX_MAX_BYTES);
+      }
+    }
+
+    function trimFrameRxToSyncPrefix() {
+      if (!frameRxBytes.length) return;
+      let keep = 0;
+      const maxPrefix = Math.min(frameRxBytes.length, FRAME_SYNC_BYTES.length - 1);
+      for (let prefixLen = maxPrefix; prefixLen > 0; prefixLen--) {
+        let matches = true;
+        for (let i = 0; i < prefixLen; i++) {
+          if (frameRxBytes[frameRxBytes.length - prefixLen + i] !== FRAME_SYNC_BYTES[i]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) {
+          keep = prefixLen;
+          break;
+        }
+      }
+      if (keep > 0) {
+        frameRxBytes.splice(0, frameRxBytes.length - keep);
+      } else {
+        frameRxBytes = [];
+      }
+    }
+
+    function findFrameSyncStart() {
+      const maxStart = frameRxBytes.length - FRAME_SYNC_BYTES.length;
+      for (let i = 0; i <= maxStart; i++) {
+        let ok = true;
+        for (let j = 0; j < FRAME_SYNC_BYTES.length; j++) {
+          if (frameRxBytes[i + j] !== FRAME_SYNC_BYTES[j]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return i;
+      }
+      return -1;
+    }
+
+    function consumeFramedMessages(onMessageText) {
+      while (true) {
+        const syncStart = findFrameSyncStart();
+        if (syncStart < 0) {
+          trimFrameRxToSyncPrefix();
+          return;
+        }
+        if (syncStart > 0) {
+          frameRxBytes.splice(0, syncStart);
+        }
+
+        const base = FRAME_SYNC_BYTES.length;
+        if (frameRxBytes.length < base + 1) {
+          return;
+        }
+
+        const msgLen = frameRxBytes[base];
+        if (msgLen <= 0 || msgLen > FRAME_MAX_LEN) {
+          frameRxBytes.splice(0, 1);
+          continue;
+        }
+
+        const frameLen = base + 1 + msgLen + 1 + 3;
+        if (frameRxBytes.length < frameLen) {
+          return;
+        }
+
+        const frame = frameRxBytes.splice(0, frameLen);
+        const payloadStart = base + 1;
+        const payloadEnd = payloadStart + msgLen;
+        const payload = frame.slice(payloadStart, payloadEnd);
+        const text = decoder.decode(Uint8Array.from(payload)).trim();
+        if (text) {
+          onMessageText(text);
+        }
+      }
+    }
+
+    function sendLine(line, messageType = "CMD", logTx = true) {
       if (!writer) return;
-      writer.write(new TextEncoder().encode(line + "\n"));
+
+      const payloadText = String(line || "").trim();
+      if (!payloadText) return;
+
+      const rawPayload = encoder.encode(payloadText);
+      const payload = rawPayload.length > FRAME_MAX_LEN ? rawPayload.slice(0, FRAME_MAX_LEN) : rawPayload;
+      const typeCode = FRAME_MSG_TYPE_CODE[messageType] || FRAME_MSG_TYPE_CODE.CMD;
+      const seq = nextFrameSeq();
+      const frameLen = FRAME_SYNC_BYTES.length + 1 + payload.length + 1 + 3;
+      const frame = new Uint8Array(frameLen);
+      let i = 0;
+      for (const b of FRAME_SYNC_BYTES) frame[i++] = b;
+      frame[i++] = payload.length & 0xff;
+      frame.set(payload, i);
+      i += payload.length;
+      frame[i++] = typeCode & 0xff;
+      frame[i++] = (seq >> 16) & 0xff;
+      frame[i++] = (seq >> 8) & 0xff;
+      frame[i++] = seq & 0xff;
+      writer.write(frame);
+
+      if (logTx) {
+        appendLog(`>> [${messageType}] ${payloadText}`);
+      }
     }
 
     function setTrackLabel(trackType) {
@@ -551,6 +679,11 @@
       if (!line.startsWith("LS,")) appendLog("<< " + line);
       if (line === "OK") return setCmdStatus("OK", true);
       if (line === "ERR") return setCmdStatus("ERR", false);
+      if (line === "TELEMETRY STARTED") return setCmdStatus("Telemetry started", true);
+      if (line === "TELEMETRY STOPPED") return setCmdStatus("Telemetry stopped", true);
+      if (line === "TELEMETRY SYNCED") return;
+      if (line === "I RECIEVED CMD") return setCmdStatus(line, true);
+      if (line === "I RECIEVED TEST") return setCmdStatus(line, true);
       if (line.startsWith("LS,")) return renderSensorState(line.split(","));
       if (line.startsWith("CFG,")) return renderConfig(line.split(","));
       if (line.startsWith("CAL,")) return renderCalibration(line.split(","));
@@ -562,15 +695,11 @@
         while (reader) {
           const { value, done } = await reader.read();
           if (done) break;
-          const chunk = new TextDecoder().decode(value);
-          if (chunk && chunk.length) lastRxAt = Date.now();
-          buffer += chunk;
-          let idx;
-          while ((idx = buffer.search(/[\r\n]/)) >= 0) {
-            const line = buffer.slice(0, idx).trim();
-            buffer = buffer.slice(idx + 1);
-            if (line.length) handleLine(line);
+          if (value && value.length) {
+            lastRxAt = Date.now();
           }
+          appendFrameRxChunk(value);
+          consumeFramedMessages((line) => handleLine(line));
         }
       } catch (err) {
         if (!closingSerial) appendLog("RX ERROR: " + (err && err.message ? err.message : err));
@@ -579,18 +708,23 @@
       }
     }
 
-    function startPolling() {
-      if (!writer || telemTimer) return;
-      sendLine("GET DATA");
-      telemTimer = setInterval(() => {
-        if (writer) sendLine("GET DATA");
-      }, TELEM_INTERVAL_MS);
+    function startTelemetry() {
+      if (!writer || telemSyncTimer) return;
+      sendLine(`TELEMETRY_START:${Date.now()}`, "TELEMETRY");
+      telemSyncTimer = setInterval(() => {
+        if (writer) {
+          sendLine(`TELEMETRY_SYNC:${Date.now()}`, "TELEMETRY", false);
+        }
+      }, TELEMETRY_SYNC_INTERVAL_MS);
     }
 
-    function stopPolling() {
-      if (telemTimer) {
-        clearInterval(telemTimer);
-        telemTimer = null;
+    function stopTelemetry(sendStop = true) {
+      if (telemSyncTimer) {
+        clearInterval(telemSyncTimer);
+        telemSyncTimer = null;
+      }
+      if (sendStop && writer) {
+        sendLine("TELEMETRY_STOP", "TELEMETRY");
       }
     }
 
@@ -598,7 +732,8 @@
       if (closingSerial) return;
       closingSerial = true;
       try {
-        stopPolling();
+        stopTelemetry(true);
+        frameRxBytes = [];
         if (reader) {
           try { await reader.cancel(); } catch (_err) {}
           try { reader.releaseLock(); } catch (_err) {}
@@ -634,10 +769,10 @@
         appendLog("PORT: connected");
         lastRxAt = Date.now();
         void readLoop();
-        sendLine("GET INFO");
-        sendLine("GET CFG");
-        sendLine("GET CAL");
-        startPolling();
+        sendLine("GET INFO", "CMD");
+        sendLine("GET CFG", "CMD");
+        sendLine("GET CAL", "CMD");
+        startTelemetry();
       } catch (err) {
         appendLog("ERROR: " + (err && err.message ? err.message : err));
         await closeSerial(false);
@@ -649,21 +784,21 @@
       else void connect();
     });
     refreshBtn.addEventListener("click", () => {
-      sendLine("GET INFO");
-      sendLine("GET CFG");
-      sendLine("GET CAL");
-      sendLine("GET DATA");
+      sendLine("GET INFO", "CMD");
+      sendLine("GET CFG", "CMD");
+      sendLine("GET CAL", "CMD");
+      sendLine("GET DATA", "CMD");
     });
     startCalBtn.addEventListener("click", () => {
-      sendLine("START CAL");
+      sendLine("START CAL", "CMD");
       setCmdStatus("Calibration started", true);
     });
     stopCalBtn.addEventListener("click", () => {
-      sendLine("STOP CAL");
+      sendLine("STOP CAL", "CMD");
       setCmdStatus("Calibration stopped", true);
     });
-    saveCfgBtn.addEventListener("click", () => sendLine("SAVE CFG"));
-    saveCalBtn.addEventListener("click", () => sendLine("SAVE CAL"));
+    saveCfgBtn.addEventListener("click", () => sendLine("SAVE CFG", "CMD"));
+    saveCalBtn.addEventListener("click", () => sendLine("SAVE CAL", "CMD"));
     clearLogBtn.addEventListener("click", () => {
       logLines.length = 0;
       logEl.textContent = "";
@@ -671,20 +806,20 @@
     toggleTrackBtn.addEventListener("click", () => {
       trackSelect.value = trackSelect.value === "1" ? "0" : "1";
       setTrackLabel(trackSelect.value);
-      sendLine(`SET CFG TRACK ${trackSelect.value}`);
+      sendLine(`SET CFG TRACK ${trackSelect.value}`, "CMD");
     });
     trackSelect.addEventListener("change", () => {
       setTrackLabel(trackSelect.value);
-      sendLine(`SET CFG TRACK ${trackSelect.value}`);
+      sendLine(`SET CFG TRACK ${trackSelect.value}`, "CMD");
     });
     sensorNameInput.addEventListener("change", () => {
       const safeName = (sensorNameInput.value || "").trim() || "line-sensor-esp";
       setSensorName(safeName);
-      sendLine(`SET CFG NAME ${safeName}`);
+      sendLine(`SET CFG NAME ${safeName}`, "CMD");
     });
-    digitalThInput.addEventListener("change", () => sendLine(`SET CFG DIGITAL_TH ${parseFloat(digitalThInput.value).toFixed(2)}`));
-    detectThInput.addEventListener("change", () => sendLine(`SET CFG DETECT_TH ${parseFloat(detectThInput.value).toFixed(2)}`));
-    calTimeInput.addEventListener("change", () => sendLine(`SET CFG CAL_TIME_MS ${parseInt(calTimeInput.value, 10)}`));
+    digitalThInput.addEventListener("change", () => sendLine(`SET CFG DIGITAL_TH ${parseFloat(digitalThInput.value).toFixed(2)}`, "CMD"));
+    detectThInput.addEventListener("change", () => sendLine(`SET CFG DETECT_TH ${parseFloat(detectThInput.value).toFixed(2)}`, "CMD"));
+    calTimeInput.addEventListener("change", () => sendLine(`SET CFG CAL_TIME_MS ${parseInt(calTimeInput.value, 10)}`, "CMD"));
 
     setInterval(() => {
       if (port && Date.now() - lastRxAt > RX_TIMEOUT_MS) {

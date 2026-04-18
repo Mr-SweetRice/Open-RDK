@@ -320,5 +320,5 @@ void app_main(void)
     xTaskCreate(ls_comm_task, "ls_comm", 4096, NULL, 5, NULL);
     xTaskCreate(line_sensor_task, "ls_task", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "line_sensor_module ready");
+    ESP_LOGI(TAG, "line_sensor_module line sensor firmware ready");
 }

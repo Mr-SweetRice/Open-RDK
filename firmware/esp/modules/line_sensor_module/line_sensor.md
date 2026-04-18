@@ -1,6 +1,6 @@
 # Line Sensor Migration Documentation
 
-This document is the required root-level documentation for all additions in `test_module` related to the line-sensor migration.
+This document is the required root-level documentation for all additions in `line_sensor_module` related to the line-sensor migration.
 From this point onward, every firmware addition/update must be recorded here.
 
 ## Mandatory Standards (obligatory instructions)
@@ -13,11 +13,11 @@ From this point onward, every firmware addition/update must be recorded here.
 
 ## Current Baseline
 
-- Module path: `firmware/esp/modules/test_module`
-- Firmware source migrated from: `firmware/esp/modules/line_sensor_module`
+- Module path: `firmware/esp/modules/line_sensor_module`
+- Firmware source migrated from: `firmware/legacy_firmware/line_sensor_module`
 - Runtime identity reported by firmware:
-  - module name: `test_module`
-  - module type: `test_module`
+  - module name: `line_sensor_module`
+  - module type: `line_sensor_module`
   - module id: `0x12`
 - Host protocol compatibility:
   - framed protocol enabled (default path)
@@ -58,10 +58,13 @@ From this point onward, every firmware addition/update must be recorded here.
 ## Change Log
 
 ### 2026-04-18
-- Copied line-sensor firmware base into `test_module`.
-- Updated module identity in firmware code from `line_sensor_module` to `test_module`.
+- Copied line-sensor firmware base into the migration module workspace.
+- Updated module communication to framed host protocol compatibility.
 - Added framed protocol transport and host-compatible message type handling in `components/ls_comm/ls_comm.c`.
 - Kept legacy line command path behind compile-time fallback switch.
 - Set line fallback default to `OFF` to match framed-first behavior used by host and traction module.
 - Added this `line_sensor.md` documentation and checklist.
 - Updated `tools/line_sensor_tuner/index.html` to use framed serial comms (`AA55AA55 + len + payload + type + seq24`) with `CMD` and `TELEMETRY` message types, including telemetry start/sync/stop flow.
+- Promoted the framed implementation to `firmware/esp/modules/line_sensor_module`.
+- Moved the previous line-sensor tree to `firmware/legacy_firmware/line_sensor_module`.
+- Updated firmware identity strings and module-info response to `line_sensor_module`.

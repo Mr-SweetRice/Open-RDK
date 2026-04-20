@@ -58,6 +58,7 @@ typedef struct {
 typedef struct color_sensor_ctx_t *color_sensor_handle_t;
 
 esp_err_t color_sensor_init(const color_sensor_cfg_t *cfg, color_sensor_handle_t *out_handle);
+esp_err_t color_sensor_set_led_state(color_sensor_handle_t handle, bool enabled);
 esp_err_t color_sensor_set_exposure(color_sensor_handle_t handle, uint16_t gain, uint16_t integration_ms);
 esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
                                    uint8_t led_mode,

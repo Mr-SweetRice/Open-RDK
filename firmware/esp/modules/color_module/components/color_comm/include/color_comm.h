@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define COLOR_COMM_DEFAULT_LINK_TIMEOUT_MS 1200U
+#define COLOR_COMM_DEFAULT_LINK_TIMEOUT_MS 5000U
 #define COLOR_COMM_SENSOR_NAME_MAX_LEN 32U
 #define COLOR_COMM_TEXT_MAX_LEN 32U
 #define COLOR_COMM_PATCH_NAME_MAX_LEN 16U
@@ -117,6 +117,7 @@ typedef struct {
 typedef struct {
     void *ctx;
     uint32_t link_timeout_ms;
+    void (*on_link_active)(void *ctx);
     void (*on_link_timeout)(void *ctx);
     bool (*get_sensor_state)(void *ctx, color_comm_sensor_state_t *out_state);
     bool (*get_cfg_state)(void *ctx, color_comm_cfg_state_t *out_state);

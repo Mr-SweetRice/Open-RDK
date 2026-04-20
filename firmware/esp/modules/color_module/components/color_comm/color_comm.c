@@ -60,6 +60,27 @@ static const uint8_t s_frame_sync[FRAME_SYNC_LEN] = {
     FRAME_SYNC_0, FRAME_SYNC_1, FRAME_SYNC_2, FRAME_SYNC_3
 };
 
+static void set_link_active_state(bool active)
+{
+    if (s_link_active == active) {
+        return;
+    }
+
+    s_link_active = active;
+    s_last_event_us = esp_timer_get_time();
+
+    if (active) {
+        if (s_cfg.on_link_active) {
+            s_cfg.on_link_active(s_cfg.ctx);
+        }
+        return;
+    }
+
+    if (s_cfg.on_link_timeout) {
+        s_cfg.on_link_timeout(s_cfg.ctx);
+    }
+}
+
 static int32_t scale_milli(float value, float min_value, float max_value)
 {
     float safe = value;
@@ -1112,9 +1133,8 @@ void color_comm_task(void *arg)
         }
         if (n > 0) {
             last_rx_us = esp_timer_get_time();
-            s_last_event_us = last_rx_us;
             s_last_link_check_us = last_rx_us;
-            s_link_active = true;
+            set_link_active_state(true);
             bool feed_line = true;
 
             if (collecting_framed) {
@@ -1171,9 +1191,8 @@ void color_comm_task(void *arg)
             n = uart_read_bytes(UART_NUM_0, &ch, 1, pdMS_TO_TICKS(20));
             if (n > 0) {
                 last_rx_us = esp_timer_get_time();
-                s_last_event_us = last_rx_us;
                 s_last_link_check_us = last_rx_us;
-                s_link_active = true;
+                set_link_active_state(true);
                 bool feed_line = true;
 
                 if (collecting_framed) {
@@ -1235,11 +1254,7 @@ void color_comm_task(void *arg)
             const int64_t now_us = esp_timer_get_time();
             s_last_link_check_us = now_us;
             if ((now_us - last_rx_us) > ((int64_t)s_cfg.link_timeout_ms * 1000LL)) {
-                s_link_active = false;
-                s_last_event_us = now_us;
-                if (s_cfg.on_link_timeout) {
-                    s_cfg.on_link_timeout(s_cfg.ctx);
-                }
+                set_link_active_state(false);
                 ESP_LOGW(TAG, "serial link timeout");
             }
         }

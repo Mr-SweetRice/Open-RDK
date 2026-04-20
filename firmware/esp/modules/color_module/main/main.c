@@ -75,6 +75,7 @@ typedef struct {
     color_proc_result_t result;
     color_proc_capture_t capture;
     bool selftest_ok;
+    bool link_active;
     char selftest_message[48];
     int64_t sample_started_us;
     int64_t sample_ready_us;
@@ -96,7 +97,7 @@ static void apply_default_cfg(color_storage_cfg_t *cfg)
     }
     memset(cfg, 0, sizeof(*cfg));
     cfg->version = COLOR_STORAGE_CFG_VERSION;
-    cfg->led_mode = COLOR_LED_MODE_AUTO;
+    cfg->led_mode = COLOR_LED_MODE_ON;
     cfg->gain_mode = COLOR_GAIN_MODE_AUTO;
     cfg->classifier = COLOR_CLASSIFIER_LAB;
     cfg->palette_mode = COLOR_PALETTE_MODE_8;
@@ -281,6 +282,41 @@ static bool apply_sensor_exposure(uint16_t gain, uint16_t integration_ms)
     return (color_sensor_set_exposure(s_app.sensor, gain, integration_ms) == ESP_OK);
 }
 
+static void refresh_indicator_led(void)
+{
+    bool enabled = false;
+
+    portENTER_CRITICAL(&s_app.mux);
+    enabled = s_app.link_active && (s_app.cfg.led_mode != COLOR_LED_MODE_OFF);
+    portEXIT_CRITICAL(&s_app.mux);
+
+    if (!s_app.sensor) {
+        return;
+    }
+
+    if (color_sensor_set_led_state(s_app.sensor, enabled) != ESP_OK) {
+        ESP_LOGW(TAG, "failed to update indicator led");
+    }
+}
+
+static void comm_on_link_active(void *ctx)
+{
+    (void)ctx;
+    portENTER_CRITICAL(&s_app.mux);
+    s_app.link_active = true;
+    portEXIT_CRITICAL(&s_app.mux);
+    refresh_indicator_led();
+}
+
+static void comm_on_link_timeout(void *ctx)
+{
+    (void)ctx;
+    portENTER_CRITICAL(&s_app.mux);
+    s_app.link_active = false;
+    portEXIT_CRITICAL(&s_app.mux);
+    refresh_indicator_led();
+}
+
 static bool comm_get_sensor_state(void *ctx, color_comm_sensor_state_t *out_state)
 {
     (void)ctx;
@@ -380,6 +416,7 @@ static bool comm_set_cfg_state(void *ctx, const color_comm_cfg_state_t *state)
     portENTER_CRITICAL(&s_app.mux);
     s_app.cfg = next_cfg;
     portEXIT_CRITICAL(&s_app.mux);
+    refresh_indicator_led();
     return true;
 }
 
@@ -402,6 +439,7 @@ static bool comm_reset_cfg(void *ctx)
     s_app.cfg = cfg;
     portEXIT_CRITICAL(&s_app.mux);
     (void)apply_sensor_exposure(cfg.gain, cfg.integration_ms);
+    refresh_indicator_led();
     return true;
 }
 
@@ -792,6 +830,7 @@ void app_main(void)
     color_storage_cfg_t stored_cfg = {0};
     if (color_storage_load_cfg(&stored_cfg) == ESP_OK) {
         sanitize_cfg(&stored_cfg);
+        stored_cfg.led_mode = COLOR_LED_MODE_ON;
         s_app.cfg = stored_cfg;
     }
 
@@ -813,10 +852,13 @@ void app_main(void)
 
     ESP_ERROR_CHECK(color_sensor_init(&sensor_cfg, &s_app.sensor));
     color_sensor_get_status(s_app.sensor, &s_app.sensor_status);
+    refresh_indicator_led();
 
     const color_comm_cfg_t comm_cfg = {
         .ctx = NULL,
         .link_timeout_ms = COLOR_COMM_DEFAULT_LINK_TIMEOUT_MS,
+        .on_link_active = comm_on_link_active,
+        .on_link_timeout = comm_on_link_timeout,
         .get_sensor_state = comm_get_sensor_state,
         .get_cfg_state = comm_get_cfg_state,
         .set_cfg_state = comm_set_cfg_state,

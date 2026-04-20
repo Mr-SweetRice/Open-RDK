@@ -134,6 +134,11 @@ static esp_err_t apply_led_state(color_sensor_handle_t handle, bool enabled)
     return err;
 }
 
+esp_err_t color_sensor_set_led_state(color_sensor_handle_t handle, bool enabled)
+{
+    return apply_led_state(handle, enabled);
+}
+
 static esp_err_t probe_and_configure(color_sensor_handle_t handle)
 {
     if (!handle) {
@@ -291,6 +296,7 @@ esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
     if (!handle || !out_sample) {
         return ESP_ERR_INVALID_ARG;
     }
+    (void)led_mode;
 
     memset(out_sample, 0, sizeof(*out_sample));
 
@@ -298,11 +304,13 @@ esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
     uint16_t integration_ms = 0U;
     uint16_t gain = 0U;
     uint8_t sensor_id = 0U;
+    bool led_on = false;
     portENTER_CRITICAL(&handle->mux);
     configured = handle->configured;
     integration_ms = handle->integration_ms;
     gain = handle->gain;
     sensor_id = handle->sensor_id;
+    led_on = handle->led_on;
     portEXIT_CRITICAL(&handle->mux);
 
     if (!configured) {
@@ -311,25 +319,13 @@ esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
         integration_ms = handle->integration_ms;
         gain = handle->gain;
         sensor_id = handle->sensor_id;
+        led_on = handle->led_on;
         portEXIT_CRITICAL(&handle->mux);
-    }
-
-    const bool want_led = (led_mode == 1U) || (led_mode == 2U);
-    if (want_led) {
-        ESP_RETURN_ON_ERROR(apply_led_state(handle, true), TAG, "led on failed");
-        if (led_mode == 2U) {
-            vTaskDelay(pdMS_TO_TICKS(2));
-        }
-    } else {
-        ESP_RETURN_ON_ERROR(apply_led_state(handle, false), TAG, "led off failed");
     }
 
     esp_err_t err = wait_for_sample_ready(handle, integration_ms);
     if (err != ESP_OK) {
         set_last_error(handle, "sample-timeout", false);
-        if (led_mode == 2U) {
-            apply_led_state(handle, false);
-        }
         return err;
     }
 
@@ -337,9 +333,6 @@ esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
     err = read_reg(handle, TCS3472_CDATAL_REG, raw_bytes, sizeof(raw_bytes));
     if (err != ESP_OK) {
         set_last_error(handle, "read-rgbc", false);
-        if (led_mode == 2U) {
-            apply_led_state(handle, false);
-        }
         return err;
     }
 
@@ -352,7 +345,7 @@ esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
                             (out_sample->g >= 65000U) ||
                             (out_sample->b >= 65000U);
     out_sample->sensor_ok = true;
-    out_sample->led_on = want_led;
+    out_sample->led_on = led_on;
     out_sample->sensor_id = sensor_id;
     out_sample->gain = gain;
     out_sample->integration_ms = integration_ms;
@@ -362,11 +355,6 @@ esp_err_t color_sensor_read_sample(color_sensor_handle_t handle,
     handle->sensor_ok = true;
     snprintf(handle->last_error, sizeof(handle->last_error), "ok");
     portEXIT_CRITICAL(&handle->mux);
-
-    if (led_mode == 2U) {
-        apply_led_state(handle, false);
-        out_sample->led_on = false;
-    }
     return ESP_OK;
 }
 

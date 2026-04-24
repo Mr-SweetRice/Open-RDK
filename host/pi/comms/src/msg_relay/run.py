@@ -17,8 +17,8 @@ from msg_relay.constants import (
     WEBVIEW_HOST,
     WEBVIEW_PORT,
 )
-from msg_relay.functions import run_with_retries, conex, configure_comms_log_path
-from msg_relay.webview import start_webview_server
+from msg_relay.functions import run_with_retries
+from msg_relay.runtime import RelayRuntime
 
 
 def _track_runpy_access_once():
@@ -80,28 +80,20 @@ def _resolve_comms_log_path(configured_path: str) -> str:
     return comms_log_path
 
 
-def _start_webview_thread(
-    db_path: str,
-    comms_log_path: str,
-    host: str,
-    port: int,
-):
-    def _worker():
-        start_webview_server(
-            db_path=db_path,
-            comms_log_path=comms_log_path,
-            host=host,
-            port=port,
-        )
-
-    thread = threading.Thread(
-        target=_worker,
-        name="msg-relay-webview",
-        daemon=True,
+def _parse_env_flag(name: str, default: bool = True) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on", "y"}:
+        return True
+    if value in {"0", "false", "no", "off", "n"}:
+        return False
+    print(
+        f"[config] invalid boolean for {name}='{raw}', using default={default}",
+        flush=True,
     )
-    thread.start()
-    print(f"[webview] running at http://{host}:{port}", flush=True)
-    return thread
+    return bool(default)
 
 
 def _trim_log_file_by_size(log_path: str, max_bytes: int):
@@ -190,19 +182,56 @@ def main():
     comms_log_path = _resolve_comms_log_path(
         os.getenv("MSG_RELAY_COMMS_LOG_PATH", DEFAULT_COMMS_LOG_PATH)
     )
-    configure_comms_log_path(comms_log_path)
     db_path = _resolve_db_path(
         os.getenv("ESPRESSIF_DEVICE_DB_PATH", DEFAULT_DEVICE_DB_PATH)
     )
     web_host = os.getenv("MSG_RELAY_WEB_HOST", WEBVIEW_HOST)
     web_port = int(os.getenv("MSG_RELAY_WEB_PORT", str(WEBVIEW_PORT)))
-    _start_webview_thread(
+    enable_webview = _parse_env_flag("MSG_RELAY_ENABLE_WEBVIEW", default=True)
+    enable_webview_updates = _parse_env_flag(
+        "MSG_RELAY_ENABLE_WEBVIEW_UPDATES",
+        default=True,
+    )
+
+    runtime = RelayRuntime(
         db_path=db_path,
         comms_log_path=comms_log_path,
-        host=web_host,
-        port=web_port,
+        enable_webview=enable_webview,
+        enable_webview_updates=enable_webview_updates,
+        webview_host=web_host,
+        webview_port=web_port,
+        auto_start=True,
     )
-    conex(db_path)
+    runtime.ensure_running()
+
+    print(
+        f"[runtime] running db={db_path} comms_log={comms_log_path} "
+        f"webview={'on' if enable_webview else 'off'} "
+        f"webview_updates={'on' if enable_webview_updates else 'off'}",
+        flush=True,
+    )
+    if enable_webview:
+        print(f"[webview] running at {runtime.webview_url}", flush=True)
+
+    try:
+        while True:
+            if not runtime.is_running:
+                err = runtime.last_error
+                if err is not None:
+                    raise RuntimeError(f"runtime stopped: {err}") from err
+                raise RuntimeError("runtime stopped")
+
+            if enable_webview and not runtime.is_webview_running:
+                err = runtime.last_webview_error
+                if err is not None:
+                    raise RuntimeError(f"webview stopped: {err}") from err
+                raise RuntimeError("webview stopped")
+
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        print("[runtime] shutdown requested", flush=True)
+    finally:
+        runtime.stop()
 
 
 if __name__ == "__main__":

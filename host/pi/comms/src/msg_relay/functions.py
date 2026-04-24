@@ -403,6 +403,27 @@ def set_device_traction_out_value(
         return dict(item)
 
 
+def get_device_snapshot(db_path: str, serial_number: str) -> dict | None:
+    if not serial_number:
+        return None
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+        return dict(item)
+
+
+def list_device_snapshots(db_path: str) -> list[dict]:
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        out: list[dict] = []
+        for item in data.get("devices", []):
+            if isinstance(item, dict):
+                out.append(dict(item))
+        return out
+
+
 def supported_message_types() -> list[dict]:
     items: list[dict] = []
     for key, spec in MESSAGE_TYPES.items():
@@ -1272,11 +1293,22 @@ def _wake_keepalive_monitor(serial_number: str | None):
         wake_event.set()
 
 
-def _enqueue_traction_out_request(serial_number: str, value: int) -> dict:
+def _enqueue_traction_out_request(
+    serial_number: str,
+    value: int | None = None,
+    command: str | None = None,
+) -> dict:
     global _TRACTION_OUT_REQUEST_ID
+    normalized_value = _normalize_traction_out_value(value) if value is not None else None
+    command_text = str(command or "").strip()
+    if not command_text:
+        command_text = _build_traction_out_payload(normalized_value).decode("utf-8")
+    if normalized_value is None and command_text.upper().startswith("CLR OUT"):
+        normalized_value = TRACTION_OUT_DEFAULT_VALUE
     request = {
         "serial_number": serial_number,
-        "value": _normalize_traction_out_value(value),
+        "value": normalized_value,
+        "command": command_text,
         "queued_at_monotonic_ns": time.perf_counter_ns(),
         "done_event": threading.Event(),
         "result": None,
@@ -1290,12 +1322,16 @@ def _enqueue_traction_out_request(serial_number: str, value: int) -> dict:
         _TRACTION_OUT_PENDING[serial_number] = request
 
     if isinstance(superseded, dict):
+        superseded_value = superseded.get("value")
+        if not isinstance(superseded_value, int):
+            superseded_value = TRACTION_OUT_DEFAULT_VALUE
         _complete_traction_out_request(
             superseded,
             {
                 "ok": False,
                 "serial_number": serial_number,
-                "traction_out_value": int(superseded.get("value", value)),
+                "traction_out_value": int(superseded_value),
+                "command": str(superseded.get("command") or ""),
                 "ack": "SUPERSEDED",
                 "error_kind": "traction_out_superseded",
                 "latency_ms": None,
@@ -1314,12 +1350,16 @@ def _cancel_traction_out_request(serial_number: str, error_kind: str):
     request = _pop_traction_out_request(serial_number)
     if not isinstance(request, dict):
         return
+    request_value = request.get("value")
+    if not isinstance(request_value, int):
+        request_value = TRACTION_OUT_DEFAULT_VALUE
     _complete_traction_out_request(
         request,
         {
             "ok": False,
             "serial_number": serial_number,
-            "traction_out_value": int(request.get("value", TRACTION_OUT_DEFAULT_VALUE)),
+            "traction_out_value": int(request_value),
+            "command": str(request.get("command") or ""),
             "ack": "CANCELLED",
             "error_kind": str(error_kind or "traction_out_cancelled"),
             "latency_ms": None,
@@ -1391,7 +1431,7 @@ def send_device_traction_out_once(
             "latency_ms": None,
         }
 
-    request = _enqueue_traction_out_request(serial_number, normalized_value)
+    request = _enqueue_traction_out_request(serial_number, value=normalized_value)
     done_event = request.get("done_event")
     wait_timeout = max(0.1, float(timeout_sec))
     if isinstance(done_event, threading.Event):
@@ -1415,6 +1455,105 @@ def send_device_traction_out_once(
     merged = dict(result)
     merged.setdefault("serial_number", serial_number)
     merged.setdefault("traction_out_value", int(normalized_value))
+    merged.setdefault("command", f"{TRACTION_OUT_COMMAND_PREFIX} {int(normalized_value)}")
+    return merged
+
+
+def send_device_traction_command_once(
+    db_path: str,
+    serial_number: str,
+    command: str,
+    timeout_sec: float = 1.5,
+) -> dict | None:
+    if not serial_number:
+        return None
+    command_text = str(command or "").strip()
+    if not command_text:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": "",
+            "ack": "EMPTY",
+            "error_kind": "traction_out_empty",
+            "latency_ms": None,
+        }
+
+    with _DB_LOCK:
+        data = _load_db(db_path)
+        item = _find_device_by_serial(data["devices"], serial_number)
+        if not item:
+            return None
+        status_value = str(item.get("status") or "")
+        message_type_value = _normalize_message_type_name(item.get("message_type"))
+        device_node_value = str(item.get("device_node") or "").strip()
+
+    if message_type_value != MESSAGE_TYPE_TRACTION_OUT:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "ack": "MODE REQUIRED",
+            "error_kind": "traction_out_mode_required",
+            "latency_ms": None,
+        }
+    if status_value != STATUS_ONLINE_CONNECTED:
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "ack": "OFFLINE",
+            "error_kind": "device_offline",
+            "latency_ms": None,
+        }
+
+    with _MONITOR_LOCK:
+        monitor_thread = _KEEPALIVE_THREADS.get(serial_number)
+    if (not monitor_thread or not monitor_thread.is_alive()) and device_node_value:
+        _start_keepalive_monitor(
+            serial_number=serial_number,
+            device_node=device_node_value,
+            db_path=db_path,
+        )
+        time.sleep(0.05)
+        with _MONITOR_LOCK:
+            monitor_thread = _KEEPALIVE_THREADS.get(serial_number)
+    if not monitor_thread or not monitor_thread.is_alive():
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "ack": "NO MONITOR",
+            "error_kind": "keepalive_not_running",
+            "latency_ms": None,
+        }
+
+    request = _enqueue_traction_out_request(
+        serial_number=serial_number,
+        command=command_text,
+    )
+    done_event = request.get("done_event")
+    wait_timeout = max(0.1, float(timeout_sec))
+    if isinstance(done_event, threading.Event):
+        done_event.wait(wait_timeout)
+
+    result = request.get("result")
+    if not isinstance(result, dict):
+        with _TRACTION_OUT_LOCK:
+            pending = _TRACTION_OUT_PENDING.get(serial_number)
+            if pending is request:
+                _TRACTION_OUT_PENDING.pop(serial_number, None)
+        return {
+            "ok": False,
+            "serial_number": serial_number,
+            "command": command_text,
+            "ack": "TIMEOUT",
+            "error_kind": "traction_out_send_timeout",
+            "latency_ms": None,
+        }
+
+    merged = dict(result)
+    merged.setdefault("serial_number", serial_number)
+    merged.setdefault("command", command_text)
     return merged
 
 
@@ -2417,10 +2556,16 @@ def _keepalive_loop(
                         if stream_reader is None:
                             error_kind = "stream_reader_unavailable"
                             raise RuntimeError("stream reader unavailable")
-                        request_value = _normalize_traction_out_value(
-                            current_traction_request.get("value")
+                        request_value_raw = current_traction_request.get("value")
+                        request_value = (
+                            _normalize_traction_out_value(request_value_raw)
+                            if request_value_raw is not None
+                            else None
                         )
-                        command_bytes = _build_traction_out_payload(request_value)
+                        request_command = str(current_traction_request.get("command") or "").strip()
+                        if not request_command:
+                            request_command = _build_traction_out_payload(request_value).decode("utf-8")
+                        command_bytes = request_command.encode("utf-8")
                         stream_reader.clear_frames()
                         try:
                             keepalive_serial.reset_input_buffer()
@@ -2456,7 +2601,10 @@ def _keepalive_loop(
                                 {
                                     "ok": True,
                                     "serial_number": serial_number,
-                                    "traction_out_value": int(request_value),
+                                    "traction_out_value": (
+                                        int(request_value) if request_value is not None else None
+                                    ),
+                                    "command": request_command,
                                     "ack": ack_text or "OK",
                                     "latency_ms": (
                                         float(frame_latency_ms)
@@ -2482,7 +2630,10 @@ def _keepalive_loop(
                                 {
                                     "ok": False,
                                     "serial_number": serial_number,
-                                    "traction_out_value": int(request_value),
+                                    "traction_out_value": (
+                                        int(request_value) if request_value is not None else None
+                                    ),
+                                    "command": request_command,
                                     "ack": ack_text or "TIMEOUT",
                                     "error_kind": error_kind,
                                     "latency_ms": (
@@ -3119,25 +3270,49 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
 
     # print(f"[db] bootstrap complete. online_devices={boot_count} db_path={db_path}", flush=True)
 
-def conex(db_path: str):
+def _handle_monitor_device(dev: pyudev.Device, db_path: str):
+    action = dev.action  # "add", "remove", sometimes "change"
+    if action not in ("add", "remove"):
+        return
+
+    if not matches(dev):
+        return
+    if action == "add":
+        on_attach(dev, db_path)
+    elif action == "remove":
+        on_detach(dev, db_path)
+
+
+def run_conex_loop(
+    db_path: str,
+    stop_event: threading.Event | None = None,
+    poll_timeout_sec: float = 0.25,
+):
     context = pyudev.Context()
     bootstrap_connected_devices(context, db_path)
     monitor = pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem="tty")  # serial devices
 
-    # print("Monitoring udev for tty devices... (plug/unplug ESP32)")
-
-    for dev in iter(monitor.poll, None):
-        action = dev.action  # "add", "remove", sometimes "change"
-        if action not in ("add", "remove"):
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            break
+        timeout = max(0.05, float(poll_timeout_sec))
+        dev = monitor.poll(timeout)
+        if dev is None:
             continue
 
-        # Only act on the target device
-        if matches(dev):
-            if action == "add":
-                on_attach(dev, db_path)
-            elif action == "remove":
-                on_detach(dev, db_path)
+        _handle_monitor_device(dev, db_path)
 
         # small sleep avoids busy loops if you add heavier logic later
         time.sleep(0.01)
+
+
+def stop_all_keepalive_monitors():
+    with _MONITOR_LOCK:
+        serial_numbers = list(_KEEPALIVE_STOPS.keys())
+    for serial_number in serial_numbers:
+        _stop_keepalive_monitor(serial_number)
+
+
+def conex(db_path: str):
+    run_conex_loop(db_path=db_path, stop_event=None, poll_timeout_sec=0.25)

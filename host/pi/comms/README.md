@@ -21,6 +21,96 @@ Web stream architecture:
 - `UI stream thread`: distributes events to websocket clients using queues
 - frontend: subscribes to `/ws/comms` and updates view live
 
+## Architecture Direction (SDK-First, Webview as Fallback)
+This project is moving to an SDK-first architecture while preserving current behavior:
+- Core protocol engine stays in `msg_relay.functions` (serial attach/detach, handshake, framed comms, keepalive, command send/ack).
+- Webview remains available as a fallback test/control UI, using the same engine.
+- New primary integration path will be importable Python classes for external code on a fresh Pi.
+
+Target usage on a new Pi:
+- Install package.
+- Import `msg_relay`.
+- Start runtime from user code (no mandatory pre-installed system service).
+- Instantiate module-specific objects and call sanitized methods.
+
+Compatibility requirement:
+- Existing webview routes and current protocol behavior must not break during SDK introduction.
+
+## Planned Public SDK Layers
+Two public layers will coexist:
+- Expert/raw layer: direct command send helpers for advanced developers.
+- Sanitized module layer: typed classes with safe methods per module type.
+
+Initial module-class concept:
+- `TractionModule`
+- `LineSensorModule`
+
+Class behavior contract:
+- Resolve/validate module identity at object creation.
+- Ensure correct message type before sending.
+- Expose only relevant methods for that module.
+- Parse and normalize responses.
+
+Example sanitized traction methods:
+- `forward(value)` maps to `SET OUT <value>` in `TRACTION_OUT` mode.
+- `forward_raw(value)` maps to `SET OUT RAW <value>`.
+- `stop()` maps to `CLR OUT` (or equivalent safe zero-output behavior).
+
+## Implementation Workflow Lock
+From now on, changes follow this sequence:
+1. Define sanitized class method list and method contracts first.
+2. Freeze method names, argument rules, return shape, and error behavior.
+3. Implement backend wiring to satisfy those contracts.
+4. Keep webview as validation/fallback path to detect regressions.
+
+Current status:
+- Documentation and architecture alignment phase.
+- SDK bootstrap implementation started:
+  - in-process runtime class (`src/msg_relay/runtime.py`)
+  - sanitized module classes (`src/msg_relay/modules.py`)
+  - installable package metadata (`pyproject.toml`)
+
+## SDK Quick Start (In-Process, No System Service Required)
+Install from this folder:
+```bash
+cd host/pi/comms
+pip install .
+```
+
+Minimal usage:
+```python
+from msg_relay import RelayRuntime
+
+runtime = RelayRuntime(
+    auto_start=True,            # starts comms runtime thread
+    enable_webview=True,        # starts webview server thread
+    enable_webview_updates=True # enables /api/comms + /ws/comms realtime broker
+)
+devices = runtime.list_devices()
+serial = devices[0]["serial_number"]
+
+traction = runtime.traction(serial)
+traction.forward(30)
+traction.backward(20)
+traction.move_angle("forward", 45)
+traction.forward_raw(15)
+traction.stop()
+```
+
+`move_angle(...)` behavior:
+- If position PID is disabled, angle is added to current position.
+- If position PID is already enabled, angle is added to current target (incremental chaining).
+
+Resource-saving options:
+- `enable_webview=False`: comms runtime only, no web server.
+- `enable_webview_updates=False`: keep HTTP webview alive, disable realtime stream broker.
+
+Legacy webview entrypoint remains available:
+```bash
+cd host/pi/comms
+PYTHONPATH=src python3 -m msg_relay.run
+```
+
 ## Data Contracts
 ### Devices DB (`src/msg_relay/espressif_devices.json`)
 Only device state is stored here:
@@ -109,6 +199,8 @@ systemctl --user status msg-relay.service
 - `MSG_RELAY_LOG_TRIM_INTERVAL_SEC`
 - `MSG_RELAY_WEB_HOST`
 - `MSG_RELAY_WEB_PORT`
+- `MSG_RELAY_ENABLE_WEBVIEW` (`true`/`false`, default `true`)
+- `MSG_RELAY_ENABLE_WEBVIEW_UPDATES` (`true`/`false`, default `true`)
 
 ## Notes
 - This project is host-side and does not require Docker for normal operation.

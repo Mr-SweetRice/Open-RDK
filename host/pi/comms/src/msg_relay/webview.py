@@ -341,23 +341,34 @@ class CmdSendPayload(BaseModel):
     command: str = ""
 
 
-def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
+def create_webview_app(
+    db_path: str,
+    comms_log_path: str,
+    enable_realtime_stream: bool = True,
+) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-    broker = CommsStreamBroker(comms_log_path=comms_log_path)
+    broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
 
     app.state.db_path = db_path
     app.state.comms_log_path = comms_log_path
     app.state.broker = broker
+    app.state.enable_realtime_stream = bool(enable_realtime_stream)
 
     @app.on_event("startup")
     async def _on_startup():
-        broker.start()
-        print(f"[webview] startup db={db_path} comms_log={comms_log_path}", flush=True)
+        if broker is not None:
+            broker.start()
+        print(
+            f"[webview] startup db={db_path} comms_log={comms_log_path} "
+            f"realtime_stream={'on' if enable_realtime_stream else 'off'}",
+            flush=True,
+        )
 
     @app.on_event("shutdown")
     async def _on_shutdown():
-        broker.stop()
+        if broker is not None:
+            broker.stop()
         print("[webview] shutdown complete", flush=True)
 
     @app.get("/api/health")
@@ -602,11 +613,22 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
         limit: int = Query(default=300, ge=1, le=5000),
         serial: str | None = Query(default=None),
     ):
+        if broker is None:
+            return {"events": [], "disabled": True}
         return {"events": broker.history(limit=limit, serial_filter=serial)}
 
     @app.websocket("/ws/comms")
     async def ws_comms(websocket: WebSocket):
         await websocket.accept()
+        if broker is None:
+            await websocket.send_json(
+                {
+                    "type": "disabled",
+                    "reason": "webview_realtime_stream_disabled",
+                }
+            )
+            await websocket.close()
+            return
         subscriber_id, subscriber_queue = broker.register()
         try:
             await websocket.send_json(
@@ -647,8 +669,13 @@ def start_webview_server(
     comms_log_path: str,
     host: str,
     port: int,
+    enable_realtime_stream: bool = True,
 ):
-    app = create_webview_app(db_path=db_path, comms_log_path=comms_log_path)
+    app = create_webview_app(
+        db_path=db_path,
+        comms_log_path=comms_log_path,
+        enable_realtime_stream=enable_realtime_stream,
+    )
     config = uvicorn.Config(
         app=app,
         host=host,

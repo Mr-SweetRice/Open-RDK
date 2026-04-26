@@ -7,30 +7,33 @@
 
 from __future__ import annotations
 from openrdk import CommsRuntime
-
 import time
+
 def main():
     openrdk = CommsRuntime(
         auto_start=True,
         enable_webview=True,          # set False to disable webview server
-        enable_webview_updates=True,  # set False to disable realtime UI stream
+        enable_webview_updates=False,  # set False to disable realtime UI stream
     )
 
     try:
-        openrdk.post("webview")
-        motor_serial = openrdk.get_serial_by_name("motor_01")
-        motor_esquerdo = openrdk.traction(motor_serial)
+        openrdk.post("run")
 
-        motor_esquerdo.move_angle_forward(90)
-        motor_esquerdo.stop()
+        motor_esquerdo = openrdk.traction(openrdk.get_serial_by_name("motor_01"))
+        motor_esquerdo.move_angle_forward(180)
+        
+        time.sleep(2)
+        print("SETUP...OVER")
+
         while True:
-            time.sleep(0.1)
+            motor_esquerdo.move_angle_forward(90)
+            motor_esquerdo.move_angle_backward(90)
+           
+
     except KeyboardInterrupt:
         print("shutdown requested")
     finally:
         pass
        
-
-
 if __name__ == "__main__":
     main()

@@ -4,7 +4,7 @@ import subprocess
 import threading
 import time
 
-from msg_relay.constants import (
+from openrdk.constants import (
     DEFAULT_SERIAL_BAUD,
     DEFAULT_SERIAL_PORT,
     READ_TIMEOUT_SEC,
@@ -17,8 +17,8 @@ from msg_relay.constants import (
     WEBVIEW_HOST,
     WEBVIEW_PORT,
 )
-from msg_relay.functions import run_with_retries
-from msg_relay.runtime import RelayRuntime
+from openrdk.functions import run_with_retries
+from openrdk.ordk_runtime import CommsRuntime
 
 
 def _track_runpy_access_once():
@@ -144,7 +144,7 @@ def _start_log_trimmer(log_path: str, max_bytes: int, interval_sec: float):
 
     threading.Thread(
         target=_worker,
-        name="msg-relay-log-trimmer",
+        name="openrdk-log-trimmer",
         daemon=True,
     ).start()
 
@@ -193,7 +193,7 @@ def main():
         default=True,
     )
 
-    runtime = RelayRuntime(
+    runtime = CommsRuntime(
         db_path=db_path,
         comms_log_path=comms_log_path,
         enable_webview=enable_webview,

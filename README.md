@@ -3,7 +3,7 @@
 ## Layout
 - .devcontainer/ : ESP-IDF dev container (build/flash/monitor)
 - firmware/esp/modules/ : ESP-IDF firmware projects (one per module/device)
-- host/pi/comms/ : Raspberry Pi runtime service (serial relay)
+- host/main/ : Raspberry Pi runtime service (serial relay)
 - docker-compose.yml : runtime stack on the Pi
 - tools/scripts/ : convenience scripts
 
@@ -57,4 +57,4 @@ Development workflow lock:
 - Keep protocol behavior and existing webview compatibility stable while adding SDK support.
 
 Detailed host-side architecture and workflow live in:
-- `host/pi/comms/README.md`
+- `host/main/README.md`

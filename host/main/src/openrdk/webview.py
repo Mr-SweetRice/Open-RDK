@@ -97,6 +97,9 @@ def _parse_comms_line(line: str) -> dict | None:
     length = payload.get("len")
     if isinstance(length, int):
         event["len"] = length
+    phase = payload.get("phase")
+    if isinstance(phase, str) and phase.strip():
+        event["phase"] = phase.strip().lower()
     return event
 
 

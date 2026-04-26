@@ -1,0 +1,24 @@
+# LEGACY: systemd user unit for the msg_relay runtime (pre-openrdk).
+# Replaced by CommsRuntime (host/main/src/openrdk/ordk_runtime.py).
+# This unit is disabled on the system and should not be re-enabled.
+# Live unit location: ~/.config/systemd/user/msg-relay.service (disabled)
+
+[Unit]
+Description=RDK Host Message Relay (ESP attach/detach + handshake)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/openrdk/workspace/rdk_repo/host/main
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/openrdk/workspace/rdk_repo/host/main/src
+Environment=ESPRESSIF_DEVICE_DB_PATH=/home/openrdk/workspace/rdk_repo/host/main/src/msg_relay/espressif_devices.json
+ExecStart=/usr/bin/python3 -m msg_relay.run
+Restart=always
+RestartSec=2
+StandardOutput=append:/home/openrdk/workspace/rdk_repo/host/main/msg-relay.log
+StandardError=append:/home/openrdk/workspace/rdk_repo/host/main/msg-relay.log
+
+[Install]
+WantedBy=default.target

@@ -28,7 +28,7 @@ from .functions import (
 )
 
 if TYPE_CHECKING:
-    from .runtime import RelayRuntime
+    from .ordk_runtime import CommsRuntime
 
 
 def _normalize_module_type(value: str | None) -> str:
@@ -48,7 +48,7 @@ class BaseModule:
 
     def __init__(
         self,
-        runtime: "RelayRuntime",
+        runtime: "CommsRuntime",
         serial_number: str,
         snapshot: dict | None = None,
         default_message_type: str | None = None,
@@ -189,7 +189,7 @@ class TractionModule(BaseModule):
     EXPECTED_MODULE_TYPE = "traction_module"
     _DIRECTION_RPM_SETPOINT = 50.0
 
-    def __init__(self, runtime: "RelayRuntime", serial_number: str, snapshot: dict | None = None):
+    def __init__(self, runtime: "CommsRuntime", serial_number: str, snapshot: dict | None = None):
         super().__init__(
             runtime=runtime,
             serial_number=serial_number,
@@ -435,7 +435,7 @@ class TractionModule(BaseModule):
 class LineSensorModule(BaseModule):
     EXPECTED_MODULE_TYPE = "line_sensor_module"
 
-    def __init__(self, runtime: "RelayRuntime", serial_number: str, snapshot: dict | None = None):
+    def __init__(self, runtime: "CommsRuntime", serial_number: str, snapshot: dict | None = None):
         super().__init__(
             runtime=runtime,
             serial_number=serial_number,

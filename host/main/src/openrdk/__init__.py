@@ -8,10 +8,10 @@ from .errors import (
     UnsupportedModuleTypeError,
 )
 from .modules import BaseModule, LineSensorModule, TractionModule
-from .runtime import RelayRuntime
+from .ordk_runtime import CommsRuntime
 
 __all__ = [
-    "RelayRuntime",
+    "CommsRuntime",
     "BaseModule",
     "TractionModule",
     "LineSensorModule",

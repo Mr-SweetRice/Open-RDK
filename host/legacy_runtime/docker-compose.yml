@@ -1,0 +1,16 @@
+# LEGACY: Docker-based webview runtime (msg_relay package, pre-openrdk).
+# Replaced by direct Python execution via CommsRuntime (host/main/src/openrdk/).
+# This file is kept for reference only — do not use.
+# The container rdk_repo-comms-1 has had its restart policy set to "no".
+#
+# Original build context: ./host/main (repo root relative)
+# Original entrypoint:    python -m msg_relay.run
+
+services:
+  comms:
+    build: ./host/main
+    volumes:
+      - /dev:/dev
+    privileged: true
+    restart: "no"
+    network_mode: host

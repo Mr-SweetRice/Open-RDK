@@ -1,5 +1,5 @@
 class RelayError(Exception):
-    """Base error for msg_relay SDK runtime and modules."""
+    """Base error for openrdk SDK runtime and modules."""
 
 
 class RuntimeNotStartedError(RelayError):

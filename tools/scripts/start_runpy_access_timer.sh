@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-TRACKER_SCRIPT="$REPO_ROOT/host/pi/comms/track_runpy_access.sh"
+TRACKER_SCRIPT="$REPO_ROOT/host/main/track_runpy_access.sh"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 SERVICE_FILE="$UNIT_DIR/runpy-access.service"
 TIMER_FILE="$UNIT_DIR/runpy-access.timer"

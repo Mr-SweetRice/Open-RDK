@@ -1,8 +1,12 @@
-services:
-  comms:
-    build: ./host/pi/comms
-    volumes:
-      - /dev:/dev
-    privileged: true
-    restart: unless-stopped
-    network_mode: host
+# LEGACY SERVICE — comms/webview now runs via CommsRuntime (host/main/src/openrdk/).
+# The container rdk_repo-comms-1 has restart=no and should not be restarted.
+# Legacy files: host/legacy_runtime/
+#
+# services:
+#   comms:
+#     build: ./host/main
+#     volumes:
+#       - /dev:/dev
+#     privileged: true
+#     restart: unless-stopped
+#     network_mode: host

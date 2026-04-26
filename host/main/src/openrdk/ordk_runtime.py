@@ -1,4 +1,5 @@
 import os
+import socket
 import threading
 import time
 
@@ -14,6 +15,7 @@ from .functions import (
     get_device_snapshot,
     list_device_snapshots,
     run_conex_loop,
+    set_device_name,
     stop_all_keepalive_monitors,
 )
 
@@ -24,7 +26,7 @@ def _normalize_module_type(value: str | None) -> str:
     return value.strip().lower()
 
 
-class RelayRuntime:
+class CommsRuntime:
     """
     In-process runtime entrypoint for SDK-first usage.
 
@@ -153,7 +155,7 @@ class RelayRuntime:
         thread = threading.Thread(
             target=self._webview_worker,
             args=(server,),
-            name="msg-relay-webview",
+            name="openrdk-webview",
             daemon=True,
         )
         thread.start()
@@ -171,7 +173,7 @@ class RelayRuntime:
             thread = threading.Thread(
                 target=self._runtime_worker,
                 args=(stop_event,),
-                name="msg-relay-runtime",
+                name="openrdk-runtime",
                 daemon=True,
             )
             thread.start()
@@ -235,6 +237,51 @@ class RelayRuntime:
                 break
             time.sleep(0.05)
         raise DeviceNotFoundError(f"device not found: {serial_number}")
+
+    @property
+    def lan_ip(self) -> str:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                return str(sock.getsockname()[0])
+        except Exception:
+            return "127.0.0.1"
+
+    def post(self, post_option: str = "default") -> None:
+        hostname = socket.gethostname()
+        match post_option:
+            case "run":
+                print(f"openrdk running: {self.is_running}")
+            case "webview":
+                print(f"webview running: {self.is_webview_running}")
+                print(f"webview url (hostname): http://{hostname}:{self._webview_port}")
+            case "webview_complete":
+                print(f"webview running: {self.is_webview_running}")
+                print(f"webview url (host): {self.webview_url}")
+                print(f"webview url (lan): http://{self.lan_ip}:{self._webview_port}")
+            case _:
+                print(f"openrdk running: {self.is_running}")
+                print(f"webview running: {self.is_webview_running}")
+
+    def find_device_by_serial(self, serial: str) -> dict | None:
+        for dev in self.list_devices():
+            if str(dev.get("serial_number") or "").strip() == serial:
+                return dev
+        return None
+
+    def find_device_by_name(self, name: str) -> dict | None:
+        target = str(name or "").strip().lower()
+        for dev in self.list_devices():
+            if str(dev.get("name") or "").strip().lower() == target:
+                return dev
+        return None
+
+    def get_serial_by_name(self, name: str) -> str | None:
+        dev = self.find_device_by_name(name)
+        return str(dev["serial_number"]).strip() if dev else None
+
+    def rename_device(self, serial: str, name: str) -> dict | None:
+        return set_device_name(self._db_path, serial, name)
 
     def module(self, serial_number: str):
         self.ensure_running()

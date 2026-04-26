@@ -1,7 +1,7 @@
 # RDK Host <-> Firmware Protocol
 
 This document is the source of truth for the serial protocol currently implemented between:
-- Host relay/webview (`host/pi/comms/src/msg_relay`)
+- Host relay/webview (`host/main/src/openrdk`)
 - ESP firmware modules under `firmware/esp/modules/*`
 
 It also lists all communication calls currently implemented by firmware modules.
@@ -69,9 +69,9 @@ Host default payloads (when no explicit payload is provided):
 ## 2. Host Runtime Behavior
 
 Host source files:
-- `host/pi/comms/src/msg_relay/constants.py`
-- `host/pi/comms/src/msg_relay/functions.py`
-- `host/pi/comms/src/msg_relay/webview.py`
+- `host/main/src/openrdk/constants.py`
+- `host/main/src/openrdk/functions.py`
+- `host/main/src/openrdk/webview.py`
 
 ### 2.1 Module IDs used in host
 

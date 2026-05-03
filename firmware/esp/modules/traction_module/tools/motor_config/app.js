@@ -502,6 +502,13 @@
   }
 
   function handleLine(line) {
+    if (line.includes("|CFGN,")) {
+      const [cfgLine, notesLine] = line.split("|CFGN,", 2);
+      handleLine(cfgLine);
+      handleLine(`CFGN,${notesLine || ""}`);
+      return;
+    }
+
     if (line === "OK" || line === "S,ENQ" || line === "S,START" || line === "S,END") return;
     if (line === "ERR") {
       setSerialStatus("Controller returned ERR.");
@@ -595,8 +602,14 @@
       setSerialStatus("Controller connected.");
       void readLoop();
 
-      await refreshControllerState();
-      saveStatus("Configuration and curve loaded from controller.");
+      try {
+        await refreshControllerState();
+        saveStatus("Configuration and curve loaded from controller.");
+      } catch (err) {
+        const message = err && err.message ? err.message : err;
+        setSerialStatus(`Controller connected. Initial read failed: ${message}`);
+        saveStatus("Controller connected. Use Read Curve or Save Config to retry commands.");
+      }
     } catch (err) {
       setSerialStatus("Connect failed: " + (err && err.message ? err.message : err));
       await closeSerial();

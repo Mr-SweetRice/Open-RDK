@@ -77,6 +77,7 @@ Host source files:
 
 - `0x11` -> `traction_module`
 - `0x12` -> `line_sensor_module`
+- `0x13` -> `color_module`
 
 Note: module-name query (`0x04`) is the primary identity signal; module-id mapping is fallback.
 
@@ -219,11 +220,151 @@ Expected firmware ACK strings:
 
 ## 3.3 `color_module` (`firmware/esp/modules/color_module`)
 
-Current implementation does not implement framed host protocol commands.
+### Identity and handshake
+- Hello ACK module id: `0x13`
+- Module query name: `color_module`
 
-Current serial output call:
-- periodic line print once per second:
-  - `hello from module firmware`
+### Hardware profile
+- MCU target: `ESP32-C3`
+- Sensor: `TCS3472` / `TCS34725`
+- I2C address: `0x29`
+- SDA pin: `GPIO8`
+- SCL pin: `GPIO9`
+- LED pin: `GPIO10`
+
+### Framed common responses
+- `TEST` message type: `I RECIEVED TEST`
+- Unknown `CMD`: `I RECIEVED CMD`
+- `TRACTION_OUT` accepted/valid: `OK`
+- `TRACTION_OUT` invalid: `ERR`
+
+### Palette modes and built-in slot names
+- Mode `4`: `red`, `green`, `blue`, `yellow`
+- Mode `8`: `black`, `white`, `red`, `yellow`, `green`, `cyan`, `blue`, `magenta`
+- Mode `16`: `black`, `white`, `gray`, `red`, `orange`, `yellow`, `lime`, `green`, `cyan`, `sky`, `blue`, `violet`, `magenta`, `pink`, `brown`, `olive`
+
+### `CMD` calls
+- `GET DATA`
+- `GET TELEM`
+- `GET CFG`
+- `GET CAL`
+- `GET CAL <4|8|16>`
+- `GET CAL PATCH <mode> <slot>`
+- `GET CAL PATCH <slot-or-name> [mode]`
+- `GET INFO`
+- `RUN SELFTEST`
+- `START CAL`
+- `STOP CAL`
+- `SAVE CFG`
+- `SAVE CAL`
+- `RESET CFG`
+- `RESET CAL`
+- `RESET CAL ALL`
+- `RESET CAL <4|8|16>`
+- `SET CFG NAME <text>`
+- `SET CFG SAMPLE_MS <ms>`
+- `SET CFG LED <OFF|ON|AUTO|0|1|2>`
+- `SET CFG GAIN_MODE <MANUAL|AUTO|0|1>`
+- `SET CFG GAIN <value>`
+- `SET CFG INTEGRATION_MS <ms>`
+- `SET CFG CLASSIFIER <NORM_RGB|LAB|0|1>`
+- `SET CFG CONF_TH <float_0_to_1>`
+- `SET CFG TARGET_CLEAR <value>`
+- `SET CFG PALETTE_MODE <4|8|16>`
+- `SET CFG PATCH_SAMPLES <count>`
+- `SET CAL PATCH <DARK|WHITE|slot|slot-name>`
+- `COMMIT CAL PATCH <DARK|WHITE|slot|slot-name>`
+- `SET CAL DARK <mode> <r> <g> <b> <c>`
+- `SET CAL WHITE <mode> <r> <g> <b> <c>`
+- `SET CAL PROTO <mode> <slot> <norm_r_milli> <norm_g_milli> <norm_b_milli> <luma_milli> <lab_l_centi> <lab_a_centi> <lab_b_centi> <sample_count>`
+- `LED ON`
+- `LED OFF`
+- `LED AUTO`
+
+### `TELEMETRY` calls
+- `TELEMETRY_START[:host_epoch_ms]`
+- `TELEMETRY_SYNC[:host_epoch_ms]`
+- `TELEMETRY_STOP`
+
+### `TRACTION_OUT` compatibility calls
+- `SET OUT <value>`
+- `SET OUT RAW <value>`
+- `CLR OUT`
+
+### Response payload contracts
+
+`GET DATA` and streamed telemetry use:
+
+```text
+DATA|TEL,
+<palette_mode>,
+<detected_slot>,
+<confidence_milli>,
+<top0_slot>,<top0_confidence_milli>,
+<top1_slot>,<top1_confidence_milli>,
+<top2_slot>,<top2_confidence_milli>,
+<raw_r>,<raw_g>,<raw_b>,<raw_c>,
+<norm_r_milli>,<norm_g_milli>,<norm_b_milli>,
+<lab_l_centi>,<lab_a_centi>,<lab_b_centi>,
+<luma_milli>,
+<gain>,
+<integration_ms>,
+<led_mode>,
+<led_active>,
+<health_flags>,
+<classifier>,
+<calibration_target_slot>,
+<calibration_samples>,
+<sample_timestamp_ms>
+```
+
+Where:
+- `detected_slot` is `-1` when confidence is below threshold or calibration is incomplete
+- `calibration_target_slot` uses `-2` for `DARK`, `-1` for `WHITE`, `-128` for idle
+- `health_flags` bits:
+  - bit `0`: sensor ok
+  - bit `1`: sample saturated
+  - bit `2`: dark reference valid
+  - bit `3`: white reference valid
+  - bit `4`: calibration active
+  - bit `5`: selftest ok
+  - bit `6`: auto exposure enabled
+  - bit `7`: sensor present
+
+`GET CFG` returns:
+
+```text
+CFG,<sensor_name>,<sample_period_ms>,<led_mode>,<gain_mode>,<gain>,<integration_ms>,<classifier>,<confidence_threshold_milli>,<target_clear>,<palette_mode>,<patch_sample_count>
+```
+
+`GET CAL [mode]` returns:
+
+```text
+CAL,<palette_mode>,<class_count>,<valid_mask>,<enabled_mask>,<dark_valid>,<white_valid>,<dark_r>,<dark_g>,<dark_b>,<dark_c>,<white_r>,<white_g>,<white_b>,<white_c>
+```
+
+`GET CAL PATCH ...` returns:
+
+```text
+PATCH,<palette_mode>,<slot>,<enabled>,<valid>,<sample_count>,<name>,<norm_r_milli>,<norm_g_milli>,<norm_b_milli>,<lab_l_centi>,<lab_a_centi>,<lab_b_centi>,<luma_milli>
+```
+
+`GET INFO` returns:
+
+```text
+INFO,<sensor_name>,<module_type>,<firmware_module>,<module_id>,<sensor_id>,<health_flags>,<i2c_address>,<sda_pin>,<scl_pin>,<led_pin>
+```
+
+`RUN SELFTEST` returns a structured result even on failure:
+
+```text
+SELFTEST,<ok>,<sensor_id>,<message>
+```
+
+### Persistence notes
+- Configuration is stored in NVS blob `cfg`
+- Calibration is stored in NVS blob `cal`
+- Calibration profiles are versioned and stored separately for palette modes `4`, `8`, and `16`
 
 ## 3.4 `test_firware` placeholder (`firmware/esp/modules/test_firware`)
 

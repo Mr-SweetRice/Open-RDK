@@ -3,11 +3,10 @@
 **/sdkconfig
 **/sdkconfig.old
 **/managed_components/
-# Ignore build outputs
-**/build/
 **/*.elf
 **/*.bin
 **/core.*
+**/build.bad*/
 
 # Python
 __pycache__/
@@ -18,18 +17,17 @@ venv/
 # Node / other
 node_modules/
 
-# VS Code (optional; keep if you don't want to share settings)
+# VS Code
 .vscode/
 
 # OS noise
 .DS_Store
 Thumbs.db
 
-# Docker local overrides / env
+# Env / secrets
 .env
 
-# Docker
+# Logs and runtime state
 *.log
-
-# OS
-.DS_Store
+**/.runpy-access.state
+**/espressif_devices.json

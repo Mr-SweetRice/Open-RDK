@@ -3,7 +3,7 @@
 ## Layout
 - .devcontainer/ : ESP-IDF dev container (build/flash/monitor)
 - firmware/esp/modules/ : ESP-IDF firmware projects (one per module/device)
-- host/pi/comms/ : Raspberry Pi runtime service (serial relay)
+- host/main/ : Raspberry Pi runtime service (serial relay)
 - docker-compose.yml : runtime stack on the Pi
 - tools/scripts/ : convenience scripts
 
@@ -37,3 +37,24 @@ From repo root on the Pi:
 
 Logs:
 - docker compose logs -f comms
+
+## Host Comms Architecture (Current Direction)
+- The host comms system remains the single protocol engine for serial, handshake, keepalive, telemetry, and command transport.
+- The next architecture step is to expose this engine as an importable Python package (SDK-first), so a new Pi can run user code without a pre-installed system service.
+- The webview stays supported as a fallback/debug control surface, not as the primary control path.
+
+Planned operation modes:
+- Embedded mode (primary): user imports the package, starts the runtime in-process, and controls modules through Python classes.
+- Webview mode (fallback): optional FastAPI/websocket UI uses the same core engine and remains compatible.
+
+Planned SDK surface:
+- Raw/expert access for direct command-level control.
+- Sanitized module classes for application code (`TractionModule`, `LineSensorModule`, etc.), with safe methods and validation.
+
+Development workflow lock:
+- First define sanitized class methods and behavior contracts.
+- Then implement backend wiring to match those contracts.
+- Keep protocol behavior and existing webview compatibility stable while adding SDK support.
+
+Detailed host-side architecture and workflow live in:
+- `host/main/README.md`

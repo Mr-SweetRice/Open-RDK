@@ -10,23 +10,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from .color_support import (
-    COLOR_MODULE_TYPE,
-    PALETTE_DEFINITIONS,
-    default_device_profile,
-    get_device_profile,
-    now_iso,
-    parse_color_cal_line,
-    parse_color_cfg_line,
-    parse_color_data_line,
-    parse_color_info_line,
-    parse_color_patch_line,
-    parse_color_selftest_line,
-    set_device_profile,
-    update_device_mode_profile,
-)
 from .functions import (
     clear_devices_registry,
     get_active_message_type,
@@ -112,6 +97,9 @@ def _parse_comms_line(line: str) -> dict | None:
     length = payload.get("len")
     if isinstance(length, int):
         event["len"] = length
+    phase = payload.get("phase")
+    if isinstance(phase, str) and phase.strip():
+        event["phase"] = phase.strip().lower()
     return event
 
 
@@ -356,183 +344,34 @@ class CmdSendPayload(BaseModel):
     command: str = ""
 
 
-class ColorConfigPayload(BaseModel):
-    sensor_name: str | None = None
-    sample_period_ms: int | None = None
-    led_mode: int | None = None
-    gain_mode: int | None = None
-    gain: int | None = None
-    integration_ms: int | None = None
-    classifier: int | None = None
-    confidence_milli: int | None = None
-    target_clear: int | None = None
-    palette_mode: int | None = None
-    patch_sample_count: int | None = None
-
-
-class ColorCalibrationTargetPayload(BaseModel):
-    target: str = ""
-
-
-class ColorProfilePayload(BaseModel):
-    profile: dict = Field(default_factory=dict)
-    apply_to_firmware: bool = False
-
-
-class ColorSavePayload(BaseModel):
-    persist_cfg: bool = False
-    persist_cal: bool = True
-
-
-def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
+def create_webview_app(
+    db_path: str,
+    comms_log_path: str,
+    enable_realtime_stream: bool = True,
+) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-    broker = CommsStreamBroker(comms_log_path=comms_log_path)
+    broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
 
     app.state.db_path = db_path
     app.state.comms_log_path = comms_log_path
     app.state.broker = broker
-
-    def _color_devices_list() -> list[dict]:
-        devices = _load_devices(db_path)
-        out: list[dict] = []
-        for device in devices:
-            if str(device.get("module_type") or "") != COLOR_MODULE_TYPE:
-                continue
-            serial_number = str(device.get("serial_number") or "").strip()
-            profile = get_device_profile(serial_number) if serial_number else None
-            item = dict(device)
-            item["color_profile"] = profile
-            out.append(item)
-        return out
-
-    def _ensure_color_cmd_mode(serial_number: str):
-        updated = set_device_message_type(
-            db_path=db_path,
-            serial_number=serial_number,
-            message_type="CMD",
-        )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="device not found")
-        time.sleep(0.08)
-
-    def _ensure_color_telemetry_mode(serial_number: str):
-        updated = set_device_message_type(
-            db_path=db_path,
-            serial_number=serial_number,
-            message_type="TELEMETRY",
-        )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="device not found")
-        time.sleep(0.08)
-
-    def _run_color_cmd(serial_number: str, command: str, timeout_sec: float = 2.0) -> str:
-        _ensure_color_cmd_mode(serial_number)
-        result = send_device_cmd_once(
-            db_path=db_path,
-            serial_number=serial_number,
-            command=command,
-            timeout_sec=timeout_sec,
-        )
-        if result is None:
-            raise HTTPException(status_code=404, detail="device not found")
-        if not bool(result.get("ok")):
-            detail = str(result.get("error_kind") or "color_cmd_failed")
-            if detail == "cmd_send_timeout":
-                raise HTTPException(status_code=504, detail=detail)
-            raise HTTPException(status_code=409, detail=detail)
-        return str(result.get("response") or "").strip()
-
-    def _fetch_color_snapshot(serial_number: str) -> dict:
-        info_line = _run_color_cmd(serial_number, "GET INFO")
-        cfg_line = _run_color_cmd(serial_number, "GET CFG")
-        data_line = _run_color_cmd(serial_number, "GET DATA")
-
-        info = parse_color_info_line(info_line)
-        cfg = parse_color_cfg_line(cfg_line)
-        data = parse_color_data_line(data_line)
-        if not info or not cfg or not data:
-            raise HTTPException(status_code=502, detail="invalid_color_snapshot")
-        profile = get_device_profile(serial_number)
-        return {
-            "serial_number": serial_number,
-            "info": info,
-            "cfg": cfg,
-            "data": data,
-            "profile": profile,
-        }
-
-    def _fetch_color_calibration(serial_number: str, mode: int | str) -> dict:
-        mode_key = str(mode)
-        if mode_key not in PALETTE_DEFINITIONS:
-            raise HTTPException(status_code=400, detail="invalid_palette_mode")
-        summary_line = _run_color_cmd(serial_number, f"GET CAL {mode_key}")
-        summary = parse_color_cal_line(summary_line)
-        if not summary:
-            raise HTTPException(status_code=502, detail="invalid_color_calibration")
-
-        patches: list[dict] = []
-        for item in PALETTE_DEFINITIONS[mode_key]:
-            slot = int(item.get("slot", 0))
-            patch_line = _run_color_cmd(serial_number, f"GET CAL PATCH {mode_key} {slot}")
-            patch = parse_color_patch_line(patch_line)
-            if not patch:
-                continue
-            patches.append(patch)
-        return {"mode": int(mode_key), "summary": summary, "patches": patches}
-
-    def _apply_color_profile_to_firmware(serial_number: str, profile: dict):
-        if not isinstance(profile, dict):
-            raise HTTPException(status_code=400, detail="invalid_profile")
-        modes = profile.get("modes")
-        if not isinstance(modes, dict):
-            raise HTTPException(status_code=400, detail="invalid_profile")
-
-        for mode_key in ("4", "8", "16"):
-            mode_profile = modes.get(mode_key)
-            if not isinstance(mode_profile, dict):
-                continue
-            summary = mode_profile.get("summary")
-            if isinstance(summary, dict):
-                dark = summary.get("dark") if isinstance(summary.get("dark"), dict) else None
-                white = summary.get("white") if isinstance(summary.get("white"), dict) else None
-                if summary.get("dark_valid") and dark:
-                    _run_color_cmd(
-                        serial_number,
-                        f"SET CAL DARK {mode_key} {int(dark.get('r', 0))} {int(dark.get('g', 0))} "
-                        f"{int(dark.get('b', 0))} {int(dark.get('c', 0))}",
-                    )
-                if summary.get("white_valid") and white:
-                    _run_color_cmd(
-                        serial_number,
-                        f"SET CAL WHITE {mode_key} {int(white.get('r', 0))} {int(white.get('g', 0))} "
-                        f"{int(white.get('b', 0))} {int(white.get('c', 0))}",
-                    )
-
-            patches = mode_profile.get("patches")
-            if isinstance(patches, list):
-                for patch in patches:
-                    if not isinstance(patch, dict) or not patch.get("valid"):
-                        continue
-                    norm_rgb = patch.get("norm_rgb_milli") if isinstance(patch.get("norm_rgb_milli"), dict) else {}
-                    lab = patch.get("lab") if isinstance(patch.get("lab"), dict) else {}
-                    _run_color_cmd(
-                        serial_number,
-                        f"SET CAL PROTO {mode_key} {int(patch.get('slot', 0))} "
-                        f"{int(norm_rgb.get('r', 0))} {int(norm_rgb.get('g', 0))} {int(norm_rgb.get('b', 0))} "
-                        f"{int(patch.get('luma_milli', 0))} {int(lab.get('l_centi', 0))} "
-                        f"{int(lab.get('a_centi', 0))} {int(lab.get('b_centi', 0))} "
-                        f"{int(patch.get('sample_count', 0))}",
-                    )
+    app.state.enable_realtime_stream = bool(enable_realtime_stream)
 
     @app.on_event("startup")
     async def _on_startup():
-        broker.start()
-        print(f"[webview] startup db={db_path} comms_log={comms_log_path}", flush=True)
+        if broker is not None:
+            broker.start()
+        print(
+            f"[webview] startup db={db_path} comms_log={comms_log_path} "
+            f"realtime_stream={'on' if enable_realtime_stream else 'off'}",
+            flush=True,
+        )
 
     @app.on_event("shutdown")
     async def _on_shutdown():
-        broker.stop()
+        if broker is not None:
+            broker.stop()
         print("[webview] shutdown complete", flush=True)
 
     @app.get("/api/health")
@@ -551,14 +390,6 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
             "cleared": int(cleared),
             "devices": _load_devices(db_path),
         }
-
-    @app.get("/api/color/palettes")
-    async def get_color_palettes():
-        return {"palettes": PALETTE_DEFINITIONS}
-
-    @app.get("/api/color/devices")
-    async def get_color_devices():
-        return {"devices": _color_devices_list()}
 
     @app.post("/api/devices/{serial_number}/name")
     async def update_device_name(serial_number: str, payload: DeviceNameUpdatePayload):
@@ -780,145 +611,27 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
             raise HTTPException(status_code=404, detail="device not found")
         return {"ok": True}
 
-    @app.get("/api/devices/{serial_number}/color/profile")
-    async def get_color_profile(serial_number: str):
-        return {"profile": get_device_profile(serial_number)}
-
-    @app.post("/api/devices/{serial_number}/color/profile")
-    async def save_color_profile(serial_number: str, payload: ColorProfilePayload):
-        profile = set_device_profile(serial_number, payload.profile)
-        if payload.apply_to_firmware:
-            _apply_color_profile_to_firmware(serial_number, profile)
-            _run_color_cmd(serial_number, "SAVE CAL")
-        return {"profile": profile}
-
-    @app.get("/api/devices/{serial_number}/color/snapshot")
-    async def get_color_snapshot(serial_number: str):
-        return _fetch_color_snapshot(serial_number)
-
-    @app.get("/api/devices/{serial_number}/color/calibration")
-    async def get_color_calibration(serial_number: str):
-        modes: list[dict] = []
-        for mode_key in ("4", "8", "16"):
-            modes.append(_fetch_color_calibration(serial_number, mode_key))
-        return {
-            "serial_number": serial_number,
-            "modes": modes,
-            "profile": get_device_profile(serial_number),
-        }
-
-    @app.post("/api/devices/{serial_number}/color/config")
-    async def update_color_config(serial_number: str, payload: ColorConfigPayload):
-        commands: list[str] = []
-        if payload.sensor_name is not None:
-            commands.append(f"SET CFG NAME {payload.sensor_name.strip()}")
-        if payload.sample_period_ms is not None:
-            commands.append(f"SET CFG SAMPLE_MS {int(payload.sample_period_ms)}")
-        if payload.led_mode is not None:
-            commands.append(f"SET CFG LED {int(payload.led_mode)}")
-        if payload.gain_mode is not None:
-            commands.append(f"SET CFG GAIN_MODE {int(payload.gain_mode)}")
-        if payload.gain is not None:
-            commands.append(f"SET CFG GAIN {int(payload.gain)}")
-        if payload.integration_ms is not None:
-            commands.append(f"SET CFG INTEGRATION_MS {int(payload.integration_ms)}")
-        if payload.classifier is not None:
-            commands.append(f"SET CFG CLASSIFIER {int(payload.classifier)}")
-        if payload.confidence_milli is not None:
-            commands.append(f"SET CFG CONF_TH {float(int(payload.confidence_milli)) / 1000.0:.3f}")
-        if payload.target_clear is not None:
-            commands.append(f"SET CFG TARGET_CLEAR {int(payload.target_clear)}")
-        if payload.palette_mode is not None:
-            commands.append(f"SET CFG PALETTE_MODE {int(payload.palette_mode)}")
-        if payload.patch_sample_count is not None:
-            commands.append(f"SET CFG PATCH_SAMPLES {int(payload.patch_sample_count)}")
-
-        if not commands:
-            raise HTTPException(status_code=400, detail="no_config_changes")
-        for command in commands:
-            _run_color_cmd(serial_number, command)
-        return _fetch_color_snapshot(serial_number)
-
-    @app.post("/api/devices/{serial_number}/color/calibration/start")
-    async def start_color_calibration(serial_number: str):
-        _run_color_cmd(serial_number, "START CAL")
-        return _fetch_color_snapshot(serial_number)
-
-    @app.post("/api/devices/{serial_number}/color/calibration/stop")
-    async def stop_color_calibration(serial_number: str):
-        _run_color_cmd(serial_number, "STOP CAL")
-        return _fetch_color_snapshot(serial_number)
-
-    @app.post("/api/devices/{serial_number}/color/calibration/select")
-    async def select_color_calibration_target(
-        serial_number: str,
-        payload: ColorCalibrationTargetPayload,
-    ):
-        target = str(payload.target or "").strip()
-        if not target:
-            raise HTTPException(status_code=400, detail="target_required")
-        _run_color_cmd(serial_number, f"SET CAL PATCH {target}")
-        return _fetch_color_snapshot(serial_number)
-
-    @app.post("/api/devices/{serial_number}/color/calibration/commit")
-    async def commit_color_calibration_target(
-        serial_number: str,
-        payload: ColorCalibrationTargetPayload,
-    ):
-        target = str(payload.target or "").strip()
-        if not target:
-            raise HTTPException(status_code=400, detail="target_required")
-        _run_color_cmd(serial_number, f"COMMIT CAL PATCH {target}")
-        snapshot = _fetch_color_snapshot(serial_number)
-        calibration = _fetch_color_calibration(serial_number, snapshot["cfg"]["palette_mode"])
-        update_device_mode_profile(
-            serial_number,
-            snapshot["cfg"]["palette_mode"],
-            summary=calibration["summary"],
-            patches=calibration["patches"],
-            last_calibrated_at=now_iso(),
-        )
-        return {
-            "snapshot": snapshot,
-            "calibration": calibration,
-            "profile": get_device_profile(serial_number),
-        }
-
-    @app.post("/api/devices/{serial_number}/color/save")
-    async def save_color_state(serial_number: str, payload: ColorSavePayload):
-        if payload.persist_cfg:
-            _run_color_cmd(serial_number, "SAVE CFG")
-        if payload.persist_cal:
-            _run_color_cmd(serial_number, "SAVE CAL")
-        return {"ok": True}
-
-    @app.post("/api/devices/{serial_number}/color/selftest")
-    async def run_color_selftest(serial_number: str):
-        line = _run_color_cmd(serial_number, "RUN SELFTEST")
-        parsed = parse_color_selftest_line(line)
-        if not parsed:
-            raise HTTPException(status_code=502, detail="invalid_selftest_response")
-        return {"result": parsed, "snapshot": _fetch_color_snapshot(serial_number)}
-
-    @app.post("/api/devices/{serial_number}/color/restore-defaults")
-    async def restore_color_defaults(serial_number: str):
-        _run_color_cmd(serial_number, "RESET CFG")
-        _run_color_cmd(serial_number, "RESET CAL ALL")
-        _run_color_cmd(serial_number, "SAVE CFG")
-        _run_color_cmd(serial_number, "SAVE CAL")
-        profile = set_device_profile(serial_number, default_device_profile(serial_number))
-        return {"snapshot": _fetch_color_snapshot(serial_number), "profile": profile}
-
     @app.get("/api/comms")
     async def comms(
         limit: int = Query(default=300, ge=1, le=5000),
         serial: str | None = Query(default=None),
     ):
+        if broker is None:
+            return {"events": [], "disabled": True}
         return {"events": broker.history(limit=limit, serial_filter=serial)}
 
     @app.websocket("/ws/comms")
     async def ws_comms(websocket: WebSocket):
         await websocket.accept()
+        if broker is None:
+            await websocket.send_json(
+                {
+                    "type": "disabled",
+                    "reason": "webview_realtime_stream_disabled",
+                }
+            )
+            await websocket.close()
+            return
         subscriber_id, subscriber_queue = broker.register()
         try:
             await websocket.send_json(
@@ -951,10 +664,6 @@ def create_webview_app(db_path: str, comms_log_path: str) -> FastAPI:
     async def index():
         return FileResponse(os.path.join(static_dir, "index.html"))
 
-    @app.get("/color", include_in_schema=False)
-    async def color_page():
-        return FileResponse(os.path.join(static_dir, "color.html"))
-
     return app
 
 
@@ -963,8 +672,13 @@ def start_webview_server(
     comms_log_path: str,
     host: str,
     port: int,
+    enable_realtime_stream: bool = True,
 ):
-    app = create_webview_app(db_path=db_path, comms_log_path=comms_log_path)
+    app = create_webview_app(
+        db_path=db_path,
+        comms_log_path=comms_log_path,
+        enable_realtime_stream=enable_realtime_stream,
+    )
     config = uvicorn.Config(
         app=app,
         host=host,

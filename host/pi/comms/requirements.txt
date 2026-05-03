@@ -1,5 +1,0 @@
-pyserial==3.5
-pyudev==0.24.1
-fastapi==0.115.6
-uvicorn==0.32.1
-websockets==13.1

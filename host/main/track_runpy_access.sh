@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_PY_PATH="$BASE_DIR/src/msg_relay/run.py"
+RUN_PY_PATH="$BASE_DIR/src/openrdk/ordk_run.py"
 OUT_LOG="$BASE_DIR/runpy-access.log"
 STATE_FILE="$BASE_DIR/.runpy-access.state"
 NOW_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -57,7 +57,7 @@ if [[ -f "$STATE_FILE" ]]; then
   LAST_RUNNING_AT="${last_running_at:-never}"
 fi
 
-PROC_PATTERN="python(3)? .*msg_relay\\.run|${RUN_PY_PATH//\//\\/}"
+PROC_PATTERN="python(3)? .*openrdk\\.ordk_run|${RUN_PY_PATH//\//\\/}"
 mapfile -t PROC_LINES < <(pgrep -af "$PROC_PATTERN" || true)
 
 RUNNING="no"

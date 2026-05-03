@@ -1,4 +1,4 @@
-# AI Agent Quick Reference (`host/pi/comms`)
+# AI Agent Quick Reference (`host/main`)
 
 ## Mission
 Maintain a reliable host-side relay for ESP devices:
@@ -8,7 +8,7 @@ Maintain a reliable host-side relay for ESP devices:
 - expose state + stream to web clients
 
 ## Hard Constraints
-- Run on host environment (`python3 -m msg_relay.run`), not dependent on devcontainer runtime.
+- Run on host environment (`python3 -m openrdk.ordk_run`), not dependent on devcontainer runtime.
 - Keep `espressif_devices.json` as **device registry only**.
 - Keep `comms-raw.log` as **raw communication only** (`sender`, `raw_hex`).
 - Device `name` is host-managed display label: persists by serial while firmware is unchanged.
@@ -16,20 +16,21 @@ Maintain a reliable host-side relay for ESP devices:
 - Avoid destructive git commands on user workspace.
 
 ## Critical Files
-- `src/msg_relay/run.py`: process bootstrap, log trimming, web thread start, relay start.
-- `src/msg_relay/functions.py`: udev + serial + handshake + keepalive + DB writes.
-- `src/msg_relay/webview.py`: FastAPI app, REST, websocket, log-thread and stream-thread.
-- `src/msg_relay/web/app.js`: client rendering and websocket consumer.
-- `src/msg_relay/web/styles.css`: UI style.
-- `src/msg_relay/espressif_devices.json`: device state DB.
+- `src/openrdk/ordk_run.py`: process bootstrap, log trimming, web thread start, relay start.
+- `src/openrdk/ordk_runtime.py`: CommsRuntime class — in-process SDK entrypoint.
+- `src/openrdk/functions.py`: udev + serial + handshake + keepalive + DB writes.
+- `src/openrdk/webview.py`: FastAPI app, REST, websocket, log-thread and stream-thread.
+- `src/openrdk/web/app.js`: client rendering and websocket consumer.
+- `src/openrdk/web/styles.css`: UI style.
+- `src/openrdk/espressif_devices.json`: device state DB.
 - `comms-raw.log`: raw comms NDJSON DB.
 
 ## Startup Sequence
-1. `run.py` resolves paths and starts log trimmer.
-2. `run.py` triggers one-shot run access tracker.
-3. `run.py` configures comms log path.
-4. `run.py` starts webview in thread.
-5. `run.py` calls `conex()` (udev monitor + serial logic).
+1. `ordk_run.py` resolves paths and starts log trimmer.
+2. `ordk_run.py` triggers one-shot run access tracker.
+3. `ordk_run.py` configures comms log path.
+4. `ordk_run.py` starts webview in thread.
+5. `ordk_run.py` calls `conex()` (udev monitor + serial logic).
 
 ## Protocol Summary
 - Host sends handshake bytes.

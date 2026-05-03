@@ -5,6 +5,8 @@ const state = {
   ws: null,
   clearAfterLine: 0,
   autoScrollEnabled: true,
+  hideKeepAlive: false,
+  hideHandshake: false,
   activeMessageType: "CMD",
   supportedMessageTypes: [],
   activeBaudRate: 115200,

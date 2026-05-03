@@ -143,6 +143,8 @@ class BaseModule:
             "cmd_timeout",
             "cmd_superseded",
             "cmd_cancelled",
+            "cmd_mode_inactive",
+            "cmd_mode_required",
             "keepalive_not_running",
             "keepalive_exception",
             "serial_open_failed",
@@ -224,13 +226,13 @@ class TractionModule(BaseModule):
     @staticmethod
     def _normalize_direction(direction: str) -> tuple[int, str]:
         text = str(direction or "").strip().lower()
-        if text in {"forward", "fwd", "cw", "clockwise", "+", "positive"}:
+        if text in {"forward", "fwd", "f", "cw", "clockwise", "+", "positive"}:
             return 1, "forward"
-        if text in {"backward", "reverse", "rev", "ccw", "counterclockwise", "-", "negative"}:
+        if text in {"backward", "reverse", "rev", "b", "ccw", "counterclockwise", "-", "negative"}:
             return -1, "backward"
         raise ValueError(
             "direction must be one of: "
-            "forward/fwd/cw/clockwise or backward/reverse/ccw/counterclockwise"
+            "forward/fwd/f/cw/clockwise or backward/reverse/b/ccw/counterclockwise"
         )
 
     def _set_output_direction(self, sign: int, timeout_sec: float = 1.5) -> dict:
@@ -405,6 +407,24 @@ class TractionModule(BaseModule):
 
     def move_angle_backward(self, angle_deg: float | int, timeout_sec: float = 1.5) -> dict:
         return self.move_angle("backward", angle_deg=angle_deg, timeout_sec=timeout_sec)
+
+    def set_pid_rpm(
+        self,
+        kp: float | None = None,
+        ki: float | None = None,
+        kd: float | None = None,
+        timeout_sec: float = 1.5,
+    ) -> dict:
+        if kp is None and ki is None and kd is None:
+            raise ValueError("at least one of kp, ki, kd must be provided")
+        results = {}
+        if kp is not None:
+            results["kp"] = self.send_raw_cmd(f"SET PID RPM KP {float(kp)}", timeout_sec=timeout_sec)
+        if ki is not None:
+            results["ki"] = self.send_raw_cmd(f"SET PID RPM KI {float(ki)}", timeout_sec=timeout_sec)
+        if kd is not None:
+            results["kd"] = self.send_raw_cmd(f"SET PID RPM KD {float(kd)}", timeout_sec=timeout_sec)
+        return results
 
     def get_pid_rpm(self, timeout_sec: float = 1.5) -> dict:
         """

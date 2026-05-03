@@ -5,10 +5,6 @@ import threading
 import time
 
 from openrdk.constants import (
-    DEFAULT_SERIAL_BAUD,
-    DEFAULT_SERIAL_PORT,
-    READ_TIMEOUT_SEC,
-    RETRY_DELAY_SEC,
     DEFAULT_DEVICE_DB_PATH,
     DEFAULT_COMMS_LOG_PATH,
     DEFAULT_SERVICE_LOG_PATH,
@@ -17,7 +13,6 @@ from openrdk.constants import (
     WEBVIEW_HOST,
     WEBVIEW_PORT,
 )
-from openrdk.functions import run_with_retries
 from openrdk.ordk_runtime import CommsRuntime
 
 
@@ -147,17 +142,6 @@ def _start_log_trimmer(log_path: str, max_bytes: int, interval_sec: float):
         name="openrdk-log-trimmer",
         daemon=True,
     ).start()
-
-
-def test():
-    port = os.getenv("SERIAL_PORT", DEFAULT_SERIAL_PORT)
-    baud = int(os.getenv("SERIAL_BAUD", str(DEFAULT_SERIAL_BAUD)))
-    run_with_retries(
-        port=port,
-        baud=baud,
-        timeout=READ_TIMEOUT_SEC,
-        retry_delay=RETRY_DELAY_SEC,
-    )
 
 
 def main():

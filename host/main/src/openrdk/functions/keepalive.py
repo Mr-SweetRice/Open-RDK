@@ -466,6 +466,9 @@ def _keepalive_loop(
 
     try:
         while not stop_event.is_set():
+            with _state._FLASH_LOCK:
+                if serial_number in _state._FLASH_LOCKED_SERIALS:
+                    break
             telemetry_mode = device_message_type == MESSAGE_TYPE_TELEMETRY
             now_mono = time.monotonic()
             db_refresh_interval = 0.05 if telemetry_mode else 0.25
@@ -518,6 +521,7 @@ def _keepalive_loop(
                 )
                 wake_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC)
                 wake_event.clear()
+                last_db_refresh_at = 0.0
                 if stop_event.is_set():
                     break
                 continue
@@ -643,6 +647,7 @@ def _keepalive_loop(
                     _cancel_cmd_request(serial_number, "serial_open_failed")
                     wake_event.wait(FRAME_KEEPALIVE_INTERVAL_SEC)
                     wake_event.clear()
+                    last_db_refresh_at = 0.0
                     if stop_event.is_set():
                         break
                     continue
@@ -1051,6 +1056,7 @@ def _keepalive_loop(
                 wait_sec = FRAME_KEEPALIVE_INTERVAL_SEC
             wake_event.wait(wait_sec)
             wake_event.clear()
+            last_db_refresh_at = 0.0
             if stop_event.is_set():
                 break
 

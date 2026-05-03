@@ -1,4 +1,10 @@
 from .comms_log import configure_comms_log_path
+from .flasher import (
+    SUPPORTED_FIRMWARE_TYPES,
+    flash_firmware,
+    flash_firmware_by_node,
+    flash_firmware_on_port,
+)
 from .framing import _SerialFrameReader
 from .keepalive import (
     send_device_cmd_once,
@@ -23,7 +29,7 @@ from .registry import (
     supported_message_types,
     supported_serial_baud_rates,
 )
-from .transport import open_serial, relay_loop, run_with_retries
+from .transport import open_serial
 from .udev import (
     bootstrap_connected_devices,
     conex,
@@ -35,9 +41,11 @@ from .udev import (
 
 __all__ = [
     "configure_comms_log_path",
+    "SUPPORTED_FIRMWARE_TYPES",
+    "flash_firmware",
+    "flash_firmware_by_node",
+    "flash_firmware_on_port",
     "open_serial",
-    "relay_loop",
-    "run_with_retries",
     "get_active_message_type",
     "set_active_message_type",
     "get_device_message_type",

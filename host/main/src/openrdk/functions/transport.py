@@ -55,22 +55,6 @@ def open_serial(port: str, baud: int, timeout: float):
     return serial.Serial(port, baudrate=baud, timeout=timeout)
 
 
-def relay_loop(ser: serial.Serial):
-    while True:
-        line = ser.readline()
-        if not line:
-            continue
-
-
-def run_with_retries(port: str, baud: int, timeout: float, retry_delay: float):
-    while True:
-        try:
-            with open_serial(port, baud, timeout) as ser:
-                relay_loop(ser)
-        except Exception as exc:
-            print(f"[comms] Error: {exc} — retrying in {retry_delay}s", flush=True)
-            time.sleep(retry_delay)
-
 
 def _build_telemetry_start_payload() -> bytes:
     host_epoch_ms = int(time.time_ns() // 1_000_000)

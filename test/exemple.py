@@ -6,34 +6,37 @@
 """
 
 from __future__ import annotations
-from openrdk import CommsRuntime
 import time
+from openrdk import CommsRuntime, FlashError
+
 
 def main():
     openrdk = CommsRuntime(
         auto_start=True,
-        enable_webview=True,          # set False to disable webview server
-        enable_webview_updates=False,  # set False to disable realtime UI stream
+        enable_webview=True,
+        enable_webview_updates=True,
     )
+    openrdk.post("webview_complete")
+    time.sleep(3) # wait for bootstrap_connected_devices to finish scanning
 
     try:
-        openrdk.post("run")
+        devices = openrdk.list_devices(verbose="full")
 
-        motor_esquerdo = openrdk.traction(openrdk.get_serial_by_name("motor_01"))
-        motor_esquerdo.move_angle_forward(180)
-        
-        time.sleep(2)
-        print("SETUP...OVER")
+        # motor_esq = openrdk.module(openrdk.get_serial_by_name("motor_esq"))
+        # motor_esq.move_angle("F", 90)
 
-        while True:
-            motor_esquerdo.move_angle_forward(90)
-            motor_esquerdo.move_angle_backward(90)
-           
+        # --- flash a device (hold BOOT + press RESET first) ---
+        #openrdk.flash_firmware("98:3D:AE:41:5A:24", "traction_module")
+
+        input("\npress Enter to quit\n")
 
     except KeyboardInterrupt:
-        print("shutdown requested")
+        print("\nshutdown requested")
+    except FlashError as exc:
+        print(f"flash failed: {exc}")
     finally:
-        pass
-       
+        openrdk.stop()
+
+
 if __name__ == "__main__":
     main()

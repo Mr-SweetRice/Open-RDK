@@ -29,6 +29,10 @@ _COMMS_LOG_QUEUE: queue.Queue[str] = queue.Queue(maxsize=max(256, int(COMMS_LOG_
 _COMMS_LOG_WRITER_THREAD: threading.Thread | None = None
 _COMMS_LOG_WRITER_STOP = threading.Event()
 
+_FLASH_LOCK = threading.Lock()
+_FLASH_LOCKED_SERIALS: set[str] = set()
+_FLASH_LOCKED_NODES: set[str] = set()
+
 _ACTIVE_MESSAGE_TYPE: str = DEFAULT_ACTIVE_MESSAGE_TYPE
 _ACTIVE_SERIAL_BAUD: int = DEFAULT_SERIAL_BAUD
 _ACTIVE_MESSAGE_LOCK = threading.Lock()

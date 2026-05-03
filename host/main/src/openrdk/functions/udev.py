@@ -27,7 +27,6 @@ from .registry import (
     _save_db,
     _update_registry_by_serial,
     get_active_serial_baud,
-    get_device_message_type,
 )
 from .transport import _probe_link_via_handshake
 
@@ -238,18 +237,36 @@ def matches(dev: pyudev.Device) -> bool:
 
 
 def on_attach(dev: pyudev.Device, db_path: str):
-    node = dev.device_node
     serial_number = _extract_serial(dev)
+    node = dev.device_node
+    with _state._FLASH_LOCK:
+        if serial_number and serial_number in _state._FLASH_LOCKED_SERIALS:
+            return
+        if node and node in _state._FLASH_LOCKED_NODES:
+            return
+
     known_message_type = None
+    known_module_type = None
     if serial_number:
-        known_message_type = get_device_message_type(db_path=db_path, serial_number=serial_number)
+        with _state._DB_LOCK:
+            _data = _load_db(db_path)
+            _item = _find_device_by_serial(_data["devices"], serial_number)
+            if _item:
+                known_message_type = _normalize_message_type_name(_item.get("message_type"))
+                known_module_type = _normalize_module_type(
+                    _item.get("module_type") or _item.get("firmware_module")
+                )
+
     result = _update_registry(dev, STATUS_ONLINE_CONNECTED, db_path, link_live=False, link_status=LINK_STATUS_NOT_LIVE)
     if serial_number:
         _update_registry_by_serial(serial_number=serial_number, db_path=db_path, telemetry_active=False)
 
-    skip_handshake_probe = (
-        bool(node)
-        and _normalize_message_type_name(known_message_type) == MESSAGE_TYPE_TRACTION_OUT
+    # Skip the blocking probe when the device is already known with a valid module type.
+    # The keepalive does its own HELLO + module query on connect — the probe is only
+    # needed the very first time a device is seen.
+    skip_handshake_probe = bool(node) and (
+        known_message_type == MESSAGE_TYPE_TRACTION_OUT
+        or bool(known_module_type and known_module_type != DEFAULT_MODULE_TYPE)
     )
     if node and not skip_handshake_probe:
         link_live, module_type, module_id = _probe_link_via_handshake(

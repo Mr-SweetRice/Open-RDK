@@ -28,6 +28,8 @@ const elements = {
   commsTable: document.getElementById("commsTable"),
   wsStatus: document.getElementById("wsStatus"),
   clearStream: document.getElementById("clearStream"),
+  hideKeepAliveToggle: document.getElementById("hideKeepAliveToggle"),
+  hideHandshakeToggle: document.getElementById("hideHandshakeToggle"),
   autoScrollToggle: document.getElementById("autoScrollToggle"),
   messageTypeSelect: document.getElementById("messageTypeSelect"),
   baudRateSelect: document.getElementById("baudRateSelect"),
@@ -193,9 +195,35 @@ function isEventForSelectedDevice(event) {
 }
 
 function filteredEvents() {
-  const list = state.events
+  let list = state.events
     .filter(isEventForSelectedDevice)
     .filter((event) => Number(event.line || 0) > state.clearAfterLine);
+
+  if (state.hideKeepAlive) {
+    const defaultByType = {};
+    for (const spec of state.supportedMessageTypes) {
+      if (spec.default_content) defaultByType[spec.name] = spec.default_content;
+    }
+    const isKeepaliveTx = (e) =>
+      e.direction === "tx" &&
+      e.phase === "stream" &&
+      e.message != null &&
+      defaultByType[e.message_type] === e.message;
+    const keepaliveSeqs = new Set(
+      list.filter(isKeepaliveTx).map((e) => e.seq_abs).filter((s) => s != null)
+    );
+    list = list.filter((e) => {
+      if (e.phase !== "stream") return true;
+      if (isKeepaliveTx(e)) return false;
+      if (e.seq_abs != null && keepaliveSeqs.has(e.seq_abs)) return false;
+      return true;
+    });
+  }
+
+  if (state.hideHandshake) {
+    list = list.filter((e) => e.phase !== "hello" && e.phase !== "module");
+  }
+
   return list.slice(-1000);
 }
 
@@ -364,6 +392,36 @@ function updateSelectedTitle() {
 function clearVisualStream() {
   const last = state.events[state.events.length - 1];
   state.clearAfterLine = Number(last?.line || 0);
+  renderEvents();
+}
+
+function renderHideKeepAliveToggle() {
+  const enabled = state.hideKeepAlive;
+  elements.hideKeepAliveToggle.textContent = enabled
+    ? "Hide keepalive: On"
+    : "Hide keepalive: Off";
+  elements.hideKeepAliveToggle.classList.toggle("is-on", enabled);
+  elements.hideKeepAliveToggle.classList.toggle("is-off", !enabled);
+}
+
+function renderHideHandshakeToggle() {
+  const enabled = state.hideHandshake;
+  elements.hideHandshakeToggle.textContent = enabled
+    ? "Hide handshake: On"
+    : "Hide handshake: Off";
+  elements.hideHandshakeToggle.classList.toggle("is-on", enabled);
+  elements.hideHandshakeToggle.classList.toggle("is-off", !enabled);
+}
+
+function toggleHideKeepAlive() {
+  state.hideKeepAlive = !state.hideKeepAlive;
+  renderHideKeepAliveToggle();
+  renderEvents();
+}
+
+function toggleHideHandshake() {
+  state.hideHandshake = !state.hideHandshake;
+  renderHideHandshakeToggle();
   renderEvents();
 }
 
@@ -992,6 +1050,8 @@ function start() {
   updateSelectedTitle();
   renderDevices();
   renderEvents();
+  renderHideKeepAliveToggle();
+  renderHideHandshakeToggle();
   renderAutoScrollToggle();
   renderMessageTypeSelect();
   renderTractionOutInput();
@@ -1000,6 +1060,12 @@ function start() {
   renderTelemetryControls();
   elements.clearStream.addEventListener("click", clearVisualStream);
   elements.autoScrollToggle.addEventListener("click", toggleAutoScroll);
+  if (elements.hideKeepAliveToggle) {
+    elements.hideKeepAliveToggle.addEventListener("click", toggleHideKeepAlive);
+  }
+  if (elements.hideHandshakeToggle) {
+    elements.hideHandshakeToggle.addEventListener("click", toggleHideHandshake);
+  }
   if (elements.messageTypeSelect) {
     elements.messageTypeSelect.addEventListener("change", (event) => {
       updateActiveMessageType(event.target.value);

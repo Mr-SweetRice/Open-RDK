@@ -25,3 +25,7 @@ class ModuleTypeMismatchError(RelayError):
 class CommandFailedError(RelayError):
     """Raised when firmware returns non-success for an SDK command."""
 
+
+class FlashError(RelayError):
+    """Raised when a firmware flash operation fails."""
+

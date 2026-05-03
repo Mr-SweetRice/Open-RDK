@@ -2,6 +2,7 @@ from .errors import (
     CommandFailedError,
     DeviceNotFoundError,
     DeviceOfflineError,
+    FlashError,
     ModuleTypeMismatchError,
     RelayError,
     RuntimeNotStartedError,
@@ -22,4 +23,5 @@ __all__ = [
     "UnsupportedModuleTypeError",
     "ModuleTypeMismatchError",
     "CommandFailedError",
+    "FlashError",
 ]

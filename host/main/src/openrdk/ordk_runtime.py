@@ -221,8 +221,29 @@ class CommsRuntime:
         if webview_thread and webview_thread.is_alive():
             webview_thread.join(max(0.1, float(timeout_sec)))
 
-    def list_devices(self) -> list[dict]:
-        return list_device_snapshots(self._db_path)
+    def list_devices(self, verbose: str | bool | None = None) -> list[dict]:
+        devices = list_device_snapshots(self._db_path)
+        if verbose:
+            mode = str(verbose).lower() if isinstance(verbose, str) else "full"
+            print(f"{len(devices)} device(s):")
+            for d in devices:
+                name = d.get("name") or d.get("module_type") or "?"
+                serial = d.get("serial_number", "?")
+                if mode == "serials":
+                    print(f"  {serial}")
+                elif mode == "names":
+                    print(f"  {name}")
+                elif mode == "status":
+                    print(f"  [{name}]  {d.get('status','?')}")
+                else:
+                    print(
+                        f"  [{name}]"
+                        f"  serial={serial}"
+                        f"  type={d.get('module_type','?')}"
+                        f"  status={d.get('status','?')}"
+                        f"  port={d.get('device_node','?')}"
+                    )
+        return devices
 
     def get_device(self, serial_number: str) -> dict | None:
         return get_device_snapshot(self._db_path, serial_number)
@@ -299,6 +320,43 @@ class CommsRuntime:
             return LineSensorModule(self, serial_number=serial_number, snapshot=snapshot)
         raise UnsupportedModuleTypeError(
             f"unsupported module_type '{module_type or 'unknown'}' for {serial_number}"
+        )
+
+    @property
+    def supported_firmware_types(self) -> list[str]:
+        from .functions.flasher import SUPPORTED_FIRMWARE_TYPES
+        return list(SUPPORTED_FIRMWARE_TYPES)
+
+    def flash_firmware(
+        self,
+        serial_number: str,
+        firmware_type: str,
+        baud: int = 460800,
+        on_output=None,
+    ) -> dict:
+        from .functions.flasher import flash_firmware as _flash
+        return _flash(
+            serial_number=serial_number,
+            firmware_type=firmware_type,
+            db_path=self._db_path,
+            baud=baud,
+            on_output=on_output,
+        )
+
+    def flash_firmware_by_port(
+        self,
+        device_node: str,
+        firmware_type: str,
+        baud: int = 460800,
+        on_output=None,
+    ) -> dict:
+        from .functions.flasher import flash_firmware_by_node
+        return flash_firmware_by_node(
+            device_node=device_node,
+            firmware_type=firmware_type,
+            db_path=self._db_path,
+            baud=baud,
+            on_output=on_output,
         )
 
     def traction(self, serial_number: str):

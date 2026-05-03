@@ -14,6 +14,7 @@ dependencies = [
   "fastapi==0.115.6",
   "uvicorn==0.32.1",
   "websockets==13.1",
+  "esptool>=4.7,<6",
 ]
 
 [project.scripts]
@@ -27,4 +28,4 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-openrdk = ["web/*", "espressif_devices.json", "espressif_devices.json.bak"]
+openrdk = ["web/*", "espressif_devices.json", "espressif_devices.json.bak", "firmware/**/*.bin"]

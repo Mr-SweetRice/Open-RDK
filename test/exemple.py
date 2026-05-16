@@ -61,14 +61,14 @@ def main():
     sensor = openrdk.line_sensor(openrdk.get_serial_by_name("linha"))
     motors = openrdk.motors(
         {
-            "E": openrdk.get_serial_by_name("motor_esq1"),
-            "D": openrdk.get_serial_by_name("motor_dir1"),
+            "E": openrdk.get_serial_by_name("teste_rafael"),
+            #"D": openrdk.get_serial_by_name("motor_dir1"),
         },
-        inverted="D",
+        
     )
 
     print("calibrating... move sensor over the full line surface (5 s)")
-    sensor.calibrate(duration_ms=5000, wait=True)
+    #sensor.calibrate(duration_ms=5000, wait=True)
     print("calibration done — starting line follow")
 
     prev_error = 0.0
@@ -76,47 +76,8 @@ def main():
 
     try:
         while True:
-            data = sensor.get_data()
-            values = data["values"]
-            normal = [v * 100.0 for v in values]
+            motors.E.move(40)
 
-            left_90, right_90 = detect_90(normal)
-
-            if left_90:
-                while left_90:
-                    motors.E.move(-TURN_SPEED)
-                    motors.D.move(TURN_SPEED)
-                    data = sensor.get_data()
-                    normal = [v * 100.0 for v in data["values"]]
-                    left_90, _ = detect_90(normal)
-                    if normal[2] > DETECT_TH_90:
-                        left_90 = False
-                prev_time = time.monotonic()
-
-            elif right_90:
-                while right_90:
-                    motors.E.move(TURN_SPEED)
-                    motors.D.move(-TURN_SPEED)
-                    data = sensor.get_data()
-                    normal = [v * 100.0 for v in data["values"]]
-                    _, right_90 = detect_90(normal)
-                    if (normal[2] < DETECT_TH_90 and normal[0] >= DETECT_TH_90
-                            and normal[3] < DETECT_TH_90 and normal[4] < DETECT_TH_90):
-                        right_90 = False
-                prev_time = time.monotonic()
-
-            else:
-                error, _gap = compute_position(values, prev_error)
-
-                now = time.monotonic()
-                dt = max(now - prev_time, 0.001)
-                prev_time = now
-
-                correction = KP * error + KD * (error - prev_error) / dt
-                prev_error = error
-
-                motors.E.move(clamp(VEL_BASE - correction, -100, 100))
-                motors.D.move(clamp(VEL_BASE + correction, -100, 100))
 
     except KeyboardInterrupt:
         print("\nshutdown requested")

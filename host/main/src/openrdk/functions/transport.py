@@ -211,6 +211,13 @@ def _log_stream_rx_frame(
         serial_number=serial_number,
         parsed_frame=parsed_for_log,
     )
+    # Cache every LS telemetry frame regardless of which code path receives it
+    # (drain, SYNC wait, START wait — all paths log through here).
+    if serial_number:
+        msg_text = str(parsed.get("message_text") or "")
+        if msg_text.startswith("LS,"):
+            with _state._LATEST_LS_LOCK:
+                _state._LATEST_LS_FRAMES[serial_number] = (time.monotonic(), msg_text)
     return parsed_for_log
 
 
@@ -591,3 +598,9 @@ def _drain_stream_reader_frames(
         )
         received += 1
     return received
+
+
+def get_latest_ls_frame(serial_number: str) -> tuple[float, str] | None:
+    """Return (monotonic_ts, raw_text) of the last cached LS telemetry frame, or None."""
+    with _state._LATEST_LS_LOCK:
+        return _state._LATEST_LS_FRAMES.get(serial_number)

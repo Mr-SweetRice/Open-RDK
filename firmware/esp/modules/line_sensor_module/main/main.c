@@ -42,7 +42,7 @@ static void apply_default_cfg(ls_storage_cfg_t *cfg)
     }
     memset(cfg, 0, sizeof(*cfg));
     cfg->version = LS_STORAGE_CFG_VERSION;
-    cfg->track_type = LS_TRACK_LIGHT;
+    cfg->track_type = LS_TRACK_DARK;
     cfg->digital_threshold = 0.45f;
     cfg->detect_threshold = 0.20f;
     cfg->calibration_time_ms = LINE_SENSOR_DEFAULT_CAL_TIME_MS;

@@ -328,6 +328,7 @@ function renderDevices() {
     node.className = `device-item ${selected ? "selected" : ""}`;
     const lastErrorKind = String(device.last_error_kind || "").trim() || "-";
     const lastErrorAt = String(device.last_error_at || "").trim() || "-";
+    const isLineSensor = resolveModule(device) === "line_sensor_module";
     node.innerHTML = `
       <div class="device-title">
         <span class="device-name">${escapeHtml(resolveName(device))}</span>
@@ -336,6 +337,7 @@ function renderDevices() {
       <div class="device-subtitle">
         <span class="serial">${escapeHtml(device.serial_number || "-")}</span>
         <button class="rename-btn" type="button">Rename</button>
+        ${isLineSensor ? `<a class="monitor-link" href="/line-sensor?serial=${encodeURIComponent(device.serial_number)}" target="_blank">Monitor</a>` : ""}
       </div>
       <div class="device-meta">
         <span class="state ${statusStateClass(device.status)}">${escapeHtml(
@@ -371,6 +373,12 @@ function renderDevices() {
       renameButton.addEventListener("click", (event) => {
         event.stopPropagation();
         renameDevice(device);
+      });
+    }
+    const monitorLink = node.querySelector(".monitor-link");
+    if (monitorLink) {
+      monitorLink.addEventListener("click", (event) => {
+        event.stopPropagation();
       });
     }
     fragment.appendChild(node);

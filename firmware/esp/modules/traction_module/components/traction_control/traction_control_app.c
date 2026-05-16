@@ -136,13 +136,15 @@ static void apply_startup_motor_output(void)
 static void set_control_to_zero(bool clear_force_output)
 {
     portENTER_CRITICAL(&s_pid_mux);
-    s_setpoint_rpm = 0.0f;
     s_target_pos_deg = 0.0f;
     s_pos_target_explicit = false;
     if (clear_force_output) {
+        s_setpoint_rpm = 0.0f;
         s_force_out_pct = -1.0f;
         s_force_out_is_raw = false;
     }
+    // When preserving force output (link timeout), s_setpoint_rpm is kept so
+    // the motor maintains its direction until the host reconnects.
     s_pos_mode_enabled = false;
     s_pos_sine_enabled = false;
     portEXIT_CRITICAL(&s_pid_mux);
@@ -421,12 +423,15 @@ static void comm_set_rpm_setpoint(void *ctx, float value)
 static void comm_set_force_output(void *ctx, float output_pct)
 {
     (void)ctx;
-    if (output_pct < 0.0f) output_pct = 0.0f;
-    if (output_pct > MOTOR_MAX_OUTPUT_PCT) output_pct = MOTOR_MAX_OUTPUT_PCT;
+    // Signed input: sign = direction, magnitude = output level.
+    // This lets the host change direction without a CMD-mode round-trip.
+    float magnitude = fabsf(output_pct);
+    if (magnitude > MOTOR_MAX_OUTPUT_PCT) magnitude = MOTOR_MAX_OUTPUT_PCT;
 
     portENTER_CRITICAL(&s_pid_mux);
-    s_force_out_pct = output_pct;
+    s_force_out_pct = magnitude;
     s_force_out_is_raw = false;
+    s_setpoint_rpm = (output_pct >= 0.0f) ? 50.0f : -50.0f;
     portEXIT_CRITICAL(&s_pid_mux);
 }
 

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Line Sensor Monitor</title>
+  <style>
+    :root {
+      --bg: #10161d; --panel: #16202a; --edge: #233244;
+      --text: #ebf2f7; --muted: #8da2b8;
+      --accent: #7dd3fc; --accent2: #f59e0b;
+      --ok: #84cc16; --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Fira Sans", Arial, sans-serif;
+      background: radial-gradient(900px 500px at 10% 5%, #203042 0%, transparent 60%),
+                  linear-gradient(180deg, #0d141b 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 20px; border-bottom: 1px solid var(--edge);
+    }
+    header a {
+      color: var(--muted); text-decoration: none; font-size: 13px;
+      padding: 4px 10px; border: 1px solid var(--edge); border-radius: 6px;
+    }
+    header a:hover { color: var(--text); border-color: var(--accent); }
+    .hd-title { font-size: 18px; font-weight: 700; flex: 1; }
+    .hd-serial { font-size: 11px; color: var(--muted); font-family: monospace; }
+    .badge {
+      font-size: 12px; padding: 3px 9px; border-radius: 999px;
+      border: 1px solid var(--edge); color: var(--muted);
+    }
+    .badge.live   { border-color: rgba(132,204,22,.45); color: var(--ok); background: rgba(132,204,22,.08); }
+    .badge.stale  { border-color: rgba(245,158,11,.4);  color: var(--accent2); background: rgba(245,158,11,.06); }
+    .badge.nodata { border-color: rgba(239,68,68,.4);   color: var(--err); background: rgba(239,68,68,.06); }
+    .layout {
+      display: grid; grid-template-columns: 1.3fr 320px;
+      gap: 16px; padding: 16px 20px 20px;
+    }
+    .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; padding: 16px; }
+    .muted { font-size: 13px; color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+    button {
+      background: #0d141b; color: var(--text); border: 1px solid #2a3d50;
+      border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px;
+    }
+    button.primary { background: var(--accent); color: #07202c; border-color: transparent; font-weight: 700; }
+    button:hover { border-color: var(--accent); }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+    .metric { background: #0d141b; border: 1px solid #223040; border-radius: 12px; padding: 12px; }
+    .metric .label { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+    .metric .value { font-size: 22px; font-weight: 700; }
+    .position-wrap { margin-top: 18px; padding-top: 12px; border-top: 1px solid #223040; }
+    .position-track {
+      position: relative; height: 52px; border-radius: 999px;
+      background: linear-gradient(90deg, #13202d, #0b1118);
+      border: 1px solid #223040; margin-top: 10px;
+    }
+    .position-center { position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: rgba(255,255,255,.15); }
+    .position-dot {
+      position: absolute; top: 50%; width: 20px; height: 20px; border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent2), #f97316);
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 0 5px rgba(245,158,11,.14);
+      transition: left 0.12s linear;
+    }
+    .lag-wrap { margin-top: 18px; padding-top: 12px; border-top: 1px solid #223040; }
+    .lag-chart {
+      width: 100%; height: 90px; border-radius: 10px;
+      background: linear-gradient(180deg, #13202d, #0b1118);
+      border: 1px solid #223040; margin-top: 8px; overflow: hidden;
+    }
+    .lag-chart svg { width: 100%; height: 100%; display: block; }
+    .bars { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 16px; }
+    .sensor { background: #0d141b; border: 1px solid #223040; border-radius: 12px; padding: 10px; }
+    .sensor h3 { margin: 0 0 8px; font-size: 11px; color: var(--muted); }
+    .barbox {
+      height: 140px; border-radius: 10px;
+      background: linear-gradient(180deg, #172231, #0a1118);
+      border: 1px solid #223040; display: flex; align-items: end;
+      padding: 8px; margin-bottom: 6px;
+    }
+    .bar {
+      width: 100%; border-radius: 8px 8px 4px 4px;
+      background: linear-gradient(180deg, var(--accent), #0284c7);
+      min-height: 4px; transition: height 0.12s linear;
+    }
+    .digital {
+      font-size: 11px; padding: 3px 7px; border-radius: 999px;
+      border: 1px solid #29405a; color: var(--muted); display: inline-block;
+    }
+    .digital.on { background: rgba(132,204,22,.12); border-color: rgba(132,204,22,.45); color: var(--ok); }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+    th, td { border-bottom: 1px solid #223040; padding: 6px; text-align: center; }
+    th { color: var(--muted); font-weight: 600; }
+    .cfg-box { margin-top: 12px; background: #0d141b; border: 1px solid #223040; border-radius: 10px; padding: 12px; }
+    .cfg-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+    .cfg-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1a2b3a; font-size: 12px; }
+    .cfg-row:last-child { border-bottom: none; }
+    .cfg-row .k { color: var(--muted); }
+    .cfg-row .v { font-family: monospace; text-align: right; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; line-height: 1.5; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .summary { grid-template-columns: repeat(2,1fr); } }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">&#8592; Host</a>
+    <div>
+      <div class="hd-title" id="hdTitle">Line Sensor Monitor</div>
+      <div class="hd-serial" id="hdSerial">—</div>
+    </div>
+    <span class="badge nodata" id="statusBadge">no data</span>
+    <span class="badge" id="rateBadge" style="font-size:11px;">— Hz</span>
+  </header>
+
+  <div class="layout">
+    <div class="panel">
+      <div class="summary">
+        <div class="metric"><div class="label">Position</div><div class="value" id="posVal">—</div></div>
+        <div class="metric"><div class="label">Strength</div><div class="value" id="strVal">—</div></div>
+        <div class="metric"><div class="label">Line</div><div class="value" id="detVal" style="color:var(--muted);">—</div></div>
+      </div>
+
+      <div class="position-wrap">
+        <span class="muted">Position  (&#8722;1 left &rarr; 0 center &rarr; +1 right)</span>
+        <div class="position-track">
+          <div class="position-center"></div>
+          <div class="position-dot" id="posDot" style="left:50%;opacity:.25;"></div>
+        </div>
+      </div>
+
+      <div class="lag-wrap">
+        <span class="muted">Firmware input lag (ms)</span>
+        <div class="lag-chart">
+          <svg viewBox="0 0 480 90" preserveAspectRatio="none">
+            <polyline id="lagLine" fill="none" stroke="#f59e0b" stroke-width="2" points="0,90 480,90"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="bars">
+        <div class="sensor"><h3>S0</h3><div class="barbox"><div class="bar" id="bar0" style="height:4px"></div></div><div class="muted">Raw: <span id="raw0">—</span></div><div class="muted"><span id="val0">—</span></div><div class="digital" id="dig0">0</div></div>
+        <div class="sensor"><h3>S1</h3><div class="barbox"><div class="bar" id="bar1" style="height:4px"></div></div><div class="muted">Raw: <span id="raw1">—</span></div><div class="muted"><span id="val1">—</span></div><div class="digital" id="dig1">0</div></div>
+        <div class="sensor"><h3>S2</h3><div class="barbox"><div class="bar" id="bar2" style="height:4px"></div></div><div class="muted">Raw: <span id="raw2">—</span></div><div class="muted"><span id="val2">—</span></div><div class="digital" id="dig2">0</div></div>
+        <div class="sensor"><h3>S3</h3><div class="barbox"><div class="bar" id="bar3" style="height:4px"></div></div><div class="muted">Raw: <span id="raw3">—</span></div><div class="muted"><span id="val3">—</span></div><div class="digital" id="dig3">0</div></div>
+        <div class="sensor"><h3>S4</h3><div class="barbox"><div class="bar" id="bar4" style="height:4px"></div></div><div class="muted">Raw: <span id="raw4">—</span></div><div class="muted"><span id="val4">—</span></div><div class="digital" id="dig4">0</div></div>
+      </div>
+
+      <table>
+        <thead><tr><th>Sensor</th><th>Cal Min</th><th>Cal Max</th></tr></thead>
+        <tbody>
+          <tr><td>S0</td><td id="min0">—</td><td id="max0">—</td></tr>
+          <tr><td>S1</td><td id="min1">—</td><td id="max1">—</td></tr>
+          <tr><td>S2</td><td id="min2">—</td><td id="max2">—</td></tr>
+          <tr><td>S3</td><td id="min3">—</td><td id="max3">—</td></tr>
+          <tr><td>S4</td><td id="min4">—</td><td id="max4">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <button id="refreshBtn" class="primary">Refresh Config</button>
+      </div>
+      <p class="hint">
+        Live when robot is running (polls comms log).<br>
+        When robot is stopped: use <b>Refresh Config</b> then switch to
+        TELEMETRY mode on the Host page and click <b>Start RX</b>.
+      </p>
+
+      <div class="cfg-box">
+        <div class="cfg-title">Device</div>
+        <div class="cfg-row"><span class="k">Name</span><span class="v" id="cfgName">—</span></div>
+        <div class="cfg-row"><span class="k">Status</span><span class="v" id="cfgStatus">—</span></div>
+        <div class="cfg-row"><span class="k">Link</span><span class="v" id="cfgLink">—</span></div>
+        <div class="cfg-row"><span class="k">Calibrating</span><span class="v" id="cfgCaling">—</span></div>
+        <div class="cfg-row"><span class="k">Input Lag</span><span class="v" id="cfgLag">—</span></div>
+      </div>
+
+      <div class="cfg-box">
+        <div class="cfg-title">Configuration</div>
+        <div class="cfg-row"><span class="k">Track Type</span><span class="v" id="cfgTrack">—</span></div>
+        <div class="cfg-row"><span class="k">Digital Th</span><span class="v" id="cfgDigTh">—</span></div>
+        <div class="cfg-row"><span class="k">Detect Th</span><span class="v" id="cfgDetTh">—</span></div>
+        <div class="cfg-row"><span class="k">Cal Time</span><span class="v" id="cfgCalTime">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const serial = new URLSearchParams(window.location.search).get("serial") || "";
+    document.getElementById("hdSerial").textContent = serial || "no serial";
+
+    const $ = id => document.getElementById(id);
+    const bars = [0,1,2,3,4].map(i => $(`bar${i}`));
+    const raws = [0,1,2,3,4].map(i => $(`raw${i}`));
+    const vals = [0,1,2,3,4].map(i => $(`val${i}`));
+    const digs = [0,1,2,3,4].map(i => $(`dig${i}`));
+    const mins = [0,1,2,3,4].map(i => $(`min${i}`));
+    const maxs = [0,1,2,3,4].map(i => $(`max${i}`));
+
+    const lagSamples = [];
+    let lastDataAt  = 0;
+    let updateCount = 0;
+    let rateDisplay = 0;
+
+    // --- rate counter ---
+    setInterval(() => {
+      rateDisplay = updateCount;
+      updateCount = 0;
+      $("rateBadge").textContent = `${rateDisplay} Hz`;
+    }, 1000);
+
+    // --- status badge ---
+    function updateBadge() {
+      const age = Date.now() - lastDataAt;
+      const b = $("statusBadge");
+      if (lastDataAt === 0)       { b.textContent = "no data";    b.className = "badge nodata"; }
+      else if (age < 2500)        { b.textContent = "live";       b.className = "badge live";   }
+      else if (age < 10000)       { b.textContent = "stale";      b.className = "badge stale";  }
+      else                        { b.textContent = "no data";    b.className = "badge nodata"; }
+    }
+    setInterval(updateBadge, 500);
+
+    // --- lag chart ---
+    function renderLag() {
+      if (!lagSamples.length) return;
+      const maxV = Math.max(1, ...lagSamples);
+      const pts = lagSamples.map((v, i) => {
+        const x = (i / Math.max(1, lagSamples.length - 1)) * 480;
+        const y = 90 - Math.max(0, Math.min(1, v / maxV)) * 82;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      $("lagLine").setAttribute("points", pts.join(" "));
+    }
+
+    // --- data renderers ---
+    function applyLS(parts) {
+      if (parts.length < 22) return;
+      lastDataAt = Date.now();
+      updateCount++;
+
+      const raw   = parts.slice(1, 6).map(Number);
+      const value = parts.slice(6, 11).map(Number);
+      const dig   = parts.slice(11, 16).map(Number);
+      const pos   = parseFloat(parts[16]);
+      const str   = parseFloat(parts[17]);
+      const det   = parseInt(parts[18]) === 1;
+      const cal   = parseInt(parts[19]) === 1;
+      const remMs = parseInt(parts[20]);
+      const lag   = parseFloat(parts[21]);
+
+      raw.forEach((v, i)   => { raws[i].textContent = isFinite(v) ? v : "—"; });
+      value.forEach((v, i) => {
+        const s = isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+        vals[i].textContent = s.toFixed(3);
+        bars[i].style.height = `${Math.max(4, s * 122)}px`;
+      });
+      dig.forEach((v, i) => {
+        const on = v === 1;
+        digs[i].textContent = on ? "1" : "0";
+        digs[i].classList.toggle("on", on);
+      });
+
+      $("posVal").textContent = isFinite(pos) ? pos.toFixed(3) : "—";
+      $("strVal").textContent = isFinite(str) ? str.toFixed(3) : "—";
+      const detEl = $("detVal");
+      detEl.textContent  = det ? "YES" : "no";
+      detEl.style.color  = det ? "var(--ok)" : "var(--muted)";
+
+      const cp = isFinite(pos) ? Math.max(-1, Math.min(1, pos)) : 0;
+      $("posDot").style.left    = `${((cp + 1) / 2) * 100}%`;
+      $("posDot").style.opacity = det ? "1" : "0.25";
+
+      $("cfgCaling").textContent = cal ? `yes (${remMs} ms)` : "no";
+      $("cfgLag").textContent    = isFinite(lag) ? `${lag.toFixed(3)} ms` : "—";
+
+      lagSamples.push(isFinite(lag) ? Math.max(0, lag) : 0);
+      if (lagSamples.length > 120) lagSamples.shift();
+      renderLag();
+    }
+
+    function applyCFG(parts) {
+      if (parts.length < 5) return;
+      $("cfgTrack").textContent   = parseInt(parts[1]) === 1 ? "light (white)" : "dark";
+      $("cfgDigTh").textContent   = parseFloat(parts[2]).toFixed(4);
+      $("cfgDetTh").textContent   = parseFloat(parts[3]).toFixed(4);
+      $("cfgCalTime").textContent = `${parts[4]} ms`;
+      const name = parts.slice(5).join(",").trim();
+      if (name) { $("hdTitle").textContent = `${name} Monitor`; $("cfgName").textContent = name; }
+    }
+
+    function applyCAL(parts) {
+      if (parts.length < 11) return;
+      parts.slice(1, 6).forEach((v, i) => { mins[i].textContent = v; });
+      parts.slice(6, 11).forEach((v, i) => { maxs[i].textContent = v; });
+    }
+
+    function applyINFO(parts) {
+      if (parts.length < 13) return;
+      const name = parts[2] || "";
+      if (name) { $("hdTitle").textContent = `${name} Monitor`; $("cfgName").textContent = name; }
+      $("cfgStatus").textContent = parts[3] || "—";
+      $("cfgLink").textContent   = parts[10] || "—";
+    }
+
+    function handleMessage(msg) {
+      if (msg.startsWith("LS,"))   applyLS(msg.split(","));
+      else if (msg.startsWith("CFG,"))  applyCFG(msg.split(","));
+      else if (msg.startsWith("CAL,"))  applyCAL(msg.split(","));
+      else if (msg.startsWith("INFO,")) applyINFO(msg.split(","));
+    }
+
+    // --- polling: primary data source ---
+    // Reads latest LS / CFG / CAL / INFO from the in-memory broker history.
+    // Works whenever robot is running (CMD mode GET DATA responses flow through).
+    let lastLsMsg = "";
+
+    async function poll() {
+      if (!serial) return;
+      try {
+        const r = await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/snapshot`);
+        if (!r.ok) return;
+        const d = await r.json();
+
+        // Always apply LS data so lastDataAt stays current even when values are constant
+        if (d.ls) {
+          lastLsMsg = d.ls;
+          handleMessage(d.ls);
+        }
+        if (d.cfg)  handleMessage(d.cfg);
+        if (d.cal)  handleMessage(d.cal);
+        if (d.info) handleMessage(d.info);
+      } catch (_) {}
+    }
+
+    // Poll every 100 ms (~10 Hz display) — streaming cache gives near-realtime LS data
+    setInterval(poll, 100);
+    poll(); // immediate first fetch
+
+    // --- streaming: re-affirm every 3 s (first call delayed so it doesn't race
+    //     with the page GET request that opened this tab) ---
+    async function startStream() {
+      if (!serial) return;
+      try {
+        await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/start`, { method: "POST" });
+      } catch (_) {}
+    }
+    setTimeout(startStream, 500);      // first call after page is fully loaded
+    setInterval(startStream, 3000);    // keep streaming alive every 3 s
+
+    // --- refresh button ---
+    $("refreshBtn").addEventListener("click", async () => {
+      try {
+        await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/refresh`, {method:"POST"});
+        // responses will appear in next poll cycle
+        setTimeout(poll, 800);
+        setTimeout(poll, 1800);
+        setTimeout(poll, 2800);
+      } catch (_) {}
+    });
+  </script>
+</body>
+</html>

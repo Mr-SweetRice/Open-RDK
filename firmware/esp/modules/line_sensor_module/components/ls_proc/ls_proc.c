@@ -18,7 +18,7 @@ void ls_proc_get_default_cfg(ls_proc_cfg_t *out_cfg)
     if (!out_cfg) {
         return;
     }
-    out_cfg->track_type = LS_TRACK_LIGHT;
+    out_cfg->track_type = LS_TRACK_DARK;
     out_cfg->digital_threshold = 0.45f;
     out_cfg->detect_threshold = 0.20f;
 }

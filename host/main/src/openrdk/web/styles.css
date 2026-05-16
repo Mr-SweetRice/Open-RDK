@@ -387,3 +387,17 @@ body {
     height: 38vh;
   }
 }
+
+.monitor-link {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid #2a3d50;
+  border-radius: 6px;
+  color: #7dd3fc;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.monitor-link:hover {
+  border-color: #7dd3fc;
+  background: rgba(125, 211, 252, 0.08);
+}

@@ -351,7 +351,7 @@ def create_webview_app(
     enable_realtime_stream: bool = True,
 ) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
-    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_new")
     broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
 
     app.state.db_path = db_path
@@ -744,7 +744,7 @@ def create_webview_app(
         _aio.ensure_future(_do())
         return {"ok": True}
 
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.mount("/static", StaticFiles(directory=os.path.join(static_dir, "static")), name="static")
 
     @app.get("/", include_in_schema=False)
     async def index():
@@ -754,6 +754,34 @@ def create_webview_app(
     async def line_sensor_page():
         return FileResponse(
             os.path.join(static_dir, "line-sensor.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/traction-motor-config", include_in_schema=False)
+    async def traction_motor_config_page():
+        return FileResponse(
+            os.path.join(static_dir, "traction-motor-config.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/traction-pid-tuner", include_in_schema=False)
+    async def traction_pid_tuner_page():
+        return FileResponse(
+            os.path.join(static_dir, "traction-pid-tuner.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/traction-position-tuner", include_in_schema=False)
+    async def traction_position_tuner_page():
+        return FileResponse(
+            os.path.join(static_dir, "traction-position-tuner.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/color", include_in_schema=False)
+    async def color_page():
+        return FileResponse(
+            os.path.join(static_dir, "color.html"),
             headers={"Cache-Control": "no-store"},
         )
 

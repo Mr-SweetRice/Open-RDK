@@ -1,0 +1,2 @@
+[console_scripts]
+openrdk = openrdk.ordk_run:main

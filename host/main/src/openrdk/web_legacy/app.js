@@ -329,6 +329,7 @@ function renderDevices() {
     const lastErrorKind = String(device.last_error_kind || "").trim() || "-";
     const lastErrorAt = String(device.last_error_at || "").trim() || "-";
     const isLineSensor = resolveModule(device) === "line_sensor_module";
+    const isTractionModule = resolveModule(device) === "traction_module";
     node.innerHTML = `
       <div class="device-title">
         <span class="device-name">${escapeHtml(resolveName(device))}</span>
@@ -337,8 +338,15 @@ function renderDevices() {
       <div class="device-subtitle">
         <span class="serial">${escapeHtml(device.serial_number || "-")}</span>
         <button class="rename-btn" type="button">Rename</button>
-        ${isLineSensor ? `<a class="monitor-link" href="/line-sensor?serial=${encodeURIComponent(device.serial_number)}" target="_blank">Monitor</a>` : ""}
+        ${isLineSensor ? `<a class="monitor-link" href="/line-sensor?serial=${encodeURIComponent(device.serial_number)}">Monitor</a>` : ""}
       </div>
+      ${isTractionModule ? `
+      <div class="device-links">
+        <a class="config-link" href="/traction-motor-config">Motor Config</a>
+        <a class="config-link" href="/traction-pid-tuner">PID Tuner</a>
+        <a class="config-link" href="/traction-position-tuner">Position</a>
+      </div>
+      ` : ""}
       <div class="device-meta">
         <span class="state ${statusStateClass(device.status)}">${escapeHtml(
       device.status || "-",
@@ -378,6 +386,11 @@ function renderDevices() {
     const monitorLink = node.querySelector(".monitor-link");
     if (monitorLink) {
       monitorLink.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+    }
+    for (const configLink of node.querySelectorAll(".config-link")) {
+      configLink.addEventListener("click", (event) => {
         event.stopPropagation();
       });
     }
@@ -998,6 +1011,16 @@ function connectWebSocket() {
 
   ws.onopen = () => setWsStatus(true);
 
+  let _renderEventsPending = false;
+  function scheduleRenderEvents() {
+    if (_renderEventsPending) return;
+    _renderEventsPending = true;
+    requestAnimationFrame(() => {
+      _renderEventsPending = false;
+      renderEvents();
+    });
+  }
+
   ws.onmessage = (message) => {
     let data;
     try {
@@ -1040,7 +1063,7 @@ function connectWebSocket() {
       if (state.events.length > 3000) {
         state.events = state.events.slice(-3000);
       }
-      renderEvents();
+      scheduleRenderEvents();
     }
   };
 

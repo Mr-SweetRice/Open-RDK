@@ -401,3 +401,24 @@ body {
   border-color: #7dd3fc;
   background: rgba(125, 211, 252, 0.08);
 }
+
+.device-links {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.config-link {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid rgba(100, 210, 140, 0.3);
+  border-radius: 6px;
+  color: #6ee7b7;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.config-link:hover {
+  border-color: #6ee7b7;
+  background: rgba(110, 231, 183, 0.08);
+}

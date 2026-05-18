@@ -3,6 +3,7 @@
 Start the runtime, list detected devices, and keep the webview alive.
 
 PYTHONPATH=host/main/src python3 test/devices.py
+$env:PYTHONPATH="host/main/src"; python test/devices.py - WINDOWS
 """
 
 from __future__ import annotations

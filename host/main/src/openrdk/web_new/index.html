@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RDK · Relay Monitor</title>
+    <link rel="stylesheet" href="static/theme.css?v=20260518o" />
+    <link rel="stylesheet" href="static/styles.css?v=20260518o" />
+  </head>
+  <body data-rail="expanded">
+    <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
+    <main class="shell">
+      <!-- ============ Side rail (on textured wallpaper, NO panel) ============ -->
+      <aside class="rail" id="rail">
+        <button class="rail-brand" id="brandReset" type="button" title="Back to RDK home">
+          <span class="rail-brand-mark">R</span>
+          <span class="rail-brand-text">RDK</span>
+        </button>
+
+        <button class="rail-toggle" id="railToggle" type="button" title="Collapse rail" aria-label="Collapse rail">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+
+        <div class="rail-section-title">Modules <span id="deviceCount" class="rail-count">0</span></div>
+        <div id="devices" class="rail-devices"></div>
+
+        <div class="rail-section-title" id="toolsTitle" hidden><span id="toolsTitleText">Tools</span></div>
+        <nav class="rail-devices" id="railTools" hidden></nav>
+
+        <div class="rail-footer">
+          <button id="clearDevices" class="rail-action" type="button" title="Clear Devices">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+            <span>Clear Devices</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- ============ Stage (the rounded block) ============ -->
+      <section class="stage panel" id="stage">
+
+        <!-- Landing splash (default when no module selected) -->
+        <div class="landing" id="landing">
+          <div class="landing-eyebrow">Robotics Development Kit</div>
+          <div class="landing-mark">RDK</div>
+          <div class="landing-tagline">Select a module from the rail to inspect comms,<br/>tune controllers, or launch a studio.</div>
+          <div class="landing-version">v2.0</div>
+        </div>
+
+        <!-- Workspace shown after selecting a module -->
+        <div class="workspace" id="workspace" hidden>
+          <header class="stage-header">
+            <div class="stage-titleblock">
+              <div class="stage-eyebrow">Comms Stream</div>
+              <h2 id="selectedTitle">All devices</h2>
+            </div>
+            <div class="status-row">
+              <div class="toolbar-group" title="Transport">
+                <label class="type-picker" for="messageTypeSelect">
+                  <span>Type</span>
+                  <select id="messageTypeSelect" class="type-select"></select>
+                </label>
+                <label class="type-picker" for="baudRateSelect">
+                  <span>Baud</span>
+                  <select id="baudRateSelect" class="type-select"></select>
+                </label>
+              </div>
+
+              <div class="toolbar-group" title="Commands">
+                <label class="type-picker" for="cmdInput">
+                  <span>Cmd</span>
+                  <input id="cmdInput" class="type-select" type="text" value="GET PID RPM" spellcheck="false" autocomplete="off" />
+                </label>
+                <button id="cmdSend" class="action-btn primary" type="button">Send</button>
+                <label class="type-picker" for="tractionOutValueInput">
+                  <span>Out %</span>
+                  <input id="tractionOutValueInput" class="type-select" type="number" min="0" max="100" step="1" value="0" />
+                </label>
+                <button id="tractionOutSend" class="action-btn" type="button">OK</button>
+              </div>
+
+              <div class="toolbar-group" title="Telemetry">
+                <button id="telemetryStart" class="action-btn" type="button">Start RX</button>
+                <button id="telemetryStop" class="action-btn" type="button">Stop RX</button>
+              </div>
+
+              <div class="toolbar-group" title="Stream view">
+                <button id="clearStream" class="action-btn" type="button">Clear</button>
+                <button id="hideKeepAliveToggle" class="action-btn toggle-btn is-off" type="button">KeepAlive</button>
+                <button id="hideHandshakeToggle" class="action-btn toggle-btn is-off" type="button">Handshake</button>
+                <button id="autoScrollToggle" class="action-btn toggle-btn is-on" type="button">Auto-scroll</button>
+              </div>
+
+              <div class="toolbar-status">
+                <span id="wsStatus" class="status offline">offline</span>
+                <span id="eventCount" class="badge">0 lines</span>
+              </div>
+            </div>
+          </header>
+          <div id="commsTable" class="comms-table"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="static/app.js?v=20260518l"></script>
+    <script src="static/shell.js?v=20260518o"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/work/firmware/esp/modules/traction_module/build/CMakeFiles/bootloader
+/work/firmware/esp/modules/traction_module/build/CMakeFiles/bootloader.rule
+/work/firmware/esp/modules/traction_module/build/CMakeFiles/bootloader-complete.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/work/firmware/esp/modules/traction_module/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

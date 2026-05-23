@@ -18,6 +18,7 @@ from .functions import (
     get_device_message_type,
     get_device_traction_out_value,
     get_active_serial_baud,
+    get_latest_ls_frame,
     send_device_cmd_once,
     set_active_message_type,
     set_device_message_type,
@@ -350,7 +351,7 @@ def create_webview_app(
     enable_realtime_stream: bool = True,
 ) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
-    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_new")
     broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
 
     app.state.db_path = db_path
@@ -658,11 +659,131 @@ def create_webview_app(
         finally:
             broker.unregister(subscriber_id)
 
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    @app.get("/api/devices/{serial_number}/line-sensor/snapshot")
+    async def line_sensor_snapshot(serial_number: str):
+        """
+        Return the most recent LS / CFG / CAL / INFO messages for this device.
+        LS comes from the streaming cache (O(1), lock-free read, never blocks).
+        CFG/CAL/INFO come from the broker history via asyncio.to_thread so the
+        event loop is never blocked by threading.Lock acquisition.
+        """
+        result: dict = {}
+
+        # LS: in-process streaming cache — always current, zero contention
+        cached = get_latest_ls_frame(serial_number)
+        if cached is not None:
+            result["ls"] = cached[1]
+
+        # CFG/CAL/INFO: broker history scan — run in thread pool so the asyncio
+        # event loop is never blocked by the broker's threading.Lock.
+        if broker is not None:
+            def _scan_broker():
+                out: dict = {}
+                for event in reversed(broker.history(limit=200, serial_filter=serial_number)):
+                    if str(event.get("direction") or "") != "rx":
+                        continue
+                    msg = str(event.get("message") or "").strip()
+                    if msg.startswith("CFG,") and "cfg" not in out:
+                        out["cfg"] = msg
+                    elif msg.startswith("CAL,") and "cal" not in out:
+                        out["cal"] = msg
+                    elif msg.startswith("INFO,") and "info" not in out:
+                        out["info"] = msg
+                    if len(out) == 3:
+                        break
+                return out
+
+            cfg_data = await asyncio.to_thread(_scan_broker)
+            result.update(cfg_data)
+
+        return {"serial": serial_number, **result}
+
+    @app.post("/api/devices/{serial_number}/line-sensor/stream/start")
+    async def line_sensor_stream_start(serial_number: str):
+        """Switch device to TELEMETRY mode and enable streaming. Idempotent."""
+        await asyncio.to_thread(
+            set_device_message_type,
+            db_path=db_path, serial_number=serial_number, message_type="TELEMETRY",
+        )
+        await asyncio.to_thread(
+            set_device_telemetry_requested,
+            db_path=db_path, serial_number=serial_number, enabled=True,
+        )
+        return {"ok": True}
+
+    @app.post("/api/devices/{serial_number}/line-sensor/stream/stop")
+    async def line_sensor_stream_stop(serial_number: str):
+        """Disable streaming (leaves device in TELEMETRY mode, just stops the push)."""
+        await asyncio.to_thread(
+            set_device_telemetry_requested,
+            db_path=db_path, serial_number=serial_number, enabled=False,
+        )
+        return {"ok": True}
+
+    @app.post("/api/devices/{serial_number}/line-sensor/refresh")
+    async def line_sensor_refresh(serial_number: str):
+        """
+        Queue lightweight read commands (GET INFO / CFG / CAL) so the responses
+        appear in the comms stream and update the monitor page.
+        """
+        import asyncio as _aio
+
+        async def _do():
+            for cmd in ("GET INFO", "GET CFG", "GET CAL"):
+                try:
+                    await _aio.to_thread(
+                        send_device_cmd_once,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        command=cmd,
+                        timeout_sec=2.0,
+                    )
+                except Exception:
+                    pass
+
+        _aio.ensure_future(_do())
+        return {"ok": True}
+
+    app.mount("/static", StaticFiles(directory=os.path.join(static_dir, "static")), name="static")
 
     @app.get("/", include_in_schema=False)
     async def index():
         return FileResponse(os.path.join(static_dir, "index.html"))
+
+    @app.get("/line-sensor", include_in_schema=False)
+    async def line_sensor_page():
+        return FileResponse(
+            os.path.join(static_dir, "line-sensor.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/traction-motor-config", include_in_schema=False)
+    async def traction_motor_config_page():
+        return FileResponse(
+            os.path.join(static_dir, "traction-motor-config.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/traction-pid-tuner", include_in_schema=False)
+    async def traction_pid_tuner_page():
+        return FileResponse(
+            os.path.join(static_dir, "traction-pid-tuner.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/traction-position-tuner", include_in_schema=False)
+    async def traction_position_tuner_page():
+        return FileResponse(
+            os.path.join(static_dir, "traction-position-tuner.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/color", include_in_schema=False)
+    async def color_page():
+        return FileResponse(
+            os.path.join(static_dir, "color.html"),
+            headers={"Cache-Control": "no-store"},
+        )
 
     return app
 

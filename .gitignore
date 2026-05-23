@@ -8,6 +8,10 @@
 **/core.*
 **/build.bad*/
 
+# Ship the latest traction module firmware binary
+!firmware/esp/modules/traction_module/build/
+!firmware/esp/modules/traction_module/build/traction_module.bin
+
 # Python
 __pycache__/
 *.pyc
@@ -31,3 +35,5 @@ Thumbs.db
 *.log
 **/.runpy-access.state
 **/espressif_devices.json
+#hardware
+/hardware/

@@ -1,6 +1,13 @@
+import sys
 import threading
+from typing import Any
 
-import pyudev
+try:
+    import pyudev as _pyudev
+    _UDEV_AVAILABLE = sys.platform != "win32"
+except ImportError:
+    _pyudev = None  # type: ignore[assignment]
+    _UDEV_AVAILABLE = False
 
 from ..constants import (
     DEFAULT_MODULE_TYPE,
@@ -31,7 +38,7 @@ from .registry import (
 from .transport import _probe_link_via_handshake
 
 
-def _device_node(dev: pyudev.Device) -> str | None:
+def _device_node(dev: Any) -> str | None:
     if dev.device_node:
         return dev.device_node
     if dev.sys_name:
@@ -39,14 +46,14 @@ def _device_node(dev: pyudev.Device) -> str | None:
     return None
 
 
-def _usb_parent_device(dev: pyudev.Device) -> pyudev.Device | None:
+def _usb_parent_device(dev: Any) -> Any | None:
     try:
         return dev.find_parent("usb", "usb_device")
     except Exception:
         return None
 
 
-def _read_usb_attr_text(dev: pyudev.Device | None, attr_name: str) -> str | None:
+def _read_usb_attr_text(dev: Any | None, attr_name: str) -> str | None:
     if dev is None:
         return None
     try:
@@ -62,7 +69,7 @@ def _read_usb_attr_text(dev: pyudev.Device | None, attr_name: str) -> str | None
     return text or None
 
 
-def _device_property_with_fallback(dev: pyudev.Device, key: str) -> str | None:
+def _device_property_with_fallback(dev: Any, key: str) -> str | None:
     value = dev.properties.get(key)
     if value and str(value).strip():
         return str(value).strip()
@@ -89,7 +96,7 @@ def _device_property_with_fallback(dev: pyudev.Device, key: str) -> str | None:
     return None
 
 
-def _extract_serial(dev: pyudev.Device) -> str | None:
+def _extract_serial(dev: Any) -> str | None:
     for key in ("ID_SERIAL_SHORT", "ID_USB_SERIAL_SHORT", "ID_SERIAL"):
         value = _device_property_with_fallback(dev, key)
         if value:
@@ -101,7 +108,7 @@ def _extract_serial(dev: pyudev.Device) -> str | None:
 
 
 def _update_registry(
-    dev: pyudev.Device,
+    dev: Any,
     status: str,
     db_path: str,
     link_live: bool | None = None,
@@ -219,7 +226,7 @@ def _update_registry(
         return item
 
 
-def matches(dev: pyudev.Device) -> bool:
+def matches(dev: Any) -> bool:
     serial_short = _device_property_with_fallback(dev, "ID_SERIAL_SHORT")
     if SERIAL_NUMBER_ESP32_SHORT and serial_short == SERIAL_NUMBER_ESP32_SHORT:
         return True
@@ -236,7 +243,7 @@ def matches(dev: pyudev.Device) -> bool:
     return False
 
 
-def on_attach(dev: pyudev.Device, db_path: str):
+def on_attach(dev: Any, db_path: str):
     serial_number = _extract_serial(dev)
     node = dev.device_node
     with _state._FLASH_LOCK:
@@ -288,7 +295,7 @@ def on_attach(dev: pyudev.Device, db_path: str):
     _start_keepalive_monitor(serial_number=resolved_serial, device_node=node, db_path=db_path)
 
 
-def on_detach(dev: pyudev.Device, db_path: str):
+def on_detach(dev: Any, db_path: str):
     result = _update_registry(dev, STATUS_OFFLINE_DISCONNECTED, db_path, link_live=False, link_status=LINK_STATUS_NOT_LIVE)
     if (result or {}).get("serial_number"):
         _update_registry_by_serial(
@@ -298,7 +305,7 @@ def on_detach(dev: pyudev.Device, db_path: str):
     _stop_keepalive_monitor((result or {}).get("serial_number"))
 
 
-def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
+def bootstrap_connected_devices(context: Any, db_path: str):
     data = _load_db(db_path)
     now = _now_iso()
     for item in data["devices"]:
@@ -349,7 +356,7 @@ def bootstrap_connected_devices(context: pyudev.Context, db_path: str):
         _start_keepalive_monitor(serial_number=serial_number, device_node=node, db_path=db_path)
 
 
-def _handle_monitor_device(dev: pyudev.Device, db_path: str):
+def _handle_monitor_device(dev: Any, db_path: str):
     action = dev.action
     if action not in ("add", "remove"):
         return
@@ -366,10 +373,18 @@ def run_conex_loop(
     stop_event: threading.Event | None = None,
     poll_timeout_sec: float = 0.25,
 ):
+    if not _UDEV_AVAILABLE:
+        import time
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                break
+            time.sleep(max(0.05, float(poll_timeout_sec)))
+        return
+
     import time
-    context = pyudev.Context()
+    context = _pyudev.Context()
     bootstrap_connected_devices(context, db_path)
-    monitor = pyudev.Monitor.from_netlink(context)
+    monitor = _pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem="tty")
 
     while True:

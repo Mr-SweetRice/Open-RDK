@@ -8,13 +8,15 @@ from .errors import (
     RuntimeNotStartedError,
     UnsupportedModuleTypeError,
 )
-from .modules import BaseModule, LineSensorModule, TractionModule
+from .modules import BaseModule, LineSensorModule, Motors, TractionModule, run_together
 from .ordk_runtime import CommsRuntime
 
 __all__ = [
     "CommsRuntime",
     "BaseModule",
     "TractionModule",
+    "Motors",
+    "run_together",
     "LineSensorModule",
     "RelayError",
     "RuntimeNotStartedError",

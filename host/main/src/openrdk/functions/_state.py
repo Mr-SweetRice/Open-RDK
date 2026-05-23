@@ -33,6 +33,9 @@ _FLASH_LOCK = threading.Lock()
 _FLASH_LOCKED_SERIALS: set[str] = set()
 _FLASH_LOCKED_NODES: set[str] = set()
 
+_LATEST_LS_LOCK = threading.Lock()
+_LATEST_LS_FRAMES: dict[str, tuple[float, str]] = {}  # serial -> (monotonic_ts, raw_text)
+
 _ACTIVE_MESSAGE_TYPE: str = DEFAULT_ACTIVE_MESSAGE_TYPE
 _ACTIVE_SERIAL_BAUD: int = DEFAULT_SERIAL_BAUD
 _ACTIVE_MESSAGE_LOCK = threading.Lock()

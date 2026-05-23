@@ -6,10 +6,11 @@ import time
 from .constants import (
     DEFAULT_COMMS_LOG_PATH,
     DEFAULT_DEVICE_DB_PATH,
+    STATUS_ONLINE_CONNECTED,
     WEBVIEW_HOST,
     WEBVIEW_PORT,
 )
-from .errors import DeviceNotFoundError, RuntimeNotStartedError, UnsupportedModuleTypeError
+from .errors import DeviceNotFoundError, DeviceOfflineError, RuntimeNotStartedError, UnsupportedModuleTypeError
 from .functions import (
     configure_comms_log_path,
     get_device_snapshot,
@@ -259,6 +260,58 @@ class CommsRuntime:
             time.sleep(0.05)
         raise DeviceNotFoundError(f"device not found: {serial_number}")
 
+    def wait_online(
+        self,
+        serial_number: str,
+        timeout_sec: float = 15.0,
+        stable_sec: float = 1.0,
+    ) -> dict:
+        """
+        Block until a device has been continuously 'online connected' for stable_sec
+        seconds, then return its snapshot. Resets the stability counter on any blip.
+
+        Waits for the runtime (and webview, if enabled) to be fully started before
+        polling — avoids false instability caused by system startup load.
+        Raises DeviceOfflineError if timeout_sec expires.
+        """
+        deadline = time.monotonic() + max(0.0, float(timeout_sec))
+
+        # Phase 1 — wait for runtime + webview to be ready before polling devices
+        while True:
+            runtime_up  = self.is_running
+            webview_up  = (not self._enable_webview) or self.is_webview_running
+            if runtime_up and webview_up:
+                break
+            if time.monotonic() >= deadline:
+                raise DeviceOfflineError(
+                    f"runtime/webview did not start within {timeout_sec}s "
+                    f"(runtime={runtime_up}, webview={webview_up})"
+                )
+            time.sleep(0.1)
+
+        # Phase 2 — wait for stable 'online connected' status
+        stable_since: float | None = None
+        while True:
+            now = time.monotonic()
+            snapshot = self.get_device(serial_number)
+            is_online = (
+                isinstance(snapshot, dict)
+                and str(snapshot.get("status") or "") == STATUS_ONLINE_CONNECTED
+            )
+            if is_online:
+                if stable_since is None:
+                    stable_since = now
+                elif (now - stable_since) >= stable_sec:
+                    return snapshot
+            else:
+                stable_since = None
+            if now >= deadline:
+                break
+            time.sleep(0.1)
+        raise DeviceOfflineError(
+            f"{serial_number} did not stay online for {stable_sec}s within {timeout_sec}s"
+        )
+
     @property
     def lan_ip(self) -> str:
         try:
@@ -364,6 +417,24 @@ class CommsRuntime:
         from .modules import TractionModule
 
         return TractionModule(self, serial_number=serial_number, snapshot=self.require_device(serial_number))
+
+    def motors(self, motors: dict[str, str], inverted=None):
+        """
+        Factory for a Motors group.
+
+        Args:
+            motors:   mapping of name → serial_number, e.g.
+                      {"left": "AA:BB:CC:...", "right": "DD:EE:FF:..."}
+            inverted: motor name(s) whose direction should be flipped, e.g.
+                      "right" or {"right"} when that motor is wired in reverse.
+        """
+        self.ensure_running()
+        from .modules import Motors, TractionModule
+
+        return Motors(
+            inverted=inverted,
+            **{name: TractionModule(self, serial) for name, serial in motors.items()},
+        )
 
     def line_sensor(self, serial_number: str):
         self.ensure_running()

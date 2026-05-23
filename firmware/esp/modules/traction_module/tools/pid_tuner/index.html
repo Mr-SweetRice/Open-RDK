@@ -115,6 +115,7 @@
 <body>
   <header>
     Traction PID Tuner (USB/Serial)
+    <a href="/" style="margin-left:12px; color:#4cc9f0; font-size:14px;">&#8592; Host</a>
     <a href="../position_tuner/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Position Page</a>
     <a href="../motor_config/index.html" style="margin-left:12px; color:#4cc9f0; font-size:14px;">Motor Config</a>
   </header>
@@ -785,6 +786,11 @@
       });
     }
 
+    function notLive() {
+      setStatus("Not live — connect the controller first.");
+      setCmdStatus("Not live", false);
+    }
+
     bindClick(connectBtn, () => {
       if (port) {
         disconnect();
@@ -793,6 +799,7 @@
       }
     });
     bindClick(getBtn, () => {
+      if (!writer) { notLive(); return; }
       sendLine("GET PID RPM");
     });
     function pauseTelemForSave() {
@@ -803,11 +810,13 @@
     }
 
     bindClick(saveBtn, () => {
+      if (!writer) { notLive(); return; }
       sendLine("SAVE PID RPM");
       pauseTelemForSave();
     });
 
     bindClick(startStopBtn, () => {
+      if (!writer) { notLive(); return; }
       const currentSp = parseFloat(spInput.value);
       if (isRunningSetpoint(currentSp)) {
         setSetpointFromStartStop(START_STOP_SP_STOP);
@@ -849,9 +858,11 @@
     }
 
     bindClick(outEnableBtn, () => {
+      if (!writer) { notLive(); return; }
       sendLine("SET OUT " + outSlider.value);
     });
     bindClick(outClearBtn, () => {
+      if (!writer) { notLive(); return; }
       sendLine("CLR OUT");
     });
     if (outSlider && outInput) {

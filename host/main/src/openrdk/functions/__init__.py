@@ -29,7 +29,7 @@ from .registry import (
     supported_message_types,
     supported_serial_baud_rates,
 )
-from .transport import open_serial
+from .transport import get_latest_ls_frame, open_serial
 from .udev import (
     bootstrap_connected_devices,
     conex,
@@ -65,6 +65,7 @@ __all__ = [
     "send_device_traction_command_once",
     "send_device_cmd_once",
     "stop_all_keepalive_monitors",
+    "get_latest_ls_frame",
     "matches",
     "on_attach",
     "on_detach",

@@ -458,6 +458,7 @@ def _keepalive_loop(
     telemetry_active_state = False
     device_message_type = _default_device_message_type()
     device_traction_out_value = TRACTION_OUT_DEFAULT_VALUE
+    last_traction_heartbeat_at = 0.0
     last_db_refresh_at = 0.0
     last_registry_sync_at = 0.0
     last_registry_link_live: bool | None = None
@@ -668,6 +669,25 @@ def _keepalive_loop(
                     current_traction_request = _pop_traction_out_request(serial_number)
                     if not isinstance(current_traction_request, dict):
                         link_live = bool(keepalive_serial and keepalive_serial.is_open)
+                        now_mono = time.monotonic()
+                        if link_live and stream_reader is not None and (now_mono - last_traction_heartbeat_at) >= 1.0:
+                            # Heartbeat: resend current traction value so the firmware
+                            # link watchdog (1200 ms) never fires and resets setpoint_rpm=0,
+                            # which would flip direction for inverted motors mid-move.
+                            heartbeat_cmd = _build_traction_out_payload(device_traction_out_value)
+                            hb_ok, _, _ = _send_stream_frame_and_wait(
+                                ser=keepalive_serial, stream_reader=stream_reader,
+                                port=device_node, db_path=db_path, serial_number=serial_number,
+                                message_type_name=MESSAGE_TYPE_TRACTION_OUT,
+                                sequence=stream_seq, sequence_abs=stream_seq_abs,
+                                message_bytes=heartbeat_cmd,
+                                timeout_sec=min(max(FRAME_RESPONSE_TIMEOUT_SEC, 0.15), 0.75),
+                                max_attempts=1, sync_bytes=FRAME_SYNC_BYTES,
+                            )
+                            if hb_ok:
+                                stream_seq = _next_sequence_value(stream_seq)
+                                stream_seq_abs += 1
+                            last_traction_heartbeat_at = now_mono
                     else:
                         if stream_reader is None:
                             error_kind = "stream_reader_unavailable"
@@ -852,6 +872,18 @@ def _keepalive_loop(
                                 if sync_errors <= 0:
                                     error_delta += 1
                                 error_kind = error_kind or "telemetry_sync_timeout"
+                        # Refresh last_telemetry_rx_at from the LS cache — covers frames
+                        # received during the SYNC wait (they are cached via _log_stream_rx_frame
+                        # even when drain is blocked), so a slow/failed SYNC doesn't falsely
+                        # mark the link as dead.
+                        with _state._LATEST_LS_LOCK:
+                            _cached_ls = _state._LATEST_LS_FRAMES.get(serial_number)
+                        if _cached_ls is not None:
+                            _cached_ts = _cached_ls[0]
+                            if _cached_ts > last_telemetry_rx_at:
+                                last_telemetry_rx_at = _cached_ts
+                                last_telemetry_timeout_error_at = 0.0
+
                         link_live = (time.monotonic() - last_telemetry_rx_at) <= 1.0
                         if (not link_live) and (
                             last_telemetry_timeout_error_at <= 0.0

@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Color Module Studio</title>
+    <link rel="stylesheet" href="static/theme.css?v=20260518o" />
+  <link rel="stylesheet" href="static/styles.css?v=20260518o" />
+    <link rel="stylesheet" href="static/color.css?v=20260518o" />
+  </head>
+  <body data-rail="expanded">
+    <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
+    <main class="shell">
+      <aside class="rail" id="rail">
+        <a class="rail-brand" href="/" title="Back to RDK home">
+          <span class="rail-brand-mark">R</span>
+          <span class="rail-brand-text">RDK</span>
+        </a>
+        <button class="rail-toggle" id="railToggle" type="button" title="Collapse rail" aria-label="Collapse rail">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <div class="rail-section-title"><span>Module</span></div>
+        <nav class="rail-devices">
+        <a class="rail-nav-link is-active" href="/color">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a10 10 0 1 1 10-10c0 2.5-2.5 4-5 4h-1a2 2 0 0 0-2 2c0 1 1 1.5 1 2.5A2.5 2.5 0 0 1 12 22z"/><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="14.5" r="1.5" fill="currentColor"/></svg>
+          <span>Color Studio</span>
+        </a>
+        </nav>
+      </aside>
+
+      <section class="stage panel">
+        <header class="stage-header">
+          <div class="stage-titleblock">
+            <div class="stage-eyebrow">Color Module</div>
+            <h2>Color Studio</h2>
+          </div>
+        </header>
+        <div class="stage-body">
+<main class="studio-shell">
+<section class="hero-grid">
+        <article class="panel hero-card">
+          <div class="panel-kicker">Detected Color</div>
+          <div class="swatch-row">
+            <div id="currentSwatch" class="current-swatch"></div>
+            <div>
+              <div id="currentColorName" class="color-name">No data</div>
+              <div id="currentColorConfidence" class="color-confidence">0.0%</div>
+            </div>
+          </div>
+          <div class="hero-meta">
+            <span id="paletteModeText" class="badge">Palette -</span>
+            <span id="relayModeText" class="badge">Mode -</span>
+            <span id="sensorStateText" class="badge">Sensor -</span>
+          </div>
+          <div class="hero-readings">
+            <div><span>Clear</span><strong id="clearValue">0</strong></div>
+            <div><span>Gain</span><strong id="gainValue">0x</strong></div>
+            <div><span>Integration</span><strong id="integrationValue">0 ms</strong></div>
+            <div><span>Target Clear</span><strong id="targetClearValue">0</strong></div>
+          </div>
+          <div id="topCandidatesList" class="candidate-list"></div>
+        </article>
+
+        <article class="panel status-card">
+          <div class="panel-kicker">Device Status</div>
+          <div class="status-grid">
+            <div><span>Module</span><strong id="moduleTypeValue">-</strong></div>
+            <div><span>Sensor ID</span><strong id="sensorIdValue">-</strong></div>
+            <div><span>Serial</span><strong id="serialValue">-</strong></div>
+            <div><span>Link</span><strong id="linkValue">-</strong></div>
+            <div><span>Device</span><strong id="deviceStatusValue">-</strong></div>
+            <div><span>Last Calibration</span><strong id="lastCalibrationText">-</strong></div>
+          </div>
+          <div id="healthFlags" class="health-flags"></div>
+          <div id="statusNote" class="status-note">Waiting for device selection.</div>
+        </article>
+
+        <article class="panel rgb-card">
+          <div class="panel-kicker">Raw and Normalized</div>
+          <div class="rgb-bars">
+            <div class="rgb-item">
+              <span>R</span>
+              <div class="bar-track"><div id="rawRBar" class="bar-fill red"></div></div>
+              <strong id="rawRValue">0</strong>
+              <small id="normRValue">0</small>
+            </div>
+            <div class="rgb-item">
+              <span>G</span>
+              <div class="bar-track"><div id="rawGBar" class="bar-fill green"></div></div>
+              <strong id="rawGValue">0</strong>
+              <small id="normGValue">0</small>
+            </div>
+            <div class="rgb-item">
+              <span>B</span>
+              <div class="bar-track"><div id="rawBBar" class="bar-fill blue"></div></div>
+              <strong id="rawBValue">0</strong>
+              <small id="normBValue">0</small>
+            </div>
+          </div>
+          <div class="lab-row">
+            <div><span>L*</span><strong id="labLValue">0.00</strong></div>
+            <div><span>a*</span><strong id="labAValue">0.00</strong></div>
+            <div><span>b*</span><strong id="labBValue">0.00</strong></div>
+            <div><span>Sample TS</span><strong id="sampleTimestampValue">0 ms</strong></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="workspace-grid">
+        <div class="workspace-column">
+          <article class="panel">
+            <div class="panel-kicker">Configuration</div>
+            <div class="field-grid">
+              <label class="field">
+                <span>Name</span>
+                <input id="sensorNameInput" type="text" maxlength="31" />
+              </label>
+              <label class="field">
+                <span>Palette Mode</span>
+                <select id="paletteModeInput">
+                  <option value="4">4 colors</option>
+                  <option value="8">8 colors</option>
+                  <option value="16">16 colors</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Sample Period (ms)</span>
+                <input id="samplePeriodInput" type="number" min="20" max="1000" step="10" />
+              </label>
+              <label class="field">
+                <span>LED Mode</span>
+                <select id="ledModeInput">
+                  <option value="0">Off</option>
+                  <option value="1">On</option>
+                  <option value="2">Auto</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Gain Mode</span>
+                <select id="gainModeInput">
+                  <option value="0">Manual</option>
+                  <option value="1">Auto</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Gain</span>
+                <select id="gainInput">
+                  <option value="1">1x</option>
+                  <option value="4">4x</option>
+                  <option value="16">16x</option>
+                  <option value="60">60x</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Integration (ms)</span>
+                <input id="integrationInput" type="number" min="3" max="240" step="1" />
+              </label>
+              <label class="field">
+                <span>Classifier</span>
+                <select id="classifierInput">
+                  <option value="1">Lab</option>
+                  <option value="0">Norm RGB</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Confidence Threshold</span>
+                <input id="confidenceInput" type="number" min="0.05" max="1.0" step="0.01" />
+              </label>
+              <label class="field">
+                <span>Target Clear</span>
+                <input id="targetClearInput" type="number" min="1000" max="60000" step="100" />
+              </label>
+              <label class="field">
+                <span>Patch Samples</span>
+                <input id="patchSamplesInput" type="number" min="3" max="48" step="1" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="saveConfigBtn" class="action-btn accent" type="button">Apply Config</button>
+              <button id="persistConfigBtn" class="action-btn" type="button">Save CFG</button>
+              <button id="selftestBtn" class="action-btn" type="button">Run Selftest</button>
+            </div>
+            <div id="selftestResult" class="inline-note">Selftest not run.</div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-kicker">Telemetry and Events</div>
+            <div class="telemetry-grid">
+              <div>
+                <h3>Telemetry Feed</h3>
+                <div id="telemetryFeed" class="feed"></div>
+              </div>
+              <div>
+                <h3>Selected Device Comms</h3>
+                <div id="eventFeed" class="feed"></div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="workspace-column">
+          <article class="panel">
+            <div class="panel-kicker">Calibration Wizard</div>
+            <div class="wizard-header">
+              <label class="field compact">
+                <span>Wizard Mode</span>
+                <select id="wizardModeSelect">
+                  <option value="4">4 colors</option>
+                  <option value="8">8 colors</option>
+                  <option value="16">16 colors</option>
+                </select>
+              </label>
+              <button id="startWizardBtn" class="action-btn accent" type="button">Run Wizard</button>
+              <button id="abortWizardBtn" class="action-btn" type="button">Abort</button>
+            </div>
+            <p class="wizard-copy">The wizard shows dark, white and each enabled patch on-screen, captures multiple samples, commits each prototype and stores the host timestamp for the selected palette mode.</p>
+            <div id="wizardStatus" class="wizard-status">Idle.</div>
+
+            <div class="divider"></div>
+
+            <div class="single-capture-row">
+              <label class="field compact">
+                <span>Single Target</span>
+                <select id="singleTargetSelect"></select>
+              </label>
+              <button id="singleCaptureBtn" class="action-btn" type="button">Capture Selected</button>
+              <button id="persistCalibrationBtn" class="action-btn" type="button">Save CAL</button>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="palette-editor-header">
+              <h3>Palette Editor</h3>
+              <button id="saveLabelsBtn" class="action-btn" type="button">Save Host Labels</button>
+            </div>
+            <div id="paletteEditor" class="palette-editor"></div>
+
+            <div class="divider"></div>
+
+            <h3>Validation</h3>
+            <div id="validationList" class="validation-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-kicker">Profiles and Manual Control</div>
+            <div class="button-row">
+              <button id="reloadCalibrationBtn" class="action-btn" type="button">Reload Firmware Data</button>
+              <button id="exportProfileBtn" class="action-btn" type="button">Export Profile</button>
+              <button id="importProfileBtn" class="action-btn" type="button">Import Profile</button>
+              <button id="restoreDefaultsBtn" class="action-btn danger" type="button">Restore Defaults</button>
+            </div>
+            <div id="profileNote" class="inline-note">No profile loaded.</div>
+
+            <div class="divider"></div>
+
+            <label class="field">
+              <span>Manual Command</span>
+              <input id="manualCmdInput" type="text" value="GET DATA" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="button-row">
+              <button id="manualCmdSend" class="action-btn accent" type="button">Send CMD</button>
+            </div>
+            <div id="manualCmdResponse" class="manual-response">No command sent yet.</div>
+          </article>
+        </div>
+      </section>
+    </main>
+        </div>
+      </section>
+    </main>
+<input id="importProfileInput" type="file" accept="application/json,.json" hidden />
+<div id="patchOverlay" class="patch-overlay hidden" aria-hidden="true">
+      <div class="patch-overlay-shell">
+        <div id="patchPreview" class="patch-preview"></div>
+        <div class="patch-copy">
+          <div id="patchTitle" class="patch-title">Calibration Patch</div>
+          <div id="patchDescription" class="patch-description">Position the sensor and wait for capture.</div>
+          <button id="patchOverlayClose" class="action-btn" type="button">Close Overlay</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="static/color.js?v=20260420-step2"></script>
+      <script src="static/shell.js?v=20260518o"></script>
+  </body>
+</html>

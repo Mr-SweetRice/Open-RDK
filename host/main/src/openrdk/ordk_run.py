@@ -176,12 +176,21 @@ def main():
         "MSG_RELAY_ENABLE_WEBVIEW_UPDATES",
         default=True,
     )
+    enable_mdns = _parse_env_flag("MSG_RELAY_ENABLE_MDNS", default=True)
+    mdns_name = os.getenv("MSG_RELAY_MDNS_NAME", "rdk")
+    enable_http_redirect = _parse_env_flag(
+        "MSG_RELAY_ENABLE_HTTP_REDIRECT",
+        default=True,
+    )
 
     runtime = CommsRuntime(
         db_path=db_path,
         comms_log_path=comms_log_path,
         enable_webview=enable_webview,
         enable_webview_updates=enable_webview_updates,
+        enable_mdns=enable_mdns,
+        mdns_name=mdns_name,
+        enable_http_redirect=enable_http_redirect,
         webview_host=web_host,
         webview_port=web_port,
         auto_start=True,
@@ -191,11 +200,15 @@ def main():
     print(
         f"[runtime] running db={db_path} comms_log={comms_log_path} "
         f"webview={'on' if enable_webview else 'off'} "
-        f"webview_updates={'on' if enable_webview_updates else 'off'}",
+        f"webview_updates={'on' if enable_webview_updates else 'off'} "
+        f"mdns={'on' if enable_mdns else 'off'} "
+        f"http_redirect={'on' if enable_http_redirect else 'off'}",
         flush=True,
     )
     if enable_webview:
         print(f"[webview] running at {runtime.webview_url}", flush=True)
+        if enable_mdns:
+            print(f"[webview] mDNS URL {runtime.mdns_url}", flush=True)
 
     try:
         while True:

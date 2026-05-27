@@ -437,6 +437,23 @@ def stop_all_keepalive_monitors():
         _stop_keepalive_monitor(serial_number)
 
 
+def resume_keepalive_monitors(db_path: str):
+    with _state._DB_LOCK:
+        data = _load_db(db_path)
+        devices = list(data["devices"])
+    for item in devices:
+        if item.get("status") != STATUS_ONLINE_CONNECTED:
+            continue
+        serial_number = item.get("serial_number")
+        device_node = item.get("device_node")
+        if serial_number and device_node:
+            _start_keepalive_monitor(
+                serial_number=serial_number,
+                device_node=device_node,
+                db_path=db_path,
+            )
+
+
 def _keepalive_loop(
     serial_number: str,
     initial_node: str | None,

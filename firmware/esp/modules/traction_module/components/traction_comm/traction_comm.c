@@ -188,6 +188,9 @@ static SemaphoreHandle_t s_tx_mutex = NULL;
 static bool s_stream_telem_enabled = false;
 static uint32_t s_stream_telem_seq = 0U;
 static int64_t s_stream_telem_last_tx_us = 0;
+static uint32_t s_current_baud_rate = 512000U;
+static uint32_t s_pending_baud_rate = 0U;
+static int64_t s_pending_baud_apply_us = 0;
 
 #define FRAME_SYNC_0                     0xAAU
 #define FRAME_SYNC_1                     0x55U
@@ -212,6 +215,10 @@ static int64_t s_stream_telem_last_tx_us = 0;
 #define FRAME_MSG_TYPE_TRACTION_OUT      0x04U
 
 #define FRAME_TELEMETRY_TX_PERIOD_US     100000LL
+#define TRACTION_COMM_DEFAULT_BAUD_RATE  512000U
+#define TRACTION_COMM_MIN_BAUD_RATE      1200U
+#define TRACTION_COMM_MAX_BAUD_RATE      3000000U
+#define TRACTION_COMM_BAUD_APPLY_DELAY_US 50000LL
 
 #ifndef TRACTION_COMM_ENABLE_LINE_FALLBACK
 #define TRACTION_COMM_ENABLE_LINE_FALLBACK 0
@@ -237,6 +244,45 @@ static void write_bytes_locked(const uint8_t *data, size_t len)
 
     if (locked) {
         xSemaphoreGive(s_tx_mutex);
+    }
+}
+
+static bool is_valid_baud_rate(uint32_t baud_rate)
+{
+    return baud_rate >= TRACTION_COMM_MIN_BAUD_RATE &&
+           baud_rate <= TRACTION_COMM_MAX_BAUD_RATE;
+}
+
+static void schedule_baud_rate_change(uint32_t baud_rate)
+{
+    if (!is_valid_baud_rate(baud_rate)) {
+        return;
+    }
+    s_pending_baud_rate = baud_rate;
+    s_pending_baud_apply_us = esp_timer_get_time() + TRACTION_COMM_BAUD_APPLY_DELAY_US;
+}
+
+static void maybe_apply_pending_baud_rate(void)
+{
+    if (s_pending_baud_rate == 0U || s_pending_baud_apply_us <= 0) {
+        return;
+    }
+    if (esp_timer_get_time() < s_pending_baud_apply_us) {
+        return;
+    }
+
+    uint32_t next_baud = s_pending_baud_rate;
+    s_pending_baud_rate = 0U;
+    s_pending_baud_apply_us = 0;
+    if (next_baud == s_current_baud_rate) {
+        return;
+    }
+
+    if (uart_set_baudrate(UART_NUM_0, (uint32_t)next_baud) == ESP_OK) {
+        s_current_baud_rate = next_baud;
+        ESP_LOGI(TAG, "UART baud changed to %lu", (unsigned long)s_current_baud_rate);
+    } else {
+        ESP_LOGW(TAG, "failed to change UART baud to %lu", (unsigned long)next_baud);
     }
 }
 
@@ -342,6 +388,52 @@ static bool format_rpm_telem_snapshot(char *out, size_t out_len)
         (double)st.cmd_raw
     );
     return n > 0 && (size_t)n < out_len;
+}
+
+static bool try_apply_baud_command(
+    const char *line,
+    char *response_out,
+    size_t response_out_len,
+    bool *ok_out
+)
+{
+    unsigned int baud = 0U;
+    bool handled = false;
+    bool ok = false;
+
+    if (response_out && response_out_len > 0U) {
+        response_out[0] = '\0';
+    }
+    if (!line) {
+        if (ok_out) {
+            *ok_out = false;
+        }
+        return false;
+    }
+
+    if (strcmp(line, "GET BAUD") == 0) {
+        handled = true;
+        ok = true;
+        if (response_out && response_out_len > 0U) {
+            snprintf(response_out, response_out_len, "B,%lu", (unsigned long)s_current_baud_rate);
+        }
+    } else if (sscanf(line, "SET BAUD %u", &baud) == 1) {
+        handled = true;
+        ok = is_valid_baud_rate((uint32_t)baud);
+        if (ok) {
+            schedule_baud_rate_change((uint32_t)baud);
+            if (response_out && response_out_len > 0U) {
+                snprintf(response_out, response_out_len, "B,%u", baud);
+            }
+        } else if (response_out && response_out_len > 0U) {
+            snprintf(response_out, response_out_len, "ERR");
+        }
+    }
+
+    if (ok_out) {
+        *ok_out = ok;
+    }
+    return handled;
 }
 
 static bool try_apply_rpm_pid_command(
@@ -1274,6 +1366,23 @@ static void handle_stream_frame(const uint8_t *frame_payload, size_t payload_len
             &cmd_ok
         );
         if (!handled) {
+            handled = try_apply_baud_command(
+                msg_text,
+                cmd_response,
+                sizeof(cmd_response),
+                &cmd_ok
+            );
+        }
+        if (!handled) {
+            handled = try_apply_traction_out_command(
+                msg_text,
+                &cmd_ok
+            );
+            if (handled) {
+                snprintf(cmd_response, sizeof(cmd_response), cmd_ok ? "OK" : "ERR");
+            }
+        }
+        if (!handled) {
             handled = try_apply_pos_pid_command(
                 msg_text,
                 cmd_response,
@@ -1397,6 +1506,22 @@ static void handle_cmd_line(const char *line)
     float val = 0.0f;
     int ivalue = 0;
     int curve_pwm_pct = 0;
+    unsigned int baud_rate = 0U;
+
+    if (strcmp(line, "GET BAUD") == 0) {
+        traction_comm_send_line("B,%lu", (unsigned long)s_current_baud_rate);
+        return;
+    }
+
+    if (sscanf(line, "SET BAUD %u", &baud_rate) == 1) {
+        if (is_valid_baud_rate((uint32_t)baud_rate)) {
+            schedule_baud_rate_change((uint32_t)baud_rate);
+            traction_comm_send_line("B,%u", baud_rate);
+        } else {
+            traction_comm_send_line("ERR");
+        }
+        return;
+    }
 
     if (strcmp(line, "GET TELEM POS") == 0) {
         if (s_cfg.request_pos_telem) {
@@ -1810,13 +1935,16 @@ esp_err_t traction_comm_init(const traction_comm_cfg_t *cfg)
     }
 
     uart_config_t uart_cfg = {
-        .baud_rate = 115200,
+        .baud_rate = TRACTION_COMM_DEFAULT_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
+    s_current_baud_rate = TRACTION_COMM_DEFAULT_BAUD_RATE;
+    s_pending_baud_rate = 0U;
+    s_pending_baud_apply_us = 0;
     ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uart_cfg));
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
@@ -1992,6 +2120,7 @@ void traction_comm_task(void *arg)
         }
 
         maybe_send_stream_telemetry();
+        maybe_apply_pending_baud_rate();
 
         if (serial_link_active && s_cfg.link_timeout_ms > 0) {
             int64_t now_us = esp_timer_get_time();

@@ -71,13 +71,13 @@
   const curveMaxRpm = document.getElementById("curveMaxRpm");
   const curveSlope = document.getElementById("curveSlope");
 
-  const connectBtn = document.getElementById("connectBtn");
   const readCurveBtn = document.getElementById("readCurveBtn");
   const writeCurveBtn = document.getElementById("writeCurveBtn");
   const generateCurveBtn = document.getElementById("generateCurveBtn");
   const saveConfigBtn = document.getElementById("saveConfigBtn");
   const resetConfigBtn = document.getElementById("resetConfigBtn");
   const resetCurveBtn = document.getElementById("resetCurveBtn");
+  const controllerSections = Array.from(document.querySelectorAll(".controller-section"));
 
   let port = null;
   let reader = null;
@@ -92,6 +92,8 @@
   let pendingCurvePromise = null;
   let pendingCfgPromise = null;
   let pendingSavePromise = null;
+  let relayDeviceSerial = null;
+  let relayCommandQueue = Promise.resolve();
 
   function saveStatus(text) {
     configStatus.textContent = text;
@@ -205,6 +207,9 @@
 
   function setControllerConnectedState(connected) {
     _controllerConnected = connected;
+    controllerSections.forEach((section) => {
+      section.classList.toggle("is-offline", !connected);
+    });
     syncControllerButtons();
   }
 
@@ -219,6 +224,53 @@
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function resolveRelayDeviceSerial() {
+    const urlSerial = new URLSearchParams(window.location.search).get("serial");
+    if (urlSerial) return urlSerial;
+    const response = await fetch("/api/devices");
+    if (!response.ok) throw new Error("device list unavailable");
+    const payload = await response.json();
+    const devices = Array.isArray(payload.devices) ? payload.devices : [];
+    const traction = devices.find((device) =>
+      String(device.module_type || "").toLowerCase() === "traction_module" &&
+      String(device.status || "").toLowerCase() === "online connected"
+    );
+    return traction?.serial_number || null;
+  }
+
+  async function setRelayCmdMode(serial) {
+    await fetch(`/api/devices/${encodeURIComponent(serial)}/config/message-type`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_type: "CMD" }),
+    });
+  }
+
+  async function pauseHostSerialMonitors() {
+    try {
+      const response = await fetch("/api/serial-monitors/pause", { method: "POST" });
+      if (response.ok) await sleep(300);
+    } catch (_err) {
+      // Standalone/static use: no host monitor endpoint.
+    }
+  }
+
+  async function resumeHostSerialMonitors() {
+    try {
+      await fetch("/api/serial-monitors/resume", { method: "POST" });
+    } catch (_err) {
+      // Standalone/static use: no host monitor endpoint.
+    }
+  }
+
+  function resumeHostSerialMonitorsForUnload() {
+    try {
+      navigator.sendBeacon("/api/serial-monitors/resume", "");
+    } catch (_err) {
+      // ignore
+    }
   }
 
   function bridgeLabelFromValue(value) {
@@ -345,29 +397,35 @@
     syncRpmMaxFromCurve();
   }
 
+  async function sendRelayCommand(command) {
+    const response = await fetch(`/api/devices/${encodeURIComponent(relayDeviceSerial)}/cmd/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || response.statusText);
+    return String(payload.response || "").trim();
+  }
+
   function sendLine(text) {
     if (!writer) return;
-    const payloadText = String(text || "").trim();
-    if (!payloadText) return;
-    const rawPayload = encoder.encode(payloadText);
-    const payload = rawPayload.length > FRAME_MAX_LEN ? rawPayload.slice(0, FRAME_MAX_LEN) : rawPayload;
-    const msgTypeName = messageTypeForCommand(payloadText);
-    const msgTypeCode = FRAME_MSG_TYPE_CODE[msgTypeName] || FRAME_MSG_TYPE_CODE.CMD;
-    const seq = nextFrameSeq();
-
-    const frameLen = FRAME_SYNC_BYTES.length + 1 + payload.length + 1 + 3;
-    const frame = new Uint8Array(frameLen);
-    let i = 0;
-    for (const b of FRAME_SYNC_BYTES) frame[i++] = b;
-    frame[i++] = payload.length & 0xff;
-    frame.set(payload, i);
-    i += payload.length;
-    frame[i++] = msgTypeCode & 0xff;
-    frame[i++] = (seq >> 16) & 0xff;
-    frame[i++] = (seq >> 8) & 0xff;
-    frame[i++] = seq & 0xff;
-
-    writer.write(frame);
+    const command = String(text || "").trim();
+    if (!command || !relayDeviceSerial) return;
+    relayCommandQueue = relayCommandQueue
+      .catch(() => {})
+      .then(() => sendRelayCommand(command))
+      .then((line) => {
+        if (line) handleLine(line);
+      })
+      .catch((err) => {
+        const message = err && err.message ? err.message : err;
+        setSerialStatus("Relay command failed: " + message);
+        rejectPendingCurve(message);
+        rejectPendingCfg(message);
+        rejectPendingSave(message);
+      });
+    return relayCommandQueue;
   }
 
   function rejectPendingCurve(message) {
@@ -572,32 +630,22 @@
     rejectPendingCfg("Controller disconnected");
     rejectPendingSave("Controller disconnected");
     try {
-      if (reader) {
-        try { await reader.cancel(); } catch (_err) {}
-        try { reader.releaseLock(); } catch (_err) {}
-        reader = null;
-      }
-      if (writer) {
-        try { writer.releaseLock(); } catch (_err) {}
-        writer = null;
-      }
-      if (port) {
-        const openedPort = port;
-        port = null;
-        try { await openedPort.close(); } catch (_err) {}
-      }
+      reader = null;
+      writer = null;
+      port = null;
+      relayDeviceSerial = null;
     } finally {
       buffer = "";
       frameRxBytes = [];
       closingSerial = false;
-      connectBtn.textContent = "Connect Controller";
-      setSerialStatus("Controller not live. Connect to enable writes.");
+      setSerialStatus("Motor not connected.");
       setControllerConnectedState(false);
     }
   }
 
   async function refreshControllerState() {
-    const [cfg, curve] = await Promise.all([requestConfigSnapshot(), requestCurveSnapshot()]);
+    const cfg = await requestConfigSnapshot();
+    const curve = await requestCurveSnapshot();
     fillConfig(cfg);
     renderCurve(curve);
   }
@@ -606,26 +654,20 @@
     if (connectingSerial || closingSerial) return;
     connectingSerial = true;
     try {
-      if (!("serial" in navigator)) {
-        setSerialStatus("Web Serial is not available in this browser.");
-        return;
-      }
-
-      port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      reader = port.readable.getReader();
-      writer = port.writable.getWriter();
-      connectBtn.textContent = "Disconnect Controller";
-      setSerialStatus("Controller connected.");
+      relayDeviceSerial = await resolveRelayDeviceSerial();
+      if (!relayDeviceSerial) throw new Error("No online traction module found");
+      await setRelayCmdMode(relayDeviceSerial);
+      port = { relay: true };
+      writer = { relay: true };
+      setSerialStatus("Controller connected through host relay.");
       setControllerConnectedState(true);
-      void readLoop();
 
       try {
         await refreshControllerState();
         saveStatus("Configuration and curve loaded from controller.");
       } catch (err) {
         const message = err && err.message ? err.message : err;
-        setSerialStatus(`Controller connected. Initial read failed: ${message}`);
+        setSerialStatus(`Controller connected through relay. Initial read failed: ${message}`);
         saveStatus("Controller connected. Use Read Curve or Save Config to retry commands.");
       }
     } catch (err) {
@@ -640,7 +682,7 @@
     const samples = [];
     const deadline = Date.now() + durationMs;
     while (Date.now() < deadline) {
-      sendLine("GET TELEM");
+      await sendLine("GET TELEM");
       await sleep(CURVE_SAMPLE_PERIOD_MS);
       if (Date.now() - latestTelem.ts < RX_TIMEOUT_MS) {
         samples.push(latestTelem.rpm);
@@ -669,12 +711,12 @@
     ];
 
     for (const cmd of commands) {
-      sendLine(cmd);
+      await sendLine(cmd);
       await sleep(70);
     }
 
     const savePromise = waitForSave();
-    sendLine("SAVE CFG");
+    await sendLine("SAVE CFG");
     await savePromise;
 
     fillConfig(await requestConfigSnapshot());
@@ -686,12 +728,12 @@
     const normalized = normalizeCurveRows(rows);
 
     for (const row of normalized) {
-      sendLine(`SET CURVE ${row.output} ${Math.max(0, row.rpm).toFixed(2)}`);
+      await sendLine(`SET CURVE ${row.output} ${Math.max(0, row.rpm).toFixed(2)}`);
       await sleep(70);
     }
 
     const savePromise = waitForSave();
-    sendLine("SAVE CURVE");
+    await sendLine("SAVE CURVE");
     await savePromise;
 
     renderCurve(await requestCurveSnapshot());
@@ -701,7 +743,6 @@
 
   function setCurveButtonsBusy(active) {
     curveRun = active;
-    connectBtn.disabled = active;
     resetCurveBtn.disabled = active;
     resetConfigBtn.disabled = active;
     if (active) {
@@ -723,16 +764,16 @@
 
     setCurveButtonsBusy(true);
     try {
-      sendLine("STOP PID POS SINE");
-      sendLine("STOP PID POS");
-      sendLine("SET PID RPM SP 0");
-      sendLine("CLR OUT");
+      await sendLine("STOP PID POS SINE");
+      await sendLine("STOP PID POS");
+      await sendLine("SET PID RPM SP 0");
+      await sendLine("CLR OUT");
       await sleep(CURVE_PREP_MS);
 
       const rows = [];
       for (const pwm of CURVE_PWM_POINTS) {
         setSerialStatus(`Creating curve at ${pwm}% applied PWM...`);
-        sendLine(`SET OUT RAW ${pwm.toFixed(2)}`);
+        await sendLine(`SET OUT RAW ${pwm.toFixed(2)}`);
         await sleep(CURVE_SETTLE_MS);
         rows.push({
           output: pwm,
@@ -741,14 +782,14 @@
         renderCurve(rows);
       }
 
-      sendLine("CLR OUT");
+      await sendLine("CLR OUT");
       renderCurve(rows);
       await writeCurveToController(rows);
       setSerialStatus("Curve generated and saved to controller.");
     } catch (err) {
       setSerialStatus("Curve generation failed: " + (err && err.message ? err.message : err));
     } finally {
-      sendLine("CLR OUT");
+      await sendLine("CLR OUT").catch(() => {});
       setCurveButtonsBusy(false);
     }
   }
@@ -761,14 +802,6 @@
 
   rpmMax.addEventListener("input", syncCurveLastPointFromRpmMax);
   rpmMax.addEventListener("change", syncCurveLastPointFromRpmMax);
-
-  connectBtn.addEventListener("click", () => {
-    if (port) {
-      void closeSerial();
-    } else {
-      void connect();
-    }
-  });
 
   readCurveBtn.addEventListener("click", () => {
     requestCurveSnapshot()
@@ -809,14 +842,9 @@
     saveStatus("Curve edited in the page. Write Curve to push it to NVS.");
   });
 
-  if ("serial" in navigator) {
-    navigator.serial.addEventListener("disconnect", () => {
-      void closeSerial();
-    });
-  }
-
   fillConfig(configDefaults);
   renderCurve(buildCurveDefaults());
-  saveStatus("Connect to the controller to load NVS values.");
+  saveStatus("Waiting for host relay data.");
   setControllerConnectedState(false);
+  void connect();
 })();

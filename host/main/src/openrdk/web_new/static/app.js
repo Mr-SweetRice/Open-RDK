@@ -9,7 +9,7 @@ const state = {
   hideHandshake: false,
   activeMessageType: "CMD",
   supportedMessageTypes: [],
-  activeBaudRate: 115200,
+  activeBaudRate: 512000,
   supportedBaudRates: [],
   activeTractionOutValue: 0,
   tractionOutSending: false,
@@ -149,7 +149,7 @@ function syncSelectedDeviceTractionOutValue() {
 function normalizeBaudRate(value) {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 115200;
+    return 512000;
   }
   return parsed;
 }
@@ -563,7 +563,7 @@ function renderBaudRateSelect() {
     .map((item) => normalizeBaudRate(item))
     .filter((item) => item > 0);
   if (options.length === 0) {
-    options.push(normalizeBaudRate(state.activeBaudRate || 115200));
+    options.push(normalizeBaudRate(state.activeBaudRate || 512000));
   }
 
   const unique = [...new Set(options)].sort((a, b) => a - b);

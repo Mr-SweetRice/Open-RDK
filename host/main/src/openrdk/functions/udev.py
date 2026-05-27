@@ -38,6 +38,82 @@ from .registry import (
 from .transport import _probe_link_via_handshake
 
 
+class _WindowsSerialDevice:
+    def __init__(self, port_info: Any, action: str = "add"):
+        self.action = action
+        self.device_node = str(getattr(port_info, "device", "") or "")
+        self.sys_name = str(getattr(port_info, "name", "") or self.device_node)
+        serial_number = str(getattr(port_info, "serial_number", "") or "").strip()
+        if not serial_number:
+            serial_number = self.device_node
+        manufacturer = str(getattr(port_info, "manufacturer", "") or "").strip()
+        product = str(getattr(port_info, "product", "") or getattr(port_info, "description", "") or "").strip()
+        vid = getattr(port_info, "vid", None)
+        pid = getattr(port_info, "pid", None)
+        vendor_id = f"{int(vid):04x}" if isinstance(vid, int) else ""
+        model_id = f"{int(pid):04x}" if isinstance(pid, int) else ""
+        product_norm = product.replace(" ", "_").replace("/", "_") if product else ""
+        if manufacturer and product_norm and serial_number:
+            serial_full = f"{manufacturer}_{product_norm}_{serial_number}"
+        else:
+            serial_full = serial_number
+        self.properties = {
+            "ID_SERIAL_SHORT": serial_number,
+            "ID_USB_SERIAL_SHORT": serial_number,
+            "ID_SERIAL": serial_full,
+            "ID_VENDOR": manufacturer,
+            "ID_VENDOR_ID": vendor_id,
+            "ID_MODEL_ID": model_id,
+        }
+
+    def find_parent(self, *_args, **_kwargs):
+        return None
+
+    def with_action(self, action: str):
+        clone = object.__new__(_WindowsSerialDevice)
+        clone.action = action
+        clone.device_node = self.device_node
+        clone.sys_name = self.sys_name
+        clone.properties = dict(self.properties)
+        return clone
+
+
+def _list_windows_serial_devices() -> list[_WindowsSerialDevice]:
+    try:
+        from serial.tools import list_ports
+    except Exception as exc:
+        print(f"[windows-serial] list_ports unavailable: {exc}", flush=True)
+        return []
+
+    devices: list[_WindowsSerialDevice] = []
+    for port_info in list_ports.comports():
+        dev = _WindowsSerialDevice(port_info, action="add")
+        if matches(dev):
+            devices.append(dev)
+    return devices
+
+
+def _mark_all_devices_offline(db_path: str):
+    data = _load_db(db_path)
+    now = _now_iso()
+    for item in data["devices"]:
+        item["status"] = STATUS_OFFLINE_DISCONNECTED
+        item["last_event_at"] = now
+        item["link_live"] = False
+        item["link_status"] = LINK_STATUS_NOT_LIVE
+        item["last_link_check_at"] = now
+        item["message_type"] = _normalize_message_type_name(item.get("message_type"))
+        item["traction_out_value"] = _normalize_traction_out_value(item.get("traction_out_value"))
+        item["telemetry_requested"] = False
+        item["telemetry_active"] = False
+        if not isinstance(item.get("error_count"), int) or int(item.get("error_count", 0)) < 0:
+            item["error_count"] = 0
+        item["name"] = _normalize_device_name(
+            item.get("name"), item.get("module_type") or item.get("firmware_module"),
+        )
+    _save_db(db_path, data)
+
+
 def _device_node(dev: Any) -> str | None:
     if dev.device_node:
         return dev.device_node
@@ -306,24 +382,7 @@ def on_detach(dev: Any, db_path: str):
 
 
 def bootstrap_connected_devices(context: Any, db_path: str):
-    data = _load_db(db_path)
-    now = _now_iso()
-    for item in data["devices"]:
-        item["status"] = STATUS_OFFLINE_DISCONNECTED
-        item["last_event_at"] = now
-        item["link_live"] = False
-        item["link_status"] = LINK_STATUS_NOT_LIVE
-        item["last_link_check_at"] = now
-        item["message_type"] = _normalize_message_type_name(item.get("message_type"))
-        item["traction_out_value"] = _normalize_traction_out_value(item.get("traction_out_value"))
-        item["telemetry_requested"] = False
-        item["telemetry_active"] = False
-        if not isinstance(item.get("error_count"), int) or int(item.get("error_count", 0)) < 0:
-            item["error_count"] = 0
-        item["name"] = _normalize_device_name(
-            item.get("name"), item.get("module_type") or item.get("firmware_module"),
-        )
-    _save_db(db_path, data)
+    _mark_all_devices_offline(db_path)
 
     boot_count = 0
     monitor_targets: list[tuple[str | None, str | None]] = []
@@ -356,6 +415,38 @@ def bootstrap_connected_devices(context: Any, db_path: str):
         _start_keepalive_monitor(serial_number=serial_number, device_node=node, db_path=db_path)
 
 
+def _run_windows_serial_loop(
+    db_path: str,
+    stop_event: threading.Event | None = None,
+    poll_timeout_sec: float = 0.25,
+):
+    _mark_all_devices_offline(db_path)
+    known_by_node: dict[str, _WindowsSerialDevice] = {}
+
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            break
+
+        current_by_node = {
+            dev.device_node: dev
+            for dev in _list_windows_serial_devices()
+            if dev.device_node
+        }
+
+        for node, dev in current_by_node.items():
+            if node not in known_by_node:
+                on_attach(dev, db_path)
+
+        for node, dev in list(known_by_node.items()):
+            if node not in current_by_node:
+                on_detach(dev.with_action("remove"), db_path)
+
+        known_by_node = current_by_node
+
+        if stop_event is not None and stop_event.wait(max(0.05, float(poll_timeout_sec))):
+            break
+
+
 def _handle_monitor_device(dev: Any, db_path: str):
     action = dev.action
     if action not in ("add", "remove"):
@@ -374,6 +465,13 @@ def run_conex_loop(
     poll_timeout_sec: float = 0.25,
 ):
     if not _UDEV_AVAILABLE:
+        if sys.platform == "win32":
+            _run_windows_serial_loop(
+                db_path=db_path,
+                stop_event=stop_event,
+                poll_timeout_sec=poll_timeout_sec,
+            )
+            return
         import time
         while True:
             if stop_event is not None and stop_event.is_set():

@@ -14,7 +14,7 @@
     { name: "TEST",         default_content: "PING" },
     { name: "KEEPALIVE",    default_content: "KA" },
   ];
-  const supportedBaudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+  const supportedBaudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 512000, 921600];
 
   const devices = [
     {
@@ -75,7 +75,7 @@
     },
   ];
 
-  let activeBaudRate = 115200;
+  let activeBaudRate = 512000;
 
   // ---------- comms event log ----------
   const COLOR_SERIAL = "CL-001-D4E9";

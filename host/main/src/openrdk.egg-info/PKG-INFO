@@ -10,6 +10,7 @@ Requires-Dist: fastapi==0.115.6
 Requires-Dist: uvicorn==0.32.1
 Requires-Dist: websockets==13.1
 Requires-Dist: esptool<6,>=4.7
+Requires-Dist: zeroconf==0.147.3
 
 # RDK Host Comms (`host/main`)
 

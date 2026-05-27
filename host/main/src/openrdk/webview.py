@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .constants import BAUD_RATE_MAX, BAUD_RATE_MIN, MESSAGE_TYPE_CMD
 from .functions import (
     clear_devices_registry,
     get_active_message_type,
@@ -19,6 +20,7 @@ from .functions import (
     get_device_traction_out_value,
     get_active_serial_baud,
     get_latest_ls_frame,
+    resume_keepalive_monitors,
     send_device_cmd_once,
     set_active_message_type,
     set_device_message_type,
@@ -27,6 +29,7 @@ from .functions import (
     set_active_serial_baud,
     set_device_name,
     set_device_telemetry_requested,
+    stop_all_keepalive_monitors,
     supported_message_types,
     supported_serial_baud_rates,
 )
@@ -102,6 +105,31 @@ def _parse_comms_line(line: str) -> dict | None:
     if isinstance(phase, str) and phase.strip():
         event["phase"] = phase.strip().lower()
     return event
+
+
+def _normalize_baud_rate_for_api(value: int | str | None) -> int:
+    if isinstance(value, bool):
+        raise ValueError("invalid baud rate")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("invalid baud rate")
+    if parsed < BAUD_RATE_MIN or parsed > BAUD_RATE_MAX:
+        raise ValueError(f"baud rate must be between {BAUD_RATE_MIN} and {BAUD_RATE_MAX}")
+    return parsed
+
+
+def _online_traction_devices(db_path: str) -> list[dict]:
+    devices = []
+    for item in _load_devices(db_path):
+        if str(item.get("status") or "").lower() != "online connected":
+            continue
+        if str(item.get("module_type") or "").lower() != "traction_module":
+            continue
+        if not item.get("serial_number"):
+            continue
+        devices.append(item)
+    return devices
 
 
 def _load_devices(db_path: str) -> list[dict]:
@@ -563,15 +591,76 @@ def create_webview_app(
             "supported_baud_rates": supported_serial_baud_rates(),
         }
 
+    @app.post("/api/serial-monitors/pause")
+    async def pause_serial_monitors():
+        stop_all_keepalive_monitors()
+        return {"ok": True}
+
+    @app.post("/api/serial-monitors/resume")
+    async def resume_serial_monitors():
+        resume_keepalive_monitors(db_path)
+        return {"ok": True}
+
     @app.post("/api/config/serial")
     async def update_serial_config(payload: BaudRateUpdatePayload):
         try:
-            active_baud_rate = set_active_serial_baud(payload.baud_rate)
+            requested_baud_rate = _normalize_baud_rate_for_api(payload.baud_rate)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+        current_baud_rate = get_active_serial_baud()
+        device_updates: list[dict] = []
+        if requested_baud_rate != current_baud_rate:
+            for device in _online_traction_devices(db_path):
+                serial_number = str(device.get("serial_number") or "").strip()
+                if not serial_number:
+                    continue
+                previous_type = get_device_message_type(
+                    db_path=db_path,
+                    serial_number=serial_number,
+                )
+                if previous_type != MESSAGE_TYPE_CMD:
+                    set_device_message_type(
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        message_type=MESSAGE_TYPE_CMD,
+                    )
+                    time.sleep(0.05)
+
+                result = send_device_cmd_once(
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    command=f"SET BAUD {requested_baud_rate}",
+                    timeout_sec=2.0,
+                )
+                if result is None:
+                    raise HTTPException(status_code=404, detail=f"device not found: {serial_number}")
+                if not bool(result.get("ok")):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"device baud update failed for {serial_number}: {result.get('error_kind') or result.get('response')}",
+                    )
+                response_text = str(result.get("response") or "").strip()
+                if response_text != f"B,{requested_baud_rate}":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"unexpected baud response for {serial_number}: {response_text}",
+                    )
+                device_updates.append({
+                    "serial_number": serial_number,
+                    "response": response_text,
+                    "latency_ms": result.get("latency_ms"),
+                })
+            time.sleep(0.08)
+
+        active_baud_rate = set_active_serial_baud(requested_baud_rate)
+        if requested_baud_rate != current_baud_rate:
+            stop_all_keepalive_monitors()
+            resume_keepalive_monitors(db_path)
         return {
             "active_baud_rate": active_baud_rate,
             "supported_baud_rates": supported_serial_baud_rates(),
+            "device_updates": device_updates,
         }
 
     @app.post("/api/devices/{serial_number}/telemetry/start")

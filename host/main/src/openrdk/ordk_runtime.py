@@ -46,6 +46,9 @@ class CommsRuntime:
         poll_timeout_sec: float = 0.25,
         enable_webview: bool = True,
         enable_webview_updates: bool = True,
+        enable_mdns: bool = True,
+        mdns_name: str = "rdk",
+        enable_http_redirect: bool = True,
         webview_host: str | None = None,
         webview_port: int | None = None,
         auto_start: bool = False,
@@ -55,6 +58,9 @@ class CommsRuntime:
         self._poll_timeout_sec = max(0.05, float(poll_timeout_sec))
         self._enable_webview = bool(enable_webview)
         self._enable_webview_updates = bool(enable_webview_updates)
+        self._enable_mdns = bool(enable_mdns)
+        self._mdns_name = str(mdns_name or "rdk")
+        self._enable_http_redirect = bool(enable_http_redirect)
         self._webview_host = str(webview_host or WEBVIEW_HOST)
         self._webview_port = int(webview_port or WEBVIEW_PORT)
         self._runtime_thread: threading.Thread | None = None
@@ -63,6 +69,8 @@ class CommsRuntime:
         self._webview_thread: threading.Thread | None = None
         self._webview_server = None
         self._webview_error: Exception | None = None
+        self._mdns_publisher = None
+        self._http_redirect = None
         self._runtime_lock = threading.Lock()
 
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
@@ -100,7 +108,14 @@ class CommsRuntime:
 
     @property
     def webview_url(self) -> str:
-        return f"http://{self._webview_host}:{self._webview_port}"
+        host = self._webview_host
+        if host in {"0.0.0.0", "::"}:
+            host = "127.0.0.1"
+        return f"http://{host}:{self._webview_port}"
+
+    @property
+    def mdns_url(self) -> str:
+        return f"http://{self._mdns_name}.local:{self._webview_port}"
 
     @property
     def last_error(self) -> Exception | None:
@@ -162,6 +177,27 @@ class CommsRuntime:
         thread.start()
         self._webview_server = server
         self._webview_thread = thread
+        if self._enable_mdns:
+            try:
+                from .mdns import MdnsPublisher
+
+                mdns = MdnsPublisher(
+                    name=self._mdns_name,
+                    port=int(self._webview_port),
+                )
+                if mdns.start():
+                    self._mdns_publisher = mdns
+            except Exception as exc:
+                print(f"[mdns] disabled: {exc}", flush=True)
+        if self._enable_http_redirect:
+            try:
+                from .http_redirect import HttpRedirectServer
+
+                redirect = HttpRedirectServer(target_port=int(self._webview_port))
+                if redirect.start():
+                    self._http_redirect = redirect
+            except Exception as exc:
+                print(f"[redirect] disabled: {exc}", flush=True)
 
     def start(self):
         with self._runtime_lock:
@@ -205,15 +241,29 @@ class CommsRuntime:
             thread = self._runtime_thread
             webview_server = self._webview_server
             webview_thread = self._webview_thread
+            mdns_publisher = self._mdns_publisher
+            http_redirect = self._http_redirect
             self._stop_event = None
             self._runtime_thread = None
             self._webview_server = None
             self._webview_thread = None
+            self._mdns_publisher = None
+            self._http_redirect = None
         if stop_event is not None:
             stop_event.set()
         if webview_server is not None:
             try:
                 webview_server.should_exit = True
+            except Exception:
+                pass
+        if mdns_publisher is not None:
+            try:
+                mdns_publisher.stop()
+            except Exception:
+                pass
+        if http_redirect is not None:
+            try:
+                http_redirect.stop()
             except Exception:
                 pass
         stop_all_keepalive_monitors()

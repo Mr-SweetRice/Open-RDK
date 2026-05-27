@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import timedelta, timezone
 
 DEFAULT_SERIAL_PORT = "/dev/ttyUSB0"
-DEFAULT_SERIAL_BAUD = 115200
+DEFAULT_SERIAL_BAUD = 512000
 READ_TIMEOUT_SEC = 1.0
 RETRY_DELAY_SEC = 2.0
 # Legacy handshake/control bytes kept for attach probing.
@@ -109,6 +109,7 @@ COMMON_BAUD_RATES = (
     115200,
     230400,
     460800,
+    512000,
     921600,
     1000000,
     1500000,

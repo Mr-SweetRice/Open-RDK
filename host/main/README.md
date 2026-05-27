@@ -151,6 +151,9 @@ host/main/
 - `MSG_RELAY_WEB_PORT`
 - `MSG_RELAY_ENABLE_WEBVIEW` (`true`/`false`, default `true`)
 - `MSG_RELAY_ENABLE_WEBVIEW_UPDATES` (`true`/`false`, default `true`)
+- `MSG_RELAY_ENABLE_MDNS` (`true`/`false`, default `true`)
+- `MSG_RELAY_MDNS_NAME` (default `rdk`, advertises `http://rdk.local:8765`)
+- `MSG_RELAY_ENABLE_HTTP_REDIRECT` (`true`/`false`, default `true`; redirects `http://rdk.local` to the webview port when port 80 is available)
 
 ## Notes
 - Does not require Docker. Legacy Docker setup is in `host/legacy_runtime/`.

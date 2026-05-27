@@ -7,6 +7,7 @@ from .flasher import (
 )
 from .framing import _SerialFrameReader
 from .keepalive import (
+    resume_keepalive_monitors,
     send_device_cmd_once,
     send_device_traction_command_once,
     send_device_traction_out_once,
@@ -65,6 +66,7 @@ __all__ = [
     "send_device_traction_command_once",
     "send_device_cmd_once",
     "stop_all_keepalive_monitors",
+    "resume_keepalive_monitors",
     "get_latest_ls_frame",
     "matches",
     "on_attach",

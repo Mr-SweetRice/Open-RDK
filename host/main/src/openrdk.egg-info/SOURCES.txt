@@ -4,6 +4,8 @@ src/openrdk/__init__.py
 src/openrdk/color_support.py
 src/openrdk/constants.py
 src/openrdk/errors.py
+src/openrdk/espressif_devices.json
+src/openrdk/mdns.py
 src/openrdk/modules.py
 src/openrdk/ordk_run.py
 src/openrdk/ordk_runtime.py
@@ -23,10 +25,3 @@ src/openrdk/functions/keepalive.py
 src/openrdk/functions/registry.py
 src/openrdk/functions/transport.py
 src/openrdk/functions/udev.py
-src/openrdk/web/app.js
-src/openrdk/web/color.css
-src/openrdk/web/color.html
-src/openrdk/web/color.js
-src/openrdk/web/index.html
-src/openrdk/web/line-sensor.html
-src/openrdk/web/styles.css

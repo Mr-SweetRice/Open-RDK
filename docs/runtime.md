@@ -43,7 +43,7 @@ CommsRuntime(
 `True` if the uvicorn webview thread is alive.
 
 ### `webview_url → str`
-URL built from the configured host and port: `http://<host>:<port>`.
+URL built from the configured host and port. The default relay UI is `http://<host>:8765`; with mDNS enabled it is also reachable as `http://rdk.local:8765`.
 
 ### `webview_enabled → bool`
 Whether the webview is configured (mirrors `enable_webview`).
@@ -142,6 +142,8 @@ devices = runtime.list_devices(verbose="status")  # name + status
 ```
 
 Each dict contains: `serial_number`, `name`, `status`, `module_type`, `device_node`, `link_status`, `link_live`, `message_type`, `traction_out_value`, `error_count`, `last_error_kind`, `last_event_at`, `telemetry_requested`, `telemetry_active`.
+
+`message_type` values are `CMD`, `TEST`, `TELEMETRY`, or `CONTROL`. Old registries containing `TRACTION_OUT` are normalized to `CONTROL`.
 
 ---
 

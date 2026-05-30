@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define COLOR_STORAGE_CFG_VERSION 1U
-#define COLOR_STORAGE_CAL_VERSION 1U
+#define COLOR_STORAGE_CAL_VERSION 2U
 #define COLOR_STORAGE_SENSOR_NAME_MAX_LEN 32U
 
 typedef struct {
@@ -33,7 +33,7 @@ typedef struct {
 typedef struct {
     uint16_t version;
     uint16_t reserved0;
-    color_proc_calibration_profile_t profile4;
+    color_proc_calibration_profile_t profile5;
     color_proc_calibration_profile_t profile8;
     color_proc_calibration_profile_t profile16;
 } color_storage_cal_t;

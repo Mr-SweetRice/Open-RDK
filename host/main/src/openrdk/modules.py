@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from .constants import (
     MESSAGE_TYPE_CMD,
+    MESSAGE_TYPE_CONTROL,
     MESSAGE_TYPE_TELEMETRY,
-    MESSAGE_TYPE_TRACTION_OUT,
     STATUS_ONLINE_CONNECTED,
     TRACTION_OUT_MAX_VALUE,
     TRACTION_OUT_MIN_VALUE,
@@ -178,8 +178,8 @@ class BaseModule:
 
         return self._expect_ok(last_result, "send_raw_cmd")
 
-    def send_raw_traction(self, command: str, timeout_sec: float = 1.5) -> dict:
-        self._set_message_type(MESSAGE_TYPE_TRACTION_OUT)
+    def send_raw_control(self, command: str, timeout_sec: float = 1.5) -> dict:
+        self._set_message_type(MESSAGE_TYPE_CONTROL)
         self._ensure_online()
         result = send_device_traction_command_once(
             db_path=self.runtime.db_path,
@@ -187,7 +187,10 @@ class BaseModule:
             command=str(command or "").strip(),
             timeout_sec=timeout_sec,
         )
-        return self._expect_ok(result, "send_raw_traction")
+        return self._expect_ok(result, "send_raw_control")
+
+    def send_raw_traction(self, command: str, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_control(command, timeout_sec=timeout_sec)
 
 
 class TractionModule(BaseModule):
@@ -198,7 +201,7 @@ class TractionModule(BaseModule):
             runtime=runtime,
             serial_number=serial_number,
             snapshot=snapshot,
-            default_message_type=MESSAGE_TYPE_TRACTION_OUT,
+            default_message_type=MESSAGE_TYPE_CONTROL,
         )
         self._task_queue: _queue.Queue = _queue.Queue()
         self._worker_thread = threading.Thread(target=self._worker, daemon=True)
@@ -350,7 +353,7 @@ class TractionModule(BaseModule):
             serial_number=self.serial_number,
             traction_out_value=signed_value,
         )
-        self._set_message_type(MESSAGE_TYPE_TRACTION_OUT)
+        self._set_message_type(MESSAGE_TYPE_CONTROL)
         self._ensure_online()
         result = send_device_traction_out_once(
             db_path=self.runtime.db_path,
@@ -375,7 +378,7 @@ class TractionModule(BaseModule):
     def forward_raw(self, value: float | int, timeout_sec: float = 1.5) -> dict:
         """
         Direct raw-output helper.
-        Maps to TRACTION_OUT command: `SET OUT RAW <value>`.
+        Maps to CONTROL command: `SET OUT RAW <value>`.
         """
         normalized = self._sanitize_output(value)
         return self.send_raw_traction(f"SET OUT RAW {normalized}", timeout_sec=timeout_sec)

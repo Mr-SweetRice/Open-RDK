@@ -18,10 +18,11 @@ Maintain a reliable host-side relay for ESP devices:
 ## Critical Files
 - `src/openrdk/ordk_run.py`: process bootstrap, log trimming, web thread start, relay start.
 - `src/openrdk/ordk_runtime.py`: CommsRuntime class — in-process SDK entrypoint.
-- `src/openrdk/functions.py`: udev + serial + handshake + keepalive + DB writes.
+- `src/openrdk/functions/`: udev + serial + handshake + keepalive + DB writes.
 - `src/openrdk/webview.py`: FastAPI app, REST, websocket, log-thread and stream-thread.
-- `src/openrdk/web/app.js`: client rendering and websocket consumer.
-- `src/openrdk/web/styles.css`: UI style.
+- `src/openrdk/web_new/static/app.js`: client rendering and websocket consumer.
+- `src/openrdk/web_new/static/theme.css`: shared UI style.
+- `src/openrdk/web_new/*.html`: current host-served module tools.
 - `src/openrdk/espressif_devices.json`: device state DB.
 - `comms-raw.log`: raw comms NDJSON DB.
 
@@ -33,9 +34,9 @@ Maintain a reliable host-side relay for ESP devices:
 5. `ordk_run.py` calls `conex()` (udev monitor + serial logic).
 
 ## Protocol Summary
-- Host sends handshake bytes.
-- ESP replies ACK/PONG/module-info.
-- Keepalive uses ping/pong.
+- Host sends framed handshake/discovery bytes (`HELLO`, module query).
+- ESP replies ACK/module-info and then uses framed stream traffic.
+- Message types are `CMD`, `TEST`, `TELEMETRY`, and generic `CONTROL (0x04)`.
 - Module type is discovered on handshake and stored in device registry.
 
 ## Web Stream Model

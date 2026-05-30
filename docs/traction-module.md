@@ -20,8 +20,9 @@ motor = runtime.module("98:3D:AE:41:97:C4")  # auto-detects type
 
 ## Output Range
 
-All `value` parameters for output commands are clamped to `[0, 100]`.  
-Values below 0 are raised to 0; values above 100 are clamped to 100.
+All motor output commands are sent through the generic `CONTROL (0x04)` frame type. The host still exposes `traction_out_value` in the registry because it is the motor output setpoint.
+
+Signed movement values are clamped to `[-100, 100]`; raw magnitude helpers clamp to the same range before sending `SET OUT RAW <value>`.
 
 ---
 

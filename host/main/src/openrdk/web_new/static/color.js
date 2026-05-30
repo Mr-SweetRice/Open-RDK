@@ -8,8 +8,6 @@ const state = {
   ws: null,
   telemetryLines: [],
   eventLines: [],
-  wizardAbort: false,
-  validationResults: [],
 };
 
 const elements = {
@@ -28,14 +26,6 @@ const elements = {
   integrationValue: document.getElementById("integrationValue"),
   targetClearValue: document.getElementById("targetClearValue"),
   topCandidatesList: document.getElementById("topCandidatesList"),
-  moduleTypeValue: document.getElementById("moduleTypeValue"),
-  sensorIdValue: document.getElementById("sensorIdValue"),
-  serialValue: document.getElementById("serialValue"),
-  linkValue: document.getElementById("linkValue"),
-  deviceStatusValue: document.getElementById("deviceStatusValue"),
-  lastCalibrationText: document.getElementById("lastCalibrationText"),
-  healthFlags: document.getElementById("healthFlags"),
-  statusNote: document.getElementById("statusNote"),
   rawRBar: document.getElementById("rawRBar"),
   rawGBar: document.getElementById("rawGBar"),
   rawBBar: document.getElementById("rawBBar"),
@@ -48,7 +38,6 @@ const elements = {
   labLValue: document.getElementById("labLValue"),
   labAValue: document.getElementById("labAValue"),
   labBValue: document.getElementById("labBValue"),
-  sampleTimestampValue: document.getElementById("sampleTimestampValue"),
   sensorNameInput: document.getElementById("sensorNameInput"),
   paletteModeInput: document.getElementById("paletteModeInput"),
   samplePeriodInput: document.getElementById("samplePeriodInput"),
@@ -66,16 +55,13 @@ const elements = {
   selftestResult: document.getElementById("selftestResult"),
   telemetryFeed: document.getElementById("telemetryFeed"),
   eventFeed: document.getElementById("eventFeed"),
-  wizardModeSelect: document.getElementById("wizardModeSelect"),
-  startWizardBtn: document.getElementById("startWizardBtn"),
-  abortWizardBtn: document.getElementById("abortWizardBtn"),
-  wizardStatus: document.getElementById("wizardStatus"),
-  singleTargetSelect: document.getElementById("singleTargetSelect"),
-  singleCaptureBtn: document.getElementById("singleCaptureBtn"),
+  calibrationModeSelect: document.getElementById("calibrationModeSelect"),
+  calibrationStatus: document.getElementById("calibrationStatus"),
+  manualTargetSelect: document.getElementById("manualTargetSelect"),
+  manualCaptureBtn: document.getElementById("manualCaptureBtn"),
   persistCalibrationBtn: document.getElementById("persistCalibrationBtn"),
   paletteEditor: document.getElementById("paletteEditor"),
   saveLabelsBtn: document.getElementById("saveLabelsBtn"),
-  validationList: document.getElementById("validationList"),
   reloadCalibrationBtn: document.getElementById("reloadCalibrationBtn"),
   exportProfileBtn: document.getElementById("exportProfileBtn"),
   importProfileBtn: document.getElementById("importProfileBtn"),
@@ -84,11 +70,6 @@ const elements = {
   manualCmdInput: document.getElementById("manualCmdInput"),
   manualCmdSend: document.getElementById("manualCmdSend"),
   manualCmdResponse: document.getElementById("manualCmdResponse"),
-  patchOverlay: document.getElementById("patchOverlay"),
-  patchPreview: document.getElementById("patchPreview"),
-  patchTitle: document.getElementById("patchTitle"),
-  patchDescription: document.getElementById("patchDescription"),
-  patchOverlayClose: document.getElementById("patchOverlayClose"),
   importProfileInput: document.getElementById("importProfileInput"),
 };
 
@@ -195,21 +176,8 @@ function appendFeed(target, lines, text, max = 120) {
   target.scrollTop = target.scrollHeight;
 }
 
-function setWizardStatus(text) {
-  elements.wizardStatus.textContent = text;
-}
-
-function showPatchOverlay(title, description, hex) {
-  elements.patchTitle.textContent = title;
-  elements.patchDescription.textContent = description;
-  elements.patchPreview.style.background = String(hex || "#ffffff");
-  elements.patchOverlay.classList.remove("hidden");
-  elements.patchOverlay.setAttribute("aria-hidden", "false");
-}
-
-function hidePatchOverlay() {
-  elements.patchOverlay.classList.add("hidden");
-  elements.patchOverlay.setAttribute("aria-hidden", "true");
+function setCalibrationStatus(text) {
+  elements.calibrationStatus.textContent = text;
 }
 
 function renderDeviceSelect() {
@@ -247,11 +215,9 @@ function renderSnapshot() {
   if (!snapshot || !device) {
     elements.currentColorName.textContent = "No data";
     elements.currentColorConfidence.textContent = "0.0%";
-    elements.statusNote.textContent = "Select a connected color module to start.";
     return;
   }
 
-  const info = snapshot.info;
   const cfg = snapshot.cfg;
   const data = snapshot.data;
   const modeKey = String(cfg.palette_mode);
@@ -272,13 +238,6 @@ function renderSnapshot() {
   elements.gainValue.textContent = `${data.gain}x`;
   elements.integrationValue.textContent = `${data.integration_ms} ms`;
   elements.targetClearValue.textContent = String(cfg.target_clear);
-  elements.moduleTypeValue.textContent = info.module_type;
-  elements.sensorIdValue.textContent = `0x${Number(info.sensor_id || 0).toString(16).padStart(2, "0")}`;
-  elements.serialValue.textContent = device.serial_number || "-";
-  elements.linkValue.textContent = device.link_status || "-";
-  elements.deviceStatusValue.textContent = device.status || "-";
-  elements.lastCalibrationText.textContent =
-    modeProfile(modeKey)?.last_calibrated_at || "not stored on host";
 
   elements.rawRValue.textContent = String(data.raw.r);
   elements.rawGValue.textContent = String(data.raw.g);
@@ -289,7 +248,6 @@ function renderSnapshot() {
   elements.labLValue.textContent = (Number(data.lab_l_centi || 0) / 100).toFixed(2);
   elements.labAValue.textContent = (Number(data.lab_a_centi || 0) / 100).toFixed(2);
   elements.labBValue.textContent = (Number(data.lab_b_centi || 0) / 100).toFixed(2);
-  elements.sampleTimestampValue.textContent = `${data.sample_timestamp_ms} ms`;
 
   const rawMax = Math.max(1, data.raw.r, data.raw.g, data.raw.b, data.raw.c);
   elements.rawRBar.style.width = `${(data.raw.r / rawMax) * 100}%`;
@@ -312,28 +270,6 @@ function renderSnapshot() {
   if (!elements.topCandidatesList.children.length) {
     elements.topCandidatesList.innerHTML = `<div class="candidate-item"><span>No valid candidates</span><strong>0.0%</strong></div>`;
   }
-
-  elements.healthFlags.innerHTML = "";
-  const labels = [
-    ["sensor_ok", "Sensor OK"],
-    ["sensor_present", "Sensor Present"],
-    ["dark_valid", "Dark Ref"],
-    ["white_valid", "White Ref"],
-    ["auto_exposure", "Auto Exposure"],
-    ["saturated", "Saturated"],
-    ["calibrating", "Calibrating"],
-    ["selftest_ok", "Selftest OK"],
-  ];
-  for (const [key, label] of labels) {
-    const item = document.createElement("div");
-    item.className = "flag-item";
-    item.innerHTML = `<span>${label}</span><strong>${health[key] ? "yes" : "no"}</strong>`;
-    elements.healthFlags.appendChild(item);
-  }
-
-  elements.statusNote.textContent = health.sensor_ok
-    ? `Sampling at ${cfg.sample_period_ms} ms with classifier ${cfg.classifier === 1 ? "Lab" : "Norm RGB"}.`
-    : "The host can still manage configuration, but the last sample indicates the sensor is unavailable.";
 }
 
 function renderConfigInputs() {
@@ -353,7 +289,7 @@ function renderConfigInputs() {
   elements.confidenceInput.value = (Number(cfg.confidence_milli || 0) / 1000).toFixed(2);
   elements.targetClearInput.value = String(cfg.target_clear);
   elements.patchSamplesInput.value = String(cfg.patch_sample_count || 12);
-  elements.wizardModeSelect.value = String(cfg.palette_mode);
+  elements.calibrationModeSelect.value = String(cfg.palette_mode);
 }
 
 function renderPaletteEditor() {
@@ -418,23 +354,6 @@ function collectEditedProfile() {
   return profile;
 }
 
-function renderValidation() {
-  elements.validationList.innerHTML = "";
-  if (!state.validationResults.length) {
-    elements.validationList.innerHTML = `<div class="validation-item"><span>No validation run yet.</span><strong>-</strong></div>`;
-    return;
-  }
-  for (const result of state.validationResults) {
-    const item = document.createElement("div");
-    item.className = "validation-item";
-    item.innerHTML = `
-      <span>${escapeHtml(result.expected)} -> ${escapeHtml(result.detected)}</span>
-      <strong>${escapeHtml(result.confidence)}</strong>
-    `;
-    elements.validationList.appendChild(item);
-  }
-}
-
 async function refreshPalettes() {
   const payload = await apiGet("/api/color/palettes");
   state.palettes = payload.palettes || {};
@@ -449,7 +368,6 @@ async function refreshDevices() {
     await refreshSnapshot();
     await refreshCalibration();
     await refreshProfile();
-    renderValidation();
   }
 }
 
@@ -609,7 +527,6 @@ function parseTelemetryLine(message) {
     classifier: Number(parts[hasExtendedLab ? 26 : 22]),
     calibration_target_slot: Number(parts[hasExtendedLab ? 27 : 23]),
     calibration_samples: Number(parts[hasExtendedLab ? 28 : 24]),
-    sample_timestamp_ms: Number(parts[hasExtendedLab ? 29 : 25]),
   };
 }
 
@@ -646,7 +563,6 @@ function applyTelemetryEvent(parsed) {
   snapshot.data.classifier = parsed.classifier;
   snapshot.data.calibration_target_slot = parsed.calibration_target_slot;
   snapshot.data.calibration_samples = parsed.calibration_samples;
-  snapshot.data.sample_timestamp_ms = parsed.sample_timestamp_ms;
   renderSnapshot();
 }
 
@@ -727,12 +643,10 @@ async function restoreDefaults() {
   const payload = await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/color/restore-defaults`, {});
   state.snapshot = payload.snapshot || null;
   state.profile = payload.profile || null;
-  state.validationResults = [];
   renderSnapshot();
   renderConfigInputs();
   renderPaletteEditor();
   renderSingleTargetOptions();
-  renderValidation();
 }
 
 async function startCalibrationSession(modeKey) {
@@ -740,7 +654,6 @@ async function startCalibrationSession(modeKey) {
     palette_mode: Number(modeKey),
   });
   await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/color/calibration/start`, {});
-  await refreshSnapshot();
 }
 
 async function waitForCaptureSamples(targetCount, timeoutMs = 6000) {
@@ -751,9 +664,6 @@ async function waitForCaptureSamples(targetCount, timeoutMs = 6000) {
       return true;
     }
     await delay(220);
-    if (state.wizardAbort) {
-      return false;
-    }
   }
   return false;
 }
@@ -762,13 +672,15 @@ function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function captureTarget(target, title, hex, description) {
-  showPatchOverlay(title, description, hex);
-  await delay(600);
+async function captureTarget(target, label) {
+  setCalibrationStatus(`Capturing ${label}. Keep the sensor fixed.`);
   await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/color/calibration/select`, {
     target,
   });
+  await delay(120);
+  await refreshSnapshot();
   const patchTarget = Number(elements.patchSamplesInput.value || state.snapshot?.cfg?.patch_sample_count || 12);
+  setCalibrationStatus(`Collecting ${patchTarget} samples for ${label}.`);
   const ok = await waitForCaptureSamples(patchTarget, Math.max(5000, patchTarget * 350));
   if (!ok) {
     throw new Error("capture_timeout");
@@ -780,109 +692,35 @@ async function captureTarget(target, title, hex, description) {
   state.profile = payload.profile || state.profile;
   renderSnapshot();
   renderPaletteEditor();
-  appendFeed(elements.eventFeed, state.eventLines, `Committed calibration target ${target}.`);
-}
-
-async function runWizard() {
-  if (!state.selectedSerial) {
-    return;
-  }
-  const modeKey = String(elements.wizardModeSelect.value || selectedModeKey());
-  const labels = (modeProfile(modeKey)?.labels || paletteEntries(modeKey)).filter((item) => item.enabled !== false);
-  state.wizardAbort = false;
-  state.validationResults = [];
-  renderValidation();
-  setWizardStatus(`Starting wizard for palette mode ${modeKey}.`);
-
-  try {
-    await startCalibrationSession(modeKey);
-    await captureTarget("DARK", "Dark Reference", "#000000", "Keep the sensor facing a black patch or a covered scene.");
-    if (state.wizardAbort) throw new Error("wizard_aborted");
-    await captureTarget("WHITE", "White Reference", "#ffffff", "Keep the sensor at the same distance and align it with the white patch.");
-
-    for (const item of labels) {
-      if (state.wizardAbort) {
-        throw new Error("wizard_aborted");
-      }
-      await captureTarget(
-        String(item.slot),
-        `Patch ${item.name}`,
-        normalizeHex(item.hex),
-        `Point the sensor at the ${item.name} patch and keep distance stable during capture.`,
-      );
-      await delay(250);
-    }
-
-    hidePatchOverlay();
-    await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/color/save`, {
-      persist_cfg: false,
-      persist_cal: true,
-    });
-    await refreshCalibration();
-    await refreshProfile();
-
-    setWizardStatus("Calibration committed. Running validation sequence.");
-    for (const item of labels) {
-      showPatchOverlay(
-        `Validation ${item.name}`,
-        "The page is checking whether the detected class matches the patch displayed on screen.",
-        normalizeHex(item.hex),
-      );
-      await delay(500);
-      await refreshSnapshot();
-      const detected = labelForSlot(modeKey, Number(state.snapshot?.data?.detected_slot));
-      state.validationResults.push({
-        expected: item.name,
-        detected,
-        confidence: formatPercentFromMilli(state.snapshot?.data?.confidence_milli || 0),
-      });
-    }
-    hidePatchOverlay();
-    renderValidation();
-    setWizardStatus("Wizard completed.");
-  } catch (err) {
-    hidePatchOverlay();
-    if (String(err?.message || err) === "wizard_aborted") {
-      setWizardStatus("Wizard aborted by user.");
-    } else {
-      setWizardStatus(`Wizard failed: ${String(err?.message || err)}`);
-    }
-  } finally {
-    await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/color/calibration/stop`, {});
-    await refreshSnapshot();
-  }
+  appendFeed(elements.eventFeed, state.eventLines, `Committed calibration target ${label}.`);
 }
 
 async function captureSelectedTarget() {
   if (!state.selectedSerial) {
     return;
   }
-  const target = String(elements.singleTargetSelect.value || "").trim();
+  const target = String(elements.manualTargetSelect.value || "").trim();
   if (!target) {
     return;
   }
+  const modeKey = String(elements.calibrationModeSelect.value || selectedModeKey());
+  const isSpecialTarget = target === "DARK" || target === "WHITE";
+  const titleLabel = isSpecialTarget
+    ? target.toLowerCase()
+    : labelForSlot(modeKey, Number(target));
+  const confirmed = window.confirm(
+    `Confirm that the sensor is positioned over ${titleLabel} before capturing.`,
+  );
+  if (!confirmed) {
+    setCalibrationStatus("Capture cancelled.");
+    return;
+  }
   try {
-    await startCalibrationSession(selectedModeKey());
-    const isSpecialTarget = target === "DARK" || target === "WHITE";
-    const titleLabel = isSpecialTarget
-      ? target.toLowerCase()
-      : labelForSlot(selectedModeKey(), Number(target));
-    const targetHex = target === "DARK"
-      ? "#000000"
-      : target === "WHITE"
-        ? "#ffffff"
-        : colorForSlot(selectedModeKey(), Number(target));
-    await captureTarget(
-      target,
-      `Capture ${titleLabel}`,
-      targetHex,
-      "Single-target capture is active. Keep the sensor fixed until commit completes.",
-    );
-    hidePatchOverlay();
-    setWizardStatus(`Captured target ${target}.`);
+    await startCalibrationSession(modeKey);
+    await captureTarget(target, titleLabel);
+    setCalibrationStatus(`Captured ${titleLabel}.`);
   } catch (err) {
-    hidePatchOverlay();
-    setWizardStatus(`Single capture failed: ${String(err?.message || err)}`);
+    setCalibrationStatus(`Capture failed: ${String(err?.message || err)}`);
   } finally {
     await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/color/calibration/stop`, {});
     await refreshSnapshot();
@@ -890,7 +728,7 @@ async function captureSelectedTarget() {
 }
 
 function renderSingleTargetOptions() {
-  const modeKey = selectedModeKey();
+  const modeKey = String(elements.calibrationModeSelect.value || selectedModeKey());
   const items = [
     { value: "DARK", label: "dark" },
     { value: "WHITE", label: "white" },
@@ -899,12 +737,16 @@ function renderSingleTargetOptions() {
       label: item.name,
     }))),
   ];
-  elements.singleTargetSelect.innerHTML = "";
+  const previous = elements.manualTargetSelect.value;
+  elements.manualTargetSelect.innerHTML = "";
   for (const item of items) {
     const option = document.createElement("option");
     option.value = item.value;
     option.textContent = item.label;
-    elements.singleTargetSelect.appendChild(option);
+    elements.manualTargetSelect.appendChild(option);
+  }
+  if (items.some((item) => item.value === previous)) {
+    elements.manualTargetSelect.value = previous;
   }
 }
 
@@ -963,14 +805,12 @@ async function initialize() {
     refreshDevices().catch(() => {});
   }, 3000);
   if (!state.selectedSerial) {
-    renderValidation();
     return;
   }
   await refreshSnapshot();
   await refreshCalibration();
   await refreshProfile();
   renderSingleTargetOptions();
-  renderValidation();
 }
 
 elements.deviceSelect.addEventListener("change", async (event) => {
@@ -1008,16 +848,8 @@ elements.startTelemetryBtn.addEventListener("click", () => startTelemetry().catc
 elements.stopTelemetryBtn.addEventListener("click", () => stopTelemetry().catch((err) => {
   appendFeed(elements.eventFeed, state.eventLines, `Telemetry stop failed: ${err.message}`);
 }));
-elements.startWizardBtn.addEventListener("click", () => runWizard().catch((err) => {
-  setWizardStatus(`Wizard failed: ${err.message}`);
-}));
-elements.abortWizardBtn.addEventListener("click", () => {
-  state.wizardAbort = true;
-  hidePatchOverlay();
-  setWizardStatus("Abort requested.");
-});
-elements.singleCaptureBtn.addEventListener("click", () => captureSelectedTarget().catch((err) => {
-  setWizardStatus(`Single capture failed: ${err.message}`);
+elements.manualCaptureBtn.addEventListener("click", () => captureSelectedTarget().catch((err) => {
+  setCalibrationStatus(`Capture failed: ${err.message}`);
 }));
 elements.persistCalibrationBtn.addEventListener("click", () => apiPost(
   `/api/devices/${encodeURIComponent(state.selectedSerial)}/color/save`,
@@ -1056,14 +888,15 @@ elements.restoreDefaultsBtn.addEventListener("click", () => restoreDefaults().ca
 elements.manualCmdSend.addEventListener("click", () => sendManualCmd().catch((err) => {
   elements.manualCmdResponse.textContent = `Command failed: ${err.message}`;
 }));
-elements.patchOverlayClose.addEventListener("click", () => {
-  hidePatchOverlay();
-});
 elements.paletteModeInput.addEventListener("change", () => {
   renderPaletteEditor();
   renderSingleTargetOptions();
 });
+elements.calibrationModeSelect.addEventListener("change", () => {
+  renderSingleTargetOptions();
+});
 
 initialize().catch((err) => {
-  elements.statusNote.textContent = `Initialization failed: ${err.message}`;
+  elements.currentColorName.textContent = "Initialization failed";
+  elements.currentColorConfidence.textContent = err.message;
 });

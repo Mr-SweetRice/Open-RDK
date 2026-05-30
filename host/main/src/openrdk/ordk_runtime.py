@@ -49,6 +49,9 @@ class CommsRuntime:
         enable_mdns: bool = True,
         mdns_name: str = "rdk",
         enable_http_redirect: bool = True,
+        enable_https: bool = False,
+        tls_cert_file: str | None = None,
+        tls_key_file: str | None = None,
         webview_host: str | None = None,
         webview_port: int | None = None,
         auto_start: bool = False,
@@ -61,6 +64,9 @@ class CommsRuntime:
         self._enable_mdns = bool(enable_mdns)
         self._mdns_name = str(mdns_name or "rdk")
         self._enable_http_redirect = bool(enable_http_redirect)
+        self._enable_https = bool(enable_https)
+        self._tls_cert_file = tls_cert_file
+        self._tls_key_file = tls_key_file
         self._webview_host = str(webview_host or WEBVIEW_HOST)
         self._webview_port = int(webview_port or WEBVIEW_PORT)
         self._runtime_thread: threading.Thread | None = None
@@ -111,11 +117,15 @@ class CommsRuntime:
         host = self._webview_host
         if host in {"0.0.0.0", "::"}:
             host = "127.0.0.1"
-        return f"http://{host}:{self._webview_port}"
+        return f"{self._webview_scheme}://{host}:{self._webview_port}"
 
     @property
     def mdns_url(self) -> str:
-        return f"http://{self._mdns_name}.local:{self._webview_port}"
+        return f"{self._webview_scheme}://{self._mdns_name}.local:{self._webview_port}"
+
+    @property
+    def _webview_scheme(self) -> str:
+        return "https" if self._enable_https else "http"
 
     @property
     def last_error(self) -> Exception | None:
@@ -160,12 +170,33 @@ class CommsRuntime:
             comms_log_path=self._comms_log_path,
             enable_realtime_stream=self._enable_webview_updates,
         )
+        ssl_certfile = None
+        ssl_keyfile = None
+        if self._enable_https:
+            try:
+                from .tls import ensure_self_signed_cert
+
+                ssl_certfile, ssl_keyfile = ensure_self_signed_cert(
+                    cert_file=self._tls_cert_file,
+                    key_file=self._tls_key_file,
+                    hosts=[
+                        f"{self._mdns_name}.local",
+                        "localhost",
+                        "127.0.0.1",
+                    ],
+                )
+                print(f"[tls] HTTPS certificate: {ssl_certfile}", flush=True)
+            except Exception as exc:
+                self._webview_error = exc
+                return
         config = uvicorn.Config(
             app=app,
             host=self._webview_host,
             port=int(self._webview_port),
             log_level="warning",
             access_log=False,
+            ssl_certfile=ssl_certfile,
+            ssl_keyfile=ssl_keyfile,
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(
@@ -184,6 +215,7 @@ class CommsRuntime:
                 mdns = MdnsPublisher(
                     name=self._mdns_name,
                     port=int(self._webview_port),
+                    scheme=self._webview_scheme,
                 )
                 if mdns.start():
                     self._mdns_publisher = mdns
@@ -193,7 +225,10 @@ class CommsRuntime:
             try:
                 from .http_redirect import HttpRedirectServer
 
-                redirect = HttpRedirectServer(target_port=int(self._webview_port))
+                redirect = HttpRedirectServer(
+                    target_port=int(self._webview_port),
+                    target_scheme=self._webview_scheme,
+                )
                 if redirect.start():
                     self._http_redirect = redirect
             except Exception as exc:

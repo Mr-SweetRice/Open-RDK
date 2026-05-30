@@ -1,60 +1,49 @@
-# Embedded Workspace (Pi + ESP-IDF)
+# Open-RDK
+
+Host relay, web UI, SDK, and ESP32-C3 firmware modules for the RDK platform.
 
 ## Layout
-- .devcontainer/ : ESP-IDF dev container (build/flash/monitor)
-- firmware/esp/modules/ : ESP-IDF firmware projects (one per module/device)
-- host/main/ : Raspberry Pi runtime service (serial relay)
-- docker-compose.yml : runtime stack on the Pi
-- tools/scripts/ : convenience scripts
 
-## Firmware (ESP)
-Open the repo on the Raspberry Pi with VS Code Remote-SSH, then "Open Folder in Container".
+- `host/main/`: Python host relay, SDK entrypoint, mDNS/HTTPS web UI, and module tools.
+- `host/main/src/openrdk/web_new/`: current browser interface served by the host relay.
+- `firmware/esp/modules/`: active ESP-IDF firmware projects, one directory per module.
+- `firmware/legacy_firmware/`: preserved legacy firmware sources.
+- `protocol/protocol.md`: current host/firmware serial protocol.
+- `docs/`: SDK and runtime reference.
+- `tools/scripts/`: helper scripts.
 
-VS Code workspace:
-- Open the repository root `Open-RDK`.
-- The workspace is preconfigured for `firmware/esp/modules/traction_module`.
-- On Windows, set `IDF_PATH` in your environment before opening VS Code so the workspace resolves the ESP-IDF installation automatically.
+## Host Relay
 
-Build:
-- cd firmware/esp/modules/traction_module
-- . $IDF_PATH/export.sh
-- idf.py set-target esp32c3
-- idf.py build
+Run from `host/main`:
 
-Flash + monitor:
-- idf.py -p /dev/ttyUSB0 flash monitor
+```bash
+pip install -e .
+openrdk
+```
 
-Helper scripts:
-- Linux/macOS: `./tools/scripts/build_firmware.sh` and `./tools/scripts/flash.sh`
-- Windows PowerShell: `.\tools\scripts\build.ps1` and `.\tools\scripts\flash.ps1 -Port COM11`
+The relay owns serial communication, device discovery, telemetry, and all browser tools. The UI is served on port `8765`; with mDNS enabled the local URL is:
 
-The flash helpers always enter `firmware/esp/modules/traction_module`, recreate `sdkconfig` when it is missing, and delete a stale `build/` directory if it still points at an older absolute path.
+```text
+http://rdk.local:8765
+```
 
-## Pi Runtime
-From repo root on the Pi:
-- docker compose build
-- docker compose up -d
+If HTTP redirect is enabled and port 80 is available, `http://rdk.local` redirects to the relay UI.
 
-Logs:
-- docker compose logs -f comms
+## Firmware
 
-## Host Comms Architecture (Current Direction)
-- The host comms system remains the single protocol engine for serial, handshake, keepalive, telemetry, and command transport.
-- The next architecture step is to expose this engine as an importable Python package (SDK-first), so a new Pi can run user code without a pre-installed system service.
-- The webview stays supported as a fallback/debug control surface, not as the primary control path.
+Each active firmware is an ESP-IDF project:
 
-Planned operation modes:
-- Embedded mode (primary): user imports the package, starts the runtime in-process, and controls modules through Python classes.
-- Webview mode (fallback): optional FastAPI/websocket UI uses the same core engine and remains compatible.
+```bash
+cd firmware/esp/modules/traction_module
+idf.py set-target esp32c3
+idf.py build
+idf.py -p <PORT> flash monitor
+```
 
-Planned SDK surface:
-- Raw/expert access for direct command-level control.
-- Sanitized module classes for application code (`TractionModule`, `LineSensorModule`, etc.), with safe methods and validation.
+The active firmware module tools were removed from firmware directories; configuration and tuning now happen through the host relay UI.
 
-Development workflow lock:
-- First define sanitized class methods and behavior contracts.
-- Then implement backend wiring to match those contracts.
-- Keep protocol behavior and existing webview compatibility stable while adding SDK support.
+## Protocol
 
-Detailed host-side architecture and workflow live in:
-- `host/main/README.md`
+The framed protocol uses `CMD`, `TEST`, `TELEMETRY`, and generic `CONTROL (0x04)` message types. `CONTROL` replaces the old public `TRACTION_OUT` message type name; the host still accepts `TRACTION_OUT` as a backward-compatible alias for old registries.
+
+See `protocol/protocol.md` for the full frame format and command catalog.

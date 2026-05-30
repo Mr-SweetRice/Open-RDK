@@ -37,7 +37,14 @@ class RelayMessageType:
 MESSAGE_TYPE_CMD = "CMD"
 MESSAGE_TYPE_TEST = "TEST"
 MESSAGE_TYPE_TELEMETRY = "TELEMETRY"
-MESSAGE_TYPE_TRACTION_OUT = "TRACTION_OUT"
+MESSAGE_TYPE_CONTROL = "CONTROL"
+# Backward-compatible alias for older code and device registries.
+MESSAGE_TYPE_TRACTION_OUT = MESSAGE_TYPE_CONTROL
+MESSAGE_TYPE_ALIASES = {
+    "TRACTION_OUT": MESSAGE_TYPE_CONTROL,
+    "MODULE_CONTROL": MESSAGE_TYPE_CONTROL,
+    "MODULE_CMD": MESSAGE_TYPE_CONTROL,
+}
 
 MESSAGE_TYPES = {
     MESSAGE_TYPE_CMD: RelayMessageType(
@@ -58,10 +65,10 @@ MESSAGE_TYPES = {
         default_content="TELEMETRY",
         ack_content="I RECIEVED TELEMETRY",
     ),
-    MESSAGE_TYPE_TRACTION_OUT: RelayMessageType(
-        name=MESSAGE_TYPE_TRACTION_OUT,
+    MESSAGE_TYPE_CONTROL: RelayMessageType(
+        name=MESSAGE_TYPE_CONTROL,
         code=0x04,
-        default_content="SET OUT 30",
+        default_content="CONTROL",
         ack_content="OK",
     ),
 }

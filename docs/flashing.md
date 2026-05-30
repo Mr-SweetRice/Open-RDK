@@ -30,7 +30,7 @@ The device will reboot automatically with the new firmware after flashing comple
 | `"traction_module"` | ESP32-C3 | `traction_module.bin` |
 | `"line_sensor_module"` | ESP32-C3 | `line_sensor_module.bin` |
 
-Firmware binaries are bundled inside the SDK package. No external files needed.
+Firmware binaries are expected under the SDK package's firmware asset directory when using the SDK flashing helpers. Build artifacts under `firmware/esp/modules/*/build/` are not tracked in git; generate them with ESP-IDF and copy package assets only when preparing a release bundle.
 
 Available at runtime:
 ```python

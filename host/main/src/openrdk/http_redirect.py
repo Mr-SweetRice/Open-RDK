@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class _RedirectHandler(BaseHTTPRequestHandler):
     target_port = 8765
+    target_scheme = "http"
 
     def do_GET(self):
         self._redirect()
@@ -22,7 +23,7 @@ class _RedirectHandler(BaseHTTPRequestHandler):
     def _redirect(self):
         host = self.headers.get("Host", "rdk.local").split(":", 1)[0] or "rdk.local"
         path = self.path or "/"
-        target = f"http://{host}:{int(self.target_port)}{path}"
+        target = f"{self.target_scheme}://{host}:{int(self.target_port)}{path}"
         self.send_response(307)
         self.send_header("Location", target)
         self.send_header("Cache-Control", "no-store")
@@ -30,8 +31,15 @@ class _RedirectHandler(BaseHTTPRequestHandler):
 
 
 class HttpRedirectServer:
-    def __init__(self, target_port: int = 8765, listen_host: str = "0.0.0.0", listen_port: int = 80):
+    def __init__(
+        self,
+        target_port: int = 8765,
+        target_scheme: str = "http",
+        listen_host: str = "0.0.0.0",
+        listen_port: int = 80,
+    ):
         self.target_port = int(target_port)
+        self.target_scheme = "https" if str(target_scheme).lower() == "https" else "http"
         self.listen_host = str(listen_host or "0.0.0.0")
         self.listen_port = int(listen_port)
         self._server: ThreadingHTTPServer | None = None
@@ -48,7 +56,10 @@ class HttpRedirectServer:
         handler = type(
             "OpenRdkRedirectHandler",
             (_RedirectHandler,),
-            {"target_port": self.target_port},
+            {
+                "target_port": self.target_port,
+                "target_scheme": self.target_scheme,
+            },
         )
         try:
             server = ThreadingHTTPServer((self.listen_host, self.listen_port), handler)
@@ -68,7 +79,7 @@ class HttpRedirectServer:
         self._server = server
         self._thread = thread
         print(
-            f"[redirect] http://rdk.local -> http://rdk.local:{self.target_port}",
+            f"[redirect] http://rdk.local -> {self.target_scheme}://rdk.local:{self.target_port}",
             flush=True,
         )
         return True

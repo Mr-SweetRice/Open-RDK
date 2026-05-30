@@ -48,7 +48,7 @@
     .summary .metric .label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
     .summary .metric .value { font-family: var(--font-disp); font-weight: 700; font-size: 24px; }
 
-    .position-wrap, .lag-wrap {
+    .position-wrap {
       margin-top: 18px;
       padding-top: 16px;
       border-top: 1px solid var(--border);
@@ -76,16 +76,6 @@
       box-shadow: 0 0 0 6px rgba(168,213,168,0.16);
       transition: left 0.12s linear, opacity 0.12s linear;
     }
-
-    .lag-chart {
-      width: 100%; height: 100px;
-      border-radius: var(--r-lg);
-      background: linear-gradient(180deg, var(--bg-2), var(--surface-2));
-      border: 1px solid var(--border);
-      margin-top: 8px;
-      overflow: hidden;
-    }
-    .lag-chart svg { width: 100%; height: 100%; display: block; }
 
     .bars {
       display: grid;
@@ -171,6 +161,47 @@
       display: flex; gap: 8px; align-items: center;
       margin: 10px 0; flex-wrap: wrap;
     }
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .control-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      color: var(--text-dim);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .control-grid input,
+    .control-grid select,
+    .cal-input {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 9px 10px;
+      font: inherit;
+      letter-spacing: 0;
+    }
+    .cal-input {
+      max-width: 96px;
+      padding: 7px 8px;
+      text-align: right;
+      font-family: var(--font-mono);
+    }
+    .config-status {
+      min-height: 18px;
+      color: var(--text-dim);
+      font-size: 12px;
+      margin-top: 10px;
+    }
 
     @media (max-width: 980px) {
       .layout { grid-template-columns: 1fr; }
@@ -202,7 +233,13 @@
         <header class="stage-header">
           <div class="stage-titleblock">
             <div class="stage-eyebrow">Line Sensor Module</div>
-            <h2>Line Sensor Monitor</h2>
+            <h2 id="hdTitle">Line Sensor Monitor</h2>
+            <div class="toolbar-status">
+              <span class="badge" id="hdSerial">no serial</span>
+              <span class="badge nodata" id="deviceBadge">not live</span>
+              <span class="badge nodata" id="statusBadge">no data</span>
+              <span class="badge" id="rateBadge">0 Hz</span>
+            </div>
           </div>
         </header>
         <div class="stage-body">
@@ -226,15 +263,6 @@
         </div>
       </div>
 
-      <div class="lag-wrap">
-        <span class="muted">Firmware input lag (ms)</span>
-        <div class="lag-chart">
-          <svg viewBox="0 0 480 90" preserveAspectRatio="none">
-            <polyline id="lagLine" fill="none" stroke="#f59e0b" stroke-width="2" points="0,90 480,90"/>
-          </svg>
-        </div>
-      </div>
-
       <div class="bars">
         <div class="sensor"><h3>S0</h3><div class="barbox"><div class="bar" id="bar0" style="height:4px"></div></div><div class="muted">Raw: <span id="raw0">—</span></div><div class="muted"><span id="val0">—</span></div><div class="digital" id="dig0">0</div></div>
         <div class="sensor"><h3>S1</h3><div class="barbox"><div class="bar" id="bar1" style="height:4px"></div></div><div class="muted">Raw: <span id="raw1">—</span></div><div class="muted"><span id="val1">—</span></div><div class="digital" id="dig1">0</div></div>
@@ -246,24 +274,56 @@
       <table>
         <thead><tr><th>Sensor</th><th>Cal Min</th><th>Cal Max</th></tr></thead>
         <tbody>
-          <tr><td>S0</td><td id="min0">—</td><td id="max0">—</td></tr>
-          <tr><td>S1</td><td id="min1">—</td><td id="max1">—</td></tr>
-          <tr><td>S2</td><td id="min2">—</td><td id="max2">—</td></tr>
-          <tr><td>S3</td><td id="min3">—</td><td id="max3">—</td></tr>
-          <tr><td>S4</td><td id="min4">—</td><td id="max4">—</td></tr>
+          <tr><td>S0</td><td><input class="cal-input" id="min0" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td><td><input class="cal-input" id="max0" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td></tr>
+          <tr><td>S1</td><td><input class="cal-input" id="min1" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td><td><input class="cal-input" id="max1" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td></tr>
+          <tr><td>S2</td><td><input class="cal-input" id="min2" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td><td><input class="cal-input" id="max2" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td></tr>
+          <tr><td>S3</td><td><input class="cal-input" id="min3" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td><td><input class="cal-input" id="max3" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td></tr>
+          <tr><td>S4</td><td><input class="cal-input" id="min4" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td><td><input class="cal-input" id="max4" type="number" min="0" max="4095" step="1" placeholder="--" data-live-control></td></tr>
         </tbody>
       </table>
     </div>
 
     <div class="panel">
       <div class="row">
-        <button id="refreshBtn" class="primary">Refresh Config</button>
+        <button id="refreshBtn" class="primary" data-live-control>Refresh Config</button>
       </div>
       <p class="hint">
-        Live when robot is running (polls comms log).<br>
-        When robot is stopped: use <b>Refresh Config</b> then switch to
-        TELEMETRY mode on the Host page and click <b>Start RX</b>.
+        Live readout runs at 50 Hz when telemetry is active.
       </p>
+
+      <div class="cfg-box">
+        <div class="cfg-title">Track / Calibration</div>
+        <div class="control-grid">
+          <label>Track Type
+            <select id="trackTypeSelect" data-live-control>
+              <option value="0">Dark line / light floor</option>
+              <option value="1">Light line / dark floor</option>
+            </select>
+          </label>
+          <label>Calibration Time
+            <input id="calTimeInput" type="number" min="100" max="60000" step="100" value="3000" data-live-control>
+          </label>
+          <label>Digital Threshold
+            <input id="digitalThresholdInput" type="number" min="0.05" max="0.95" step="0.01" value="0.45" data-live-control>
+          </label>
+          <label>Detect Threshold
+            <input id="detectThresholdInput" type="number" min="0.05" max="0.95" step="0.01" value="0.20" data-live-control>
+          </label>
+        </div>
+        <div class="row">
+          <button id="darkTrackBtn" data-live-control>Dark Track</button>
+          <button id="lightTrackBtn" data-live-control>Light Track</button>
+        </div>
+        <div class="row">
+          <button id="applyConfigBtn" class="primary" data-live-control>Apply Config</button>
+          <button id="startCalBtn" data-live-control>Start Calibration</button>
+          <button id="stopCalBtn" data-live-control>Stop Calibration</button>
+        </div>
+        <div class="row">
+          <button id="saveCalBtn" data-live-control>Save Min / Max</button>
+        </div>
+        <div class="config-status" id="configActionStatus"></div>
+      </div>
 
       <div class="cfg-box">
         <div class="cfg-title">Device</div>
@@ -271,7 +331,6 @@
         <div class="cfg-row"><span class="k">Status</span><span class="v" id="cfgStatus">—</span></div>
         <div class="cfg-row"><span class="k">Link</span><span class="v" id="cfgLink">—</span></div>
         <div class="cfg-row"><span class="k">Calibrating</span><span class="v" id="cfgCaling">—</span></div>
-        <div class="cfg-row"><span class="k">Input Lag</span><span class="v" id="cfgLag">—</span></div>
       </div>
 
       <div class="cfg-box">
@@ -288,18 +347,25 @@
     </main>
 
     <script>
-    const serial = new URLSearchParams(window.location.search).get("serial") || "LS-001-A3F7";
-    document.getElementById("hdSerial").textContent = serial || "no serial";
+    let serial = new URLSearchParams(window.location.search).get("serial") || "";
+    const $ = id => document.getElementById(id);
+    if ($("hdSerial")) $("hdSerial").textContent = serial || "detecting...";
 
     let deviceLive = false;
+    let resolvingDevice = false;
+    let configBusy = false;
+    let configSnapshotLoaded = false;
+    let configRefreshInFlight = false;
+    let lastConfigRefreshAt = 0;
 
     function setDeviceLive(live) {
       deviceLive = live;
       const banner = document.getElementById("notLiveBanner");
       const badge = document.getElementById("deviceBadge");
-      const btn = document.getElementById("refreshBtn");
       if (banner) banner.style.display = live ? "none" : "block";
-      if (btn) btn.disabled = !live;
+      document.querySelectorAll("[data-live-control]").forEach((el) => {
+        el.disabled = !live || configBusy;
+      });
       if (badge) {
         badge.textContent = live ? "live" : "not live";
         badge.className = live ? "badge live" : "badge nodata";
@@ -307,41 +373,130 @@
     }
 
     async function checkDeviceStatus() {
-      if (!serial) return;
+      if (resolvingDevice) return;
+      resolvingDevice = true;
       try {
         const r = await fetch("/api/devices");
         if (!r.ok) { setDeviceLive(false); return; }
         const d = await r.json();
-        const device = (d.devices || []).find(dev => dev.serial_number === serial);
+        const devices = Array.isArray(d.devices) ? d.devices : [];
+        if (!serial) {
+          const selected = devices.find(dev =>
+            String(dev.module_type || "").toLowerCase() === "line_sensor_module" &&
+            String(dev.status || "").toLowerCase().includes("online")
+          ) || devices.find(dev =>
+            String(dev.module_type || "").toLowerCase() === "line_sensor_module"
+          );
+          serial = selected?.serial_number || "";
+          if ($("hdSerial")) $("hdSerial").textContent = serial || "no line sensor";
+          if (serial && !new URLSearchParams(window.location.search).get("serial")) {
+            const url = new URL(window.location.href);
+            url.searchParams.set("serial", serial);
+            window.history.replaceState(null, "", url);
+          }
+        }
+        const device = devices.find(dev => dev.serial_number === serial);
+        if ($("hdSerial")) $("hdSerial").textContent = serial || "no line sensor";
         const live = !!(device && String(device.status || "").toLowerCase().includes("online"));
         setDeviceLive(live);
-      } catch (_) { setDeviceLive(false); }
+        if (live && serial && !configSnapshotLoaded) {
+          void refreshLineSensorConfig({ silent: true });
+        }
+      } catch (_) {
+        setDeviceLive(false);
+      } finally {
+        resolvingDevice = false;
+      }
     }
 
-    const $ = id => document.getElementById(id);
     const bars = [0,1,2,3,4].map(i => $(`bar${i}`));
     const raws = [0,1,2,3,4].map(i => $(`raw${i}`));
     const vals = [0,1,2,3,4].map(i => $(`val${i}`));
     const digs = [0,1,2,3,4].map(i => $(`dig${i}`));
     const mins = [0,1,2,3,4].map(i => $(`min${i}`));
     const maxs = [0,1,2,3,4].map(i => $(`max${i}`));
+    const trackTypeSelect = $("trackTypeSelect");
+    const calTimeInput = $("calTimeInput");
+    const digitalThresholdInput = $("digitalThresholdInput");
+    const detectThresholdInput = $("detectThresholdInput");
+    const configActionStatus = $("configActionStatus");
 
-    const lagSamples = [];
     let lastDataAt  = 0;
     let updateCount = 0;
     let rateDisplay = 0;
+
+    function setConfigBusy(active, message = "") {
+      configBusy = !!active;
+      if (configActionStatus) configActionStatus.textContent = message;
+      setDeviceLive(deviceLive);
+    }
+
+    function normalizeFloatInput(el, fallback) {
+      const value = Number.parseFloat(String(el?.value ?? ""));
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function normalizeIntInput(el, fallback) {
+      const value = Number.parseInt(String(el?.value ?? ""), 10);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    async function postJson(url, payload = {}) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      return d;
+    }
+
+    function collectConfigPayload(overrides = {}) {
+      return {
+        track_type: normalizeIntInput(trackTypeSelect, 0),
+        digital_threshold: normalizeFloatInput(digitalThresholdInput, 0.45),
+        detect_threshold: normalizeFloatInput(detectThresholdInput, 0.20),
+        calibration_time_ms: normalizeIntInput(calTimeInput, 3000),
+        save: true,
+        ...overrides,
+      };
+    }
+
+    function collectCalibrationPayload() {
+      return {
+        min_raw: mins.map((el) => normalizeIntInput(el, 0)),
+        max_raw: maxs.map((el) => normalizeIntInput(el, 4095)),
+        save: true,
+      };
+    }
+
+    async function applyConfig(overrides = {}) {
+      if (!serial || !deviceLive) return;
+      setConfigBusy(true, "Applying configuration...");
+      try {
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/config`, collectConfigPayload(overrides));
+        await poll();
+        configActionStatus.textContent = "Configuration saved.";
+      } catch (err) {
+        configActionStatus.textContent = `Config failed: ${err.message || err}`;
+      } finally {
+        setConfigBusy(false, configActionStatus.textContent);
+      }
+    }
 
     // --- rate counter ---
     setInterval(() => {
       rateDisplay = updateCount;
       updateCount = 0;
-      $("rateBadge").textContent = `${rateDisplay} Hz`;
+      if ($("rateBadge")) $("rateBadge").textContent = `${rateDisplay} Hz`;
     }, 1000);
 
     // --- status badge ---
     function updateBadge() {
       const age = Date.now() - lastDataAt;
       const b = $("statusBadge");
+      if (!b) return;
       if (lastDataAt === 0)       { b.textContent = "no data";    b.className = "badge nodata"; }
       else if (age < 2500)        { b.textContent = "live";       b.className = "badge live";   }
       else if (age < 10000)       { b.textContent = "stale";      b.className = "badge stale";  }
@@ -349,21 +504,9 @@
     }
     setInterval(updateBadge, 500);
 
-    // --- lag chart ---
-    function renderLag() {
-      if (!lagSamples.length) return;
-      const maxV = Math.max(1, ...lagSamples);
-      const pts = lagSamples.map((v, i) => {
-        const x = (i / Math.max(1, lagSamples.length - 1)) * 480;
-        const y = 90 - Math.max(0, Math.min(1, v / maxV)) * 82;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      });
-      $("lagLine").setAttribute("points", pts.join(" "));
-    }
-
     // --- data renderers ---
     function applyLS(parts) {
-      if (parts.length < 22) return;
+      if (parts.length < 21) return;
       lastDataAt = Date.now();
       updateCount++;
 
@@ -375,7 +518,6 @@
       const det   = parseInt(parts[18]) === 1;
       const cal   = parseInt(parts[19]) === 1;
       const remMs = parseInt(parts[20]);
-      const lag   = parseFloat(parts[21]);
 
       raw.forEach((v, i)   => { raws[i].textContent = isFinite(v) ? v : "—"; });
       value.forEach((v, i) => {
@@ -400,31 +542,36 @@
       $("posDot").style.opacity = det ? "1" : "0.25";
 
       $("cfgCaling").textContent = cal ? `yes (${remMs} ms)` : "no";
-      $("cfgLag").textContent    = isFinite(lag) ? `${lag.toFixed(3)} ms` : "—";
-
-      lagSamples.push(isFinite(lag) ? Math.max(0, lag) : 0);
-      if (lagSamples.length > 120) lagSamples.shift();
-      renderLag();
     }
 
     function applyCFG(parts) {
       if (parts.length < 5) return;
-      $("cfgTrack").textContent   = parseInt(parts[1]) === 1 ? "light (white)" : "dark";
-      $("cfgDigTh").textContent   = parseFloat(parts[2]).toFixed(4);
-      $("cfgDetTh").textContent   = parseFloat(parts[3]).toFixed(4);
-      $("cfgCalTime").textContent = `${parts[4]} ms`;
+      const trackType = parseInt(parts[1]) === 1 ? 1 : 0;
+      const digitalThreshold = parseFloat(parts[2]);
+      const detectThreshold = parseFloat(parts[3]);
+      const calTimeMs = parseInt(parts[4], 10);
+      $("cfgTrack").textContent   = trackType === 1 ? "light (white)" : "dark";
+      $("cfgDigTh").textContent   = Number.isFinite(digitalThreshold) ? digitalThreshold.toFixed(4) : "—";
+      $("cfgDetTh").textContent   = Number.isFinite(detectThreshold) ? detectThreshold.toFixed(4) : "—";
+      $("cfgCalTime").textContent = Number.isFinite(calTimeMs) ? `${calTimeMs} ms` : "—";
+      if (trackTypeSelect) trackTypeSelect.value = String(trackType);
+      if (digitalThresholdInput && Number.isFinite(digitalThreshold)) digitalThresholdInput.value = digitalThreshold.toFixed(2);
+      if (detectThresholdInput && Number.isFinite(detectThreshold)) detectThresholdInput.value = detectThreshold.toFixed(2);
+      if (calTimeInput && Number.isFinite(calTimeMs)) calTimeInput.value = String(calTimeMs);
       const name = parts.slice(5).join(",").trim();
       if (name) { $("hdTitle").textContent = `${name} Monitor`; $("cfgName").textContent = name; }
     }
 
     function applyCAL(parts) {
       if (parts.length < 11) return;
-      parts.slice(1, 6).forEach((v, i) => { mins[i].textContent = v; });
-      parts.slice(6, 11).forEach((v, i) => { maxs[i].textContent = v; });
+      parts.slice(1, 6).forEach((v, i) => { if (mins[i]) mins[i].value = v; });
+      parts.slice(6, 11).forEach((v, i) => { if (maxs[i]) maxs[i].value = v; });
+      configSnapshotLoaded = true;
     }
 
     function applyINFO(parts) {
       if (parts.length < 13) return;
+      configSnapshotLoaded = true;
       const name = parts[2] || "";
       if (name) { $("hdTitle").textContent = `${name} Monitor`; $("cfgName").textContent = name; }
       $("cfgStatus").textContent = parts[3] || "—";
@@ -442,9 +589,12 @@
     // Reads latest LS / CFG / CAL / INFO from the in-memory broker history.
     // Works whenever robot is running (CMD mode GET DATA responses flow through).
     let lastLsMsg = "";
+    let pollInFlight = false;
 
     async function poll() {
       if (!serial) return;
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
         const r = await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/snapshot`);
         if (!r.ok) return;
@@ -458,11 +608,17 @@
         if (d.cfg)  handleMessage(d.cfg);
         if (d.cal)  handleMessage(d.cal);
         if (d.info) handleMessage(d.info);
-      } catch (_) {}
+        if (!configSnapshotLoaded && deviceLive && Date.now() - lastConfigRefreshAt > 3000) {
+          void refreshLineSensorConfig({ silent: true });
+        }
+      } catch (_) {
+      } finally {
+        pollInFlight = false;
+      }
     }
 
-    // Poll every 100 ms (~10 Hz display) — streaming cache gives near-realtime LS data
-    setInterval(poll, 100);
+    // Poll every 20 ms (50 Hz display) from the host-side latest-frame cache.
+    setInterval(poll, 20);
     poll(); // immediate first fetch
 
     // --- streaming: re-affirm every 3 s, only when device is live ---
@@ -480,15 +636,81 @@
     checkDeviceStatus();
     setInterval(checkDeviceStatus, 3000);
 
-    // --- refresh button ---
-    $("refreshBtn").addEventListener("click", async () => {
+    async function refreshLineSensorConfig(options = {}) {
+      const silent = !!options.silent;
+      if (!serial || !deviceLive || configRefreshInFlight) return;
+      configRefreshInFlight = true;
+      lastConfigRefreshAt = Date.now();
+      if (!silent) setConfigBusy(true, "Refreshing configuration...");
       try {
-        await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/refresh`, {method:"POST"});
-        // responses will appear in next poll cycle
-        setTimeout(poll, 800);
-        setTimeout(poll, 1800);
-        setTimeout(poll, 2800);
-      } catch (_) {}
+        const result = await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/refresh`, {});
+        (result.results || []).forEach((item) => {
+          if (item && item.response) handleMessage(String(item.response));
+        });
+        await poll();
+        configSnapshotLoaded = true;
+        if (!silent) configActionStatus.textContent = "Configuration refreshed.";
+      } catch (err) {
+        if (!silent) configActionStatus.textContent = `Refresh failed: ${err.message || err}`;
+      } finally {
+        configRefreshInFlight = false;
+        if (!silent) setConfigBusy(false, configActionStatus.textContent);
+      }
+    }
+
+    // --- refresh button ---
+    $("refreshBtn").addEventListener("click", () => {
+      void refreshLineSensorConfig();
+    });
+    $("applyConfigBtn").addEventListener("click", () => void applyConfig());
+    $("darkTrackBtn").addEventListener("click", () => {
+      trackTypeSelect.value = "0";
+      void applyConfig({ track_type: 0 });
+    });
+    $("lightTrackBtn").addEventListener("click", () => {
+      trackTypeSelect.value = "1";
+      void applyConfig({ track_type: 1 });
+    });
+    $("startCalBtn").addEventListener("click", async () => {
+      if (!serial || !deviceLive) return;
+      setConfigBusy(true, "Starting calibration...");
+      try {
+        const payload = collectConfigPayload({ save_config: true });
+        delete payload.save;
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/calibration/start`, payload);
+        await poll();
+        configActionStatus.textContent = "Calibration started.";
+      } catch (err) {
+        configActionStatus.textContent = `Calibration failed: ${err.message || err}`;
+      } finally {
+        setConfigBusy(false, configActionStatus.textContent);
+      }
+    });
+    $("stopCalBtn").addEventListener("click", async () => {
+      if (!serial || !deviceLive) return;
+      setConfigBusy(true, "Stopping calibration...");
+      try {
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/calibration/stop`, {});
+        await poll();
+        configActionStatus.textContent = "Calibration stopped and saved.";
+      } catch (err) {
+        configActionStatus.textContent = `Stop calibration failed: ${err.message || err}`;
+      } finally {
+        setConfigBusy(false, configActionStatus.textContent);
+      }
+    });
+    $("saveCalBtn").addEventListener("click", async () => {
+      if (!serial || !deviceLive) return;
+      setConfigBusy(true, "Saving min / max...");
+      try {
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/calibration`, collectCalibrationPayload());
+        await poll();
+        configActionStatus.textContent = "Min / max saved.";
+      } catch (err) {
+        configActionStatus.textContent = `Save min/max failed: ${err.message || err}`;
+      } finally {
+        setConfigBusy(false, configActionStatus.textContent);
+      }
     });
   </script>
       <script src="static/shell.js?v=20260518o"></script>

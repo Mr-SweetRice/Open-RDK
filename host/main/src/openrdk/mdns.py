@@ -28,12 +28,14 @@ class MdnsPublisher:
         self,
         name: str = "rdk",
         port: int = 8765,
+        scheme: str = "http",
         service_name: str = "Open-RDK",
     ):
         self.name = _normalize_mdns_name(name)
         self.port = int(port)
+        self.scheme = "https" if str(scheme).lower() == "https" else "http"
         self.service_name = str(service_name or "Open-RDK").strip() or "Open-RDK"
-        self.url = f"http://{self.name}.local:{self.port}"
+        self.url = f"{self.scheme}://{self.name}.local:{self.port}"
         self._zeroconf = None
         self._service_info = None
 
@@ -49,7 +51,7 @@ class MdnsPublisher:
 
         address = _lan_ipv4()
         server = f"{self.name}.local."
-        service_type = "_http._tcp.local."
+        service_type = f"_{self.scheme}._tcp.local."
         service_full_name = f"{self.service_name}.{service_type}"
         info = ServiceInfo(
             type_=service_type,

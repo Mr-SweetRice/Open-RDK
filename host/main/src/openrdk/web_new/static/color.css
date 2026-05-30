@@ -52,7 +52,7 @@ body {
 /* ---------- Hero grid ---------- */
 .hero-grid {
   display: grid;
-  grid-template-columns: 1.15fr 0.9fr 1fr;
+  grid-template-columns: 1.1fr 1fr;
   gap: 18px;
 }
 
@@ -98,8 +98,7 @@ body {
 
 .hero-meta,
 .button-row,
-.wizard-header,
-.single-capture-row {
+.calibration-header {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -108,18 +107,15 @@ body {
 .hero-meta { margin-top: 18px; }
 
 .hero-readings,
-.status-grid,
 .lab-row {
   display: grid;
   gap: 10px;
   margin-top: 18px;
 }
 .hero-readings { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.status-grid   { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.lab-row       { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.lab-row       { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 .hero-readings div,
-.status-grid div,
 .lab-row div {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -127,7 +123,6 @@ body {
   padding: 12px 14px;
 }
 .hero-readings span,
-.status-grid span,
 .lab-row span {
   display: block;
   color: var(--text-dim);
@@ -138,7 +133,6 @@ body {
   margin-bottom: 4px;
 }
 .hero-readings strong,
-.status-grid strong,
 .lab-row strong {
   font-family: var(--font-disp);
   font-size: 1.05rem;
@@ -150,9 +144,7 @@ body {
   display: grid;
   gap: 8px;
 }
-.candidate-item,
-.flag-item,
-.validation-item {
+.candidate-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -165,17 +157,9 @@ body {
 }
 .candidate-item strong { color: var(--accent); font-family: var(--font-disp); }
 
-.health-flags,
-.validation-list {
-  margin-top: 14px;
-  display: grid;
-  gap: 8px;
-}
-
-.status-note,
 .inline-note,
-.wizard-copy,
-.wizard-status {
+.calibration-copy,
+.calibration-status {
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;
@@ -296,47 +280,6 @@ body {
   color: var(--text-2);
 }
 
-/* ---------- Patch overlay (calibration) ---------- */
-.patch-overlay {
-  position: fixed; inset: 0;
-  background: rgba(8, 10, 13, 0.85);
-  backdrop-filter: blur(14px);
-  display: flex; align-items: center; justify-content: center;
-  padding: 28px;
-  z-index: 1000;
-}
-.patch-overlay.hidden { display: none; }
-
-.patch-overlay-shell {
-  width: min(1200px, 100%);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 18px;
-  align-items: stretch;
-}
-.patch-preview {
-  min-height: 70vh;
-  border-radius: var(--r-xl);
-  border: 1px solid var(--border-strong);
-  background: #ffffff;
-}
-.patch-copy {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-xl);
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 16px;
-}
-.patch-title {
-  font-family: var(--font-disp);
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-.patch-description { color: var(--text-dim); line-height: 1.5; }
-
 /* responsive */
 @media (max-width: 1260px) {
   .hero-grid,
@@ -350,9 +293,7 @@ body {
   .studio-topbar { flex-direction: column; align-items: stretch; }
   .field-grid,
   .hero-readings,
-  .status-grid,
-  .lab-row,
-  .patch-overlay-shell {
+  .lab-row {
     grid-template-columns: 1fr;
   }
   .palette-item,

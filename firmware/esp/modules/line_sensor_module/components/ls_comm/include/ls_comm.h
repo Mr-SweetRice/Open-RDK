@@ -20,8 +20,6 @@ typedef struct {
     uint8_t digital[LS_SENSOR_COUNT];
     float position;
     float strength;
-    int64_t sample_started_us;
-    int64_t sample_ready_us;
     bool line_detected;
     bool calibrating;
     uint32_t calibration_remaining_ms;
@@ -56,6 +54,7 @@ typedef struct {
     bool (*set_cfg_state)(void *ctx, const ls_comm_cfg_state_t *state);
     bool (*save_cfg)(void *ctx);
     bool (*get_cal_state)(void *ctx, ls_comm_cal_state_t *out_state);
+    bool (*set_cal_state)(void *ctx, const ls_comm_cal_state_t *state);
     bool (*get_info_state)(void *ctx, ls_comm_info_state_t *out_state);
     bool (*save_cal)(void *ctx);
     void (*start_calibration)(void *ctx);

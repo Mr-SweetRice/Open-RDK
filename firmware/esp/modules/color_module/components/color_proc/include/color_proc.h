@@ -14,7 +14,7 @@ extern "C" {
 #define COLOR_PROC_CAPTURE_MAX_SAMPLES 48U
 
 typedef enum {
-    COLOR_PALETTE_MODE_4 = 4,
+    COLOR_PALETTE_MODE_5 = 5,
     COLOR_PALETTE_MODE_8 = 8,
     COLOR_PALETTE_MODE_16 = 16,
 } color_palette_mode_t;

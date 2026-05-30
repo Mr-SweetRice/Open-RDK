@@ -117,7 +117,7 @@ static void apply_default_cal(color_storage_cal_t *cal)
     }
     memset(cal, 0, sizeof(*cal));
     cal->version = COLOR_STORAGE_CAL_VERSION;
-    color_proc_get_default_profile(COLOR_PALETTE_MODE_4, &cal->profile4);
+    color_proc_get_default_profile(COLOR_PALETTE_MODE_5, &cal->profile5);
     color_proc_get_default_profile(COLOR_PALETTE_MODE_8, &cal->profile8);
     color_proc_get_default_profile(COLOR_PALETTE_MODE_16, &cal->profile16);
 }
@@ -175,8 +175,8 @@ static void sanitize_cfg(color_storage_cfg_t *cfg)
 static color_proc_calibration_profile_t *profile_mut_for_mode(uint8_t mode)
 {
     switch (mode) {
-        case COLOR_PALETTE_MODE_4:
-            return &s_app.calibration.profile4;
+        case COLOR_PALETTE_MODE_5:
+            return &s_app.calibration.profile5;
         case COLOR_PALETTE_MODE_8:
             return &s_app.calibration.profile8;
         case COLOR_PALETTE_MODE_16:

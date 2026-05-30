@@ -16,7 +16,7 @@ from ..constants import (
     LINK_STATUS_LIVE,
     LINK_STATUS_NOT_LIVE,
     MANUFACTURER_ESP32,
-    MESSAGE_TYPE_TRACTION_OUT,
+    MESSAGE_TYPE_CONTROL,
     SERIAL_NUMBER_ESP32_SHORT,
     STATUS_OFFLINE_DISCONNECTED,
     STATUS_ONLINE_CONNECTED,
@@ -348,7 +348,7 @@ def on_attach(dev: Any, db_path: str):
     # The keepalive does its own HELLO + module query on connect — the probe is only
     # needed the very first time a device is seen.
     skip_handshake_probe = bool(node) and (
-        known_message_type == MESSAGE_TYPE_TRACTION_OUT
+        known_message_type == MESSAGE_TYPE_CONTROL
         or bool(known_module_type and known_module_type != DEFAULT_MODULE_TYPE)
     )
     if node and not skip_handshake_probe:

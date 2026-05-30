@@ -17,7 +17,7 @@
     CMD: 0x01,
     TEST: 0x02,
     TELEMETRY: 0x03,
-    TRACTION_OUT: 0x04,
+    CONTROL: 0x04,
   };
 
   const configDefaults = {
@@ -107,7 +107,7 @@
   function messageTypeForCommand(text) {
     const upper = String(text || "").trim().toUpperCase();
     if (upper.startsWith("SET OUT") || upper.startsWith("CLR OUT")) {
-      return "TRACTION_OUT";
+      return "CONTROL";
     }
     return "CMD";
   }

@@ -3,7 +3,6 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ls_comm.h"
@@ -27,8 +26,6 @@ typedef struct {
     ls_sensor_calibration_t calibration;
     ls_sensor_calibration_state_t cal_state;
     ls_proc_result_t result;
-    int64_t sample_started_us;
-    int64_t sample_ready_us;
 } app_state_t;
 
 static app_state_t s_app = {
@@ -98,8 +95,6 @@ static bool comm_get_sensor_state(void *ctx, ls_comm_sensor_state_t *out_state)
     }
     out_state->position = s_app.result.position;
     out_state->strength = s_app.result.strength;
-    out_state->sample_started_us = s_app.sample_started_us;
-    out_state->sample_ready_us = s_app.sample_ready_us;
     out_state->line_detected = s_app.result.line_detected;
     out_state->calibrating = s_app.cal_state.active;
     out_state->calibration_remaining_ms = s_app.cal_state.remaining_ms;
@@ -185,6 +180,27 @@ static bool comm_get_cal_state(void *ctx, ls_comm_cal_state_t *out_state)
     return true;
 }
 
+static bool comm_set_cal_state(void *ctx, const ls_comm_cal_state_t *state)
+{
+    (void)ctx;
+    if (!state) {
+        return false;
+    }
+
+    ls_sensor_calibration_t calibration = {0};
+    for (size_t i = 0; i < LS_SENSOR_COUNT; ++i) {
+        calibration.min_raw[i] = state->min_raw[i];
+        calibration.max_raw[i] = state->max_raw[i];
+    }
+    ls_sensor_set_calibration(s_app.sensor, &calibration);
+    ls_sensor_get_calibration(s_app.sensor, &calibration);
+
+    portENTER_CRITICAL(&s_app.mux);
+    s_app.calibration = calibration;
+    portEXIT_CRITICAL(&s_app.mux);
+    return true;
+}
+
 static bool comm_get_info_state(void *ctx, ls_comm_info_state_t *out_state)
 {
     (void)ctx;
@@ -234,7 +250,6 @@ static void line_sensor_task(void *arg)
 
     while (true) {
         uint16_t raw[LS_SENSOR_COUNT] = {0};
-        const int64_t sample_started_us = esp_timer_get_time();
         if (ls_sensor_sample(s_app.sensor, raw) == ESP_OK) {
             ls_sensor_calibration_t calibration = {0};
             ls_sensor_calibration_state_t cal_state = {0};
@@ -253,14 +268,11 @@ static void line_sensor_task(void *arg)
             proc_cfg.digital_threshold = cfg_snapshot.digital_threshold;
             proc_cfg.detect_threshold = cfg_snapshot.detect_threshold;
             ls_proc_process(raw, &calibration, &proc_cfg, &result);
-            const int64_t sample_ready_us = esp_timer_get_time();
 
             portENTER_CRITICAL(&s_app.mux);
             s_app.calibration = calibration;
             s_app.cal_state = cal_state;
             s_app.result = result;
-            s_app.sample_started_us = sample_started_us;
-            s_app.sample_ready_us = sample_ready_us;
             portEXIT_CRITICAL(&s_app.mux);
 
             if (ls_sensor_consume_calibration_done(s_app.sensor)) {
@@ -309,6 +321,7 @@ void app_main(void)
         .set_cfg_state = comm_set_cfg_state,
         .save_cfg = comm_save_cfg,
         .get_cal_state = comm_get_cal_state,
+        .set_cal_state = comm_set_cal_state,
         .get_info_state = comm_get_info_state,
         .save_cal = comm_save_cal,
         .start_calibration = comm_start_calibration,

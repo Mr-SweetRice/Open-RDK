@@ -10,7 +10,7 @@
   const supportedMessageTypes = [
     { name: "CMD",          default_content: "GET PID RPM" },
     { name: "TELEMETRY",    default_content: "" },
-    { name: "TRACTION_OUT", default_content: "OUT,0" },
+    { name: "CONTROL", default_content: "CONTROL" },
     { name: "TEST",         default_content: "PING" },
     { name: "KEEPALIVE",    default_content: "KA" },
   ];
@@ -142,7 +142,7 @@
     patch_sample_count: 12,
     info: { module_type: "color_module", sensor_id: 0x44, firmware: "2.1.0" },
     last_calibrated_at: {
-      "4":  "2026-04-12T11:08:14Z",
+      "5":  "2026-04-12T11:08:14Z",
       "8":  "2026-05-12T16:24:09Z",
       "16": null,
     },
@@ -156,28 +156,41 @@
   };
 
   const palettes = {
-    "4":  [
-      { slot: 0, name: "red",    hex: "#e34a4a", enabled: true },
-      { slot: 1, name: "green",  hex: "#3cb371", enabled: true },
-      { slot: 2, name: "blue",   hex: "#3a78d6", enabled: true },
-      { slot: 3, name: "yellow", hex: "#e9c947", enabled: true },
+    "5":  [
+      { slot: 0, name: "black", hex: "#050505", enabled: true },
+      { slot: 1, name: "white", hex: "#ffffff", enabled: true },
+      { slot: 2, name: "blue",  hex: "#006dff", enabled: true },
+      { slot: 3, name: "green", hex: "#30ff00", enabled: true },
+      { slot: 4, name: "red",   hex: "#ff0000", enabled: true },
     ],
     "8":  [
-      { slot: 0, name: "red",     hex: "#e34a4a", enabled: true },
-      { slot: 1, name: "orange",  hex: "#ff9f3f", enabled: true },
-      { slot: 2, name: "yellow",  hex: "#e9c947", enabled: true },
-      { slot: 3, name: "green",   hex: "#3cb371", enabled: true },
-      { slot: 4, name: "cyan",    hex: "#4bc0ff", enabled: true },
-      { slot: 5, name: "blue",    hex: "#3a78d6", enabled: true },
-      { slot: 6, name: "magenta", hex: "#c84cc1", enabled: true },
-      { slot: 7, name: "white",   hex: "#f1f2f4", enabled: true },
+      { slot: 0, name: "black",  hex: "#050505", enabled: true },
+      { slot: 1, name: "white",  hex: "#ffffff", enabled: true },
+      { slot: 2, name: "violet", hex: "#8300ff", enabled: true },
+      { slot: 3, name: "blue",   hex: "#006dff", enabled: true },
+      { slot: 4, name: "cyan",   hex: "#00ffd5", enabled: true },
+      { slot: 5, name: "green",  hex: "#a5ff00", enabled: true },
+      { slot: 6, name: "orange", hex: "#ff9b00", enabled: true },
+      { slot: 7, name: "red",    hex: "#ff0000", enabled: true },
     ],
-    "16": Array.from({ length: 16 }, (_, i) => ({
-      slot: i,
-      name: `slot-${i}`,
-      hex: `hsl(${(i * 22) % 360}, 65%, 55%)`,
-      enabled: true,
-    })),
+    "16": [
+      { slot: 0, name: "black", hex: "#050505", enabled: true },
+      { slot: 1, name: "white", hex: "#ffffff", enabled: true },
+      { slot: 2, name: "380nm", hex: "#6100ff", enabled: true },
+      { slot: 3, name: "405nm", hex: "#8300ff", enabled: true },
+      { slot: 4, name: "429nm", hex: "#004dff", enabled: true },
+      { slot: 5, name: "454nm", hex: "#006dff", enabled: true },
+      { slot: 6, name: "478nm", hex: "#00b7ff", enabled: true },
+      { slot: 7, name: "503nm", hex: "#00ffd5", enabled: true },
+      { slot: 8, name: "528nm", hex: "#30ff00", enabled: true },
+      { slot: 9, name: "552nm", hex: "#a5ff00", enabled: true },
+      { slot: 10, name: "577nm", hex: "#ffff00", enabled: true },
+      { slot: 11, name: "602nm", hex: "#ff9b00", enabled: true },
+      { slot: 12, name: "626nm", hex: "#ff3f00", enabled: true },
+      { slot: 13, name: "651nm", hex: "#ff0000", enabled: true },
+      { slot: 14, name: "675nm", hex: "#d00000", enabled: true },
+      { slot: 15, name: "700nm", hex: "#7a0000", enabled: true },
+    ],
   };
 
   function profileForKey(modeKey) {
@@ -439,10 +452,10 @@
       if (!dev) return notFound();
       const v = Math.max(0, Math.min(100, parseInt(body?.value ?? 0, 10) || 0));
       dev.traction_out_value = v;
-      const tx = pushEvent({ sender: "host", direction: "tx", phase: "stream", message_type: "TRACTION_OUT", device_serial: dev.serial_number, message: `OUT,${v}` });
+      const tx = pushEvent({ sender: "host", direction: "tx", phase: "stream", message_type: "CONTROL", device_serial: dev.serial_number, message: `OUT,${v}` });
       broadcast({ type: "comms", event: tx });
       setTimeout(() => {
-        const rx = pushEvent({ sender: dev.serial_number, direction: "rx", phase: "stream", message_type: "TRACTION_OUT", device_serial: dev.serial_number, message: `ACK,OUT,${v}` });
+        const rx = pushEvent({ sender: dev.serial_number, direction: "rx", phase: "stream", message_type: "CONTROL", device_serial: dev.serial_number, message: `ACK,OUT,${v}` });
         broadcast({ type: "comms", event: rx });
       }, 120);
       return jsonResponse({ traction_out_value: v });
@@ -532,7 +545,7 @@
     m = path.match(/^\/api\/devices\/([^/]+)\/color\/selftest$/);
     if (m && method === "POST") {
       return jsonResponse({
-        result: { ok: true, message: "all 4 channels nominal" },
+        result: { ok: true, message: "all channels nominal" },
         snapshot: colorSnapshot(),
       });
     }

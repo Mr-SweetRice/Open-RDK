@@ -46,7 +46,7 @@ static int64_t s_stream_telem_last_tx_us = 0;
 #define FRAME_MSG_TYPE_CMD               0x01U
 #define FRAME_MSG_TYPE_TEST              0x02U
 #define FRAME_MSG_TYPE_TELEMETRY         0x03U
-#define FRAME_MSG_TYPE_TRACTION_OUT      0x04U
+#define FRAME_MSG_TYPE_CONTROL           0x04U
 
 #define FRAME_TELEMETRY_TX_PERIOD_US     20000LL
 
@@ -186,19 +186,6 @@ static void format_hms_from_us(int64_t time_us, char *out, size_t out_len)
              (unsigned long)ss);
 }
 
-static float calc_sensor_input_lag_ms(const ls_comm_sensor_state_t *state)
-{
-    if (!state || state->sample_started_us <= 0 || state->sample_ready_us <= 0) {
-        return 0.0f;
-    }
-
-    const int64_t lag_us = state->sample_ready_us - state->sample_started_us;
-    if (lag_us <= 0) {
-        return 0.0f;
-    }
-    return (float)lag_us / 1000.0f;
-}
-
 static bool format_sensor_snapshot(char *out, size_t out_len)
 {
     ls_comm_sensor_state_t state = {0};
@@ -211,11 +198,10 @@ static bool format_sensor_snapshot(char *out, size_t out_len)
         return false;
     }
 
-    const float input_lag_ms = calc_sensor_input_lag_ms(&state);
     snprintf(
         out,
         out_len,
-        "LS,%u,%u,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%u,%u,%u,%u,%.4f,%.4f,%u,%u,%lu,%.3f",
+        "LS,%u,%u,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%u,%u,%u,%u,%.4f,%.4f,%u,%u,%lu",
         (unsigned)state.raw[0], (unsigned)state.raw[1], (unsigned)state.raw[2],
         (unsigned)state.raw[3], (unsigned)state.raw[4],
         (double)state.value[0], (double)state.value[1], (double)state.value[2],
@@ -225,8 +211,7 @@ static bool format_sensor_snapshot(char *out, size_t out_len)
         (double)state.position, (double)state.strength,
         state.line_detected ? 1U : 0U,
         state.calibrating ? 1U : 0U,
-        (unsigned long)state.calibration_remaining_ms,
-        (double)input_lag_ms);
+        (unsigned long)state.calibration_remaining_ms);
     return true;
 }
 
@@ -403,6 +388,37 @@ static bool try_apply_line_sensor_command(const char *line, char *response_out, 
 
         if (ok) {
             ok = format_cfg_snapshot(response_out, response_out_len);
+        }
+    } else if (strncmp(line, "SET CAL ", 8) == 0) {
+        ls_comm_cal_state_t state = {0};
+        if (!get_cal_snapshot(&state) || !s_cfg.set_cal_state) {
+            ok = false;
+        } else {
+            const char *cal_line = line + 8;
+            int sensor_idx = -1;
+            int min_value = -1;
+            int max_value = -1;
+
+            if (sscanf(cal_line, "%d %d %d", &sensor_idx, &min_value, &max_value) == 3) {
+                if (
+                    sensor_idx < 0 || sensor_idx >= LS_SENSOR_COUNT ||
+                    min_value < 0 || min_value > 4095 ||
+                    max_value < 0 || max_value > 4095 ||
+                    max_value <= min_value
+                ) {
+                    ok = false;
+                } else {
+                    state.min_raw[sensor_idx] = (uint16_t)min_value;
+                    state.max_raw[sensor_idx] = (uint16_t)max_value;
+                    ok = s_cfg.set_cal_state(s_cfg.ctx, &state);
+                }
+            } else {
+                ok = false;
+            }
+        }
+
+        if (ok) {
+            ok = format_cal_snapshot(response_out, response_out_len);
         }
     } else {
         handled = false;
@@ -585,7 +601,7 @@ static void handle_stream_frame(const uint8_t *frame_payload, size_t payload_len
         return;
     }
 
-    if (msg_type == FRAME_MSG_TYPE_TRACTION_OUT) {
+    if (msg_type == FRAME_MSG_TYPE_CONTROL) {
         bool ok = false;
         bool handled = try_apply_traction_out_command(msg_text, &ok);
         if (handled && ok) {
@@ -695,7 +711,7 @@ esp_err_t ls_comm_init(const ls_comm_cfg_t *cfg)
     }
 
     uart_config_t uart_cfg = {
-        .baud_rate = 115200,
+        .baud_rate = 512000,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,

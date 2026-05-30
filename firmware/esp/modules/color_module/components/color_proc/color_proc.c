@@ -3,78 +3,80 @@
 #include <math.h>
 #include <string.h>
 
-static const char *const s_palette_names_4[4] = {
-    "red",
-    "green",
+static const char *const s_palette_names_5[5] = {
+    "black",
+    "white",
     "blue",
-    "yellow",
+    "green",
+    "red",
 };
 
-static const uint32_t s_palette_rgb_4[4] = {
-    0xE11D48U,
-    0x16A34AU,
-    0x2563EBU,
-    0xFACC15U,
+static const uint32_t s_palette_rgb_5[5] = {
+    0x050505U,
+    0xFFFFFFU,
+    0x006DFFU,
+    0x30FF00U,
+    0xFF0000U,
 };
 
 static const char *const s_palette_names_8[8] = {
     "black",
     "white",
-    "red",
-    "yellow",
-    "green",
-    "cyan",
+    "violet",
     "blue",
-    "magenta",
+    "cyan",
+    "green",
+    "orange",
+    "red",
 };
 
 static const uint32_t s_palette_rgb_8[8] = {
     0x050505U,
     0xFFFFFFU,
-    0xE11D48U,
-    0xFACC15U,
-    0x16A34AU,
-    0x06B6D4U,
-    0x2563EBU,
-    0xDB2777U,
+    0x8300FFU,
+    0x006DFFU,
+    0x00FFD5U,
+    0xA5FF00U,
+    0xFF9B00U,
+    0xFF0000U,
 };
 
 static const char *const s_palette_names_16[16] = {
     "black",
     "white",
-    "gray",
-    "red",
-    "orange",
-    "yellow",
-    "lime",
-    "green",
-    "cyan",
-    "sky",
-    "blue",
-    "violet",
-    "magenta",
-    "pink",
-    "brown",
-    "olive",
+    "380nm",
+    "405nm",
+    "429nm",
+    "454nm",
+    "478nm",
+    "503nm",
+    "528nm",
+    "552nm",
+    "577nm",
+    "602nm",
+    "626nm",
+    "651nm",
+    "675nm",
+    "700nm",
 };
 
 static const uint32_t s_palette_rgb_16[16] = {
     0x050505U,
     0xFFFFFFU,
-    0x9CA3AFU,
-    0xE11D48U,
-    0xF97316U,
-    0xFACC15U,
-    0x84CC16U,
-    0x16A34AU,
-    0x06B6D4U,
-    0x38BDF8U,
-    0x2563EBU,
-    0x8B5CF6U,
-    0xDB2777U,
-    0xEC4899U,
-    0x92400EU,
-    0x6B8E23U,
+    0x6100FFU,
+    0x8300FFU,
+    0x004DFFU,
+    0x006DFFU,
+    0x00B7FFU,
+    0x00FFD5U,
+    0x30FF00U,
+    0xA5FF00U,
+    0xFFFF00U,
+    0xFF9B00U,
+    0xFF3F00U,
+    0xFF0000U,
+    0xD00000U,
+    0x7A0000U,
 };
 
 typedef struct {
@@ -96,8 +98,8 @@ static float clampf(float value, float min_value, float max_value)
 static uint8_t palette_count_from_mode(color_palette_mode_t mode)
 {
     switch (mode) {
-        case COLOR_PALETTE_MODE_4:
-            return 4U;
+        case COLOR_PALETTE_MODE_5:
+            return 5U;
         case COLOR_PALETTE_MODE_8:
             return 8U;
         case COLOR_PALETTE_MODE_16:
@@ -109,7 +111,7 @@ static uint8_t palette_count_from_mode(color_palette_mode_t mode)
 
 bool color_proc_mode_is_valid(uint8_t mode)
 {
-    return (mode == (uint8_t)COLOR_PALETTE_MODE_4) ||
+    return (mode == (uint8_t)COLOR_PALETTE_MODE_5) ||
            (mode == (uint8_t)COLOR_PALETTE_MODE_8) ||
            (mode == (uint8_t)COLOR_PALETTE_MODE_16);
 }
@@ -132,8 +134,8 @@ const char *color_proc_palette_name(color_palette_mode_t mode, int slot)
     }
 
     switch (mode) {
-        case COLOR_PALETTE_MODE_4:
-            return (slot < 4) ? s_palette_names_4[slot] : "";
+        case COLOR_PALETTE_MODE_5:
+            return (slot < 5) ? s_palette_names_5[slot] : "";
         case COLOR_PALETTE_MODE_8:
             return (slot < 8) ? s_palette_names_8[slot] : "";
         case COLOR_PALETTE_MODE_16:
@@ -150,8 +152,8 @@ uint32_t color_proc_palette_rgb(color_palette_mode_t mode, int slot)
     }
 
     switch (mode) {
-        case COLOR_PALETTE_MODE_4:
-            return (slot < 4) ? s_palette_rgb_4[slot] : 0x000000U;
+        case COLOR_PALETTE_MODE_5:
+            return (slot < 5) ? s_palette_rgb_5[slot] : 0x000000U;
         case COLOR_PALETTE_MODE_8:
             return (slot < 8) ? s_palette_rgb_8[slot] : 0x000000U;
         case COLOR_PALETTE_MODE_16:
@@ -160,6 +162,8 @@ uint32_t color_proc_palette_rgb(color_palette_mode_t mode, int slot)
             return 0x000000U;
     }
 }
+
+static void rgb_to_lab(const float rgb[3], float lab[3]);
 
 void color_proc_get_default_cfg(color_proc_cfg_t *out_cfg)
 {
@@ -185,6 +189,23 @@ void color_proc_get_default_profile(color_palette_mode_t mode, color_proc_calibr
         out_profile->enabled_mask = 0xFFFFU;
     } else if (out_profile->class_count > 0U) {
         out_profile->enabled_mask = (uint16_t)((1UL << out_profile->class_count) - 1UL);
+    }
+
+    for (uint8_t slot = 0U; slot < out_profile->class_count; ++slot) {
+        const uint32_t rgb = color_proc_palette_rgb(mode, (int)slot);
+        color_proc_patch_t *patch = &out_profile->patches[slot];
+        const float r = (float)((rgb >> 16U) & 0xFFU) / 255.0f;
+        const float g = (float)((rgb >> 8U) & 0xFFU) / 255.0f;
+        const float b = (float)(rgb & 0xFFU) / 255.0f;
+
+        patch->valid = true;
+        patch->sample_count = 1U;
+        patch->norm_rgb[0] = r;
+        patch->norm_rgb[1] = g;
+        patch->norm_rgb[2] = b;
+        patch->luma = clampf((0.2126f * r) + (0.7152f * g) + (0.0722f * b), 0.0f, 1.0f);
+        rgb_to_lab(patch->norm_rgb, patch->lab);
+        out_profile->valid_mask |= (uint16_t)(1U << slot);
     }
 }
 

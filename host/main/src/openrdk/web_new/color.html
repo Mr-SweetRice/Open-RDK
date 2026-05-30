@@ -34,6 +34,15 @@
             <div class="stage-eyebrow">Color Module</div>
             <h2>Color Studio</h2>
           </div>
+          <div class="studio-actions">
+            <label class="field compact">
+              <span>Device</span>
+              <select id="deviceSelect"></select>
+            </label>
+            <button id="refreshSnapshotBtn" class="action-btn accent" type="button">Refresh</button>
+            <button id="startTelemetryBtn" class="action-btn" type="button">Start Telemetry</button>
+            <button id="stopTelemetryBtn" class="action-btn" type="button">Stop Telemetry</button>
+          </div>
         </header>
         <div class="stage-body">
 <main class="studio-shell">
@@ -59,20 +68,6 @@
             <div><span>Target Clear</span><strong id="targetClearValue">0</strong></div>
           </div>
           <div id="topCandidatesList" class="candidate-list"></div>
-        </article>
-
-        <article class="panel status-card">
-          <div class="panel-kicker">Device Status</div>
-          <div class="status-grid">
-            <div><span>Module</span><strong id="moduleTypeValue">-</strong></div>
-            <div><span>Sensor ID</span><strong id="sensorIdValue">-</strong></div>
-            <div><span>Serial</span><strong id="serialValue">-</strong></div>
-            <div><span>Link</span><strong id="linkValue">-</strong></div>
-            <div><span>Device</span><strong id="deviceStatusValue">-</strong></div>
-            <div><span>Last Calibration</span><strong id="lastCalibrationText">-</strong></div>
-          </div>
-          <div id="healthFlags" class="health-flags"></div>
-          <div id="statusNote" class="status-note">Waiting for device selection.</div>
         </article>
 
         <article class="panel rgb-card">
@@ -101,7 +96,6 @@
             <div><span>L*</span><strong id="labLValue">0.00</strong></div>
             <div><span>a*</span><strong id="labAValue">0.00</strong></div>
             <div><span>b*</span><strong id="labBValue">0.00</strong></div>
-            <div><span>Sample TS</span><strong id="sampleTimestampValue">0 ms</strong></div>
           </div>
         </article>
       </section>
@@ -118,7 +112,7 @@
               <label class="field">
                 <span>Palette Mode</span>
                 <select id="paletteModeInput">
-                  <option value="4">4 colors</option>
+                  <option value="5">5 colors</option>
                   <option value="8">8 colors</option>
                   <option value="16">16 colors</option>
                 </select>
@@ -200,32 +194,25 @@
 
         <div class="workspace-column">
           <article class="panel">
-            <div class="panel-kicker">Calibration Wizard</div>
-            <div class="wizard-header">
+            <div class="panel-kicker">Manual Calibration</div>
+            <div class="calibration-header">
               <label class="field compact">
-                <span>Wizard Mode</span>
-                <select id="wizardModeSelect">
-                  <option value="4">4 colors</option>
+                <span>Palette Mode</span>
+                <select id="calibrationModeSelect">
+                  <option value="5">5 colors</option>
                   <option value="8">8 colors</option>
                   <option value="16">16 colors</option>
                 </select>
               </label>
-              <button id="startWizardBtn" class="action-btn accent" type="button">Run Wizard</button>
-              <button id="abortWizardBtn" class="action-btn" type="button">Abort</button>
-            </div>
-            <p class="wizard-copy">The wizard shows dark, white and each enabled patch on-screen, captures multiple samples, commits each prototype and stores the host timestamp for the selected palette mode.</p>
-            <div id="wizardStatus" class="wizard-status">Idle.</div>
-
-            <div class="divider"></div>
-
-            <div class="single-capture-row">
               <label class="field compact">
-                <span>Single Target</span>
-                <select id="singleTargetSelect"></select>
+                <span>Calibration Target</span>
+                <select id="manualTargetSelect"></select>
               </label>
-              <button id="singleCaptureBtn" class="action-btn" type="button">Capture Selected</button>
+              <button id="manualCaptureBtn" class="action-btn accent" type="button">Confirm and Capture</button>
               <button id="persistCalibrationBtn" class="action-btn" type="button">Save CAL</button>
             </div>
+            <p class="calibration-copy">Select the target, place the sensor over that physical color, then confirm capture. The host will collect the configured patch samples and commit that target.</p>
+            <div id="calibrationStatus" class="calibration-status">Idle.</div>
 
             <div class="divider"></div>
 
@@ -234,11 +221,6 @@
               <button id="saveLabelsBtn" class="action-btn" type="button">Save Host Labels</button>
             </div>
             <div id="paletteEditor" class="palette-editor"></div>
-
-            <div class="divider"></div>
-
-            <h3>Validation</h3>
-            <div id="validationList" class="validation-list"></div>
           </article>
 
           <article class="panel">
@@ -269,18 +251,7 @@
       </section>
     </main>
 <input id="importProfileInput" type="file" accept="application/json,.json" hidden />
-<div id="patchOverlay" class="patch-overlay hidden" aria-hidden="true">
-      <div class="patch-overlay-shell">
-        <div id="patchPreview" class="patch-preview"></div>
-        <div class="patch-copy">
-          <div id="patchTitle" class="patch-title">Calibration Patch</div>
-          <div id="patchDescription" class="patch-description">Position the sensor and wait for capture.</div>
-          <button id="patchOverlayClose" class="action-btn" type="button">Close Overlay</button>
-        </div>
-      </div>
-    </div>
-
-    <script src="static/color.js?v=20260420-step2"></script>
+    <script src="static/color.js?v=20260529-manual-cal1"></script>
       <script src="static/shell.js?v=20260518o"></script>
   </body>
 </html>

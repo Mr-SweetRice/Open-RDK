@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 
 from ..constants import (
     BAUD_RATE_MAX,
@@ -10,6 +11,7 @@ from ..constants import (
     DEFAULT_MODULE_TYPE,
     DEFAULT_SERIAL_BAUD,
     MESSAGE_TYPE_TELEMETRY,
+    MESSAGE_TYPE_ALIASES,
     MESSAGE_TYPES,
     MODULE_ID_TO_TYPE,
     TRACTION_OUT_DEFAULT_VALUE,
@@ -52,6 +54,7 @@ def _normalize_message_type_name(name: str | None) -> str:
     if not isinstance(name, str):
         return DEFAULT_ACTIVE_MESSAGE_TYPE
     candidate = name.strip().upper()
+    candidate = MESSAGE_TYPE_ALIASES.get(candidate, candidate)
     if candidate in MESSAGE_TYPES:
         return candidate
     return DEFAULT_ACTIVE_MESSAGE_TYPE
@@ -212,7 +215,14 @@ def _save_db(path: str, data: dict):
         with os.fdopen(fd, "w", encoding="utf-8") as fp:
             json.dump(_canonicalize_db(data), fp, indent=2, sort_keys=True)
             fp.write("\n")
-        os.replace(tmp_path, path)
+        for attempt in range(8):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

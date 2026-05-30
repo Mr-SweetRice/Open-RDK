@@ -31,7 +31,7 @@ From this point onward, every firmware addition/update must be recorded here.
   - `CMD (0x01)`
   - `TEST (0x02)`
   - `TELEMETRY (0x03)`
-  - `TRACTION_OUT (0x04)`
+  - `CONTROL (0x04)`
 - [x] Line-sensor command handling under `CMD`:
   - `GET DATA` / `GET TELEM`
   - `GET CFG`
@@ -46,11 +46,12 @@ From this point onward, every firmware addition/update must be recorded here.
   - `SET CFG DIGITAL_TH <float>`
   - `SET CFG DETECT_TH <float>`
   - `SET CFG CAL_TIME_MS <ms>`
+  - `SET CAL <sensor_index_0_to_7> <min_raw> <max_raw>`
 - [x] Telemetry stream control under `TELEMETRY`:
   - `TELEMETRY_START[:host_epoch_ms]`
   - `TELEMETRY_SYNC[:host_epoch_ms]`
   - `TELEMETRY_STOP`
-- [x] `TRACTION_OUT` compatibility commands accepted:
+- [x] `CONTROL` compatibility commands accepted:
   - `SET OUT <value>`
   - `SET OUT RAW <value>`
   - `CLR OUT`
@@ -68,3 +69,10 @@ From this point onward, every firmware addition/update must be recorded here.
 - Promoted the framed implementation to `firmware/esp/modules/line_sensor_module`.
 - Moved the previous line-sensor tree to `firmware/legacy_firmware/line_sensor_module`.
 - Updated firmware identity strings and module-info response to `line_sensor_module`.
+
+### 2026-05-28
+- Updated the host/firmware message type name for `0x04` from `TRACTION_OUT` to generic `CONTROL`.
+- Kept `SET OUT*` / `CLR OUT` accepted on the line sensor only as compatibility no-op commands.
+- Added configurable line sensor UI through the host relay web UI: 50 Hz reading, track type, calibration time, thresholds, and min/max calibration values.
+- Added `SET CAL <sensor> <min> <max>` for direct calibration threshold updates.
+- Removed active-module firmware tool pages; module configuration now goes through `host/main/src/openrdk/web_new`.

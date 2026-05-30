@@ -49,14 +49,15 @@ Web stream:
 
 ## SDK Layers
 - **Sanitized layer**: `TractionModule`, `LineSensorModule` — typed classes, safe methods.
-- **Raw layer**: `send_raw_cmd`, `send_raw_traction` — for advanced use.
+- **Raw layer**: `send_raw_cmd`, `send_raw_control` — for advanced use. `send_raw_traction` remains as a compatibility alias.
 
-## Web UI (`src/openrdk/web`)
+## Web UI (`src/openrdk/web_new`)
 
 ### Files
 - `index.html`: shell layout (device panel + comms panel)
-- `app.js`: state, websocket consumer, device selection, render logic
-- `styles.css`: dark blue/orange UI theme, responsive layout
+- `static/app.js`: state, websocket consumer, device selection, render logic
+- `static/theme.css`: shared UI theme
+- `line-sensor.html`, `traction-motor-config.html`, `traction-pid-tuner.html`, `traction-position-tuner.html`, `color.html`: module tools served by the host relay
 
 ### Behavior
 - Device list shows editable display name, serial number, module type, link/status, tty port (`device_node`).
@@ -106,6 +107,14 @@ Base URL: `http://<host-ip>:8765`
 - `GET /api/health`
 - `GET /api/devices`
 - `POST /api/devices/{serial_number}/name` — body `{"name":"label"}`
+- `POST /api/devices/{serial_number}/config/message-type` — `CMD`, `TEST`, `TELEMETRY`, or `CONTROL`
+- `POST /api/devices/{serial_number}/cmd/send`
+- `POST /api/devices/{serial_number}/traction-out/send` — sends motor/control payloads through `CONTROL (0x04)`
+- `POST /api/devices/{serial_number}/telemetry/start`
+- `POST /api/devices/{serial_number}/telemetry/stop`
+- `POST /api/devices/{serial_number}/line-sensor/config`
+- `POST /api/devices/{serial_number}/line-sensor/calibration/start`
+- `POST /api/devices/{serial_number}/line-sensor/calibration`
 - `GET /api/comms?limit=300&serial=<optional>`
 - `WS /ws/comms`
 - `GET /` — web UI
@@ -134,11 +143,12 @@ host/main/
     ├── modules.py
     ├── errors.py
     ├── webview.py
-    ├── espressif_devices.json
-    └── web/
+    ├── tls.py
+    └── web_new/
         ├── index.html
-        ├── app.js
-        └── styles.css
+        ├── line-sensor.html
+        ├── traction-motor-config.html
+        └── static/
 ```
 
 ## Environment Variables
@@ -154,6 +164,8 @@ host/main/
 - `MSG_RELAY_ENABLE_MDNS` (`true`/`false`, default `true`)
 - `MSG_RELAY_MDNS_NAME` (default `rdk`, advertises `http://rdk.local:8765`)
 - `MSG_RELAY_ENABLE_HTTP_REDIRECT` (`true`/`false`, default `true`; redirects `http://rdk.local` to the webview port when port 80 is available)
+- `MSG_RELAY_ENABLE_HTTPS` (`true`/`false`, default `false`; serves the web UI over HTTPS when enabled)
+- `MSG_RELAY_TLS_CERT_FILE` and `MSG_RELAY_TLS_KEY_FILE` (optional existing cert/key paths; otherwise a local self-signed certificate for `rdk.local`, `localhost`, and local IPs is generated under `host/main/certs/`)
 
 ## Notes
 - Does not require Docker. Legacy Docker setup is in `host/legacy_runtime/`.

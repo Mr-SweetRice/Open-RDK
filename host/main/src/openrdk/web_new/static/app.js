@@ -17,7 +17,7 @@ const state = {
   cmdSending: false,
 };
 
-const TRACTION_OUT_MESSAGE_TYPE = "TRACTION_OUT";
+const CONTROL_MESSAGE_TYPE = "CONTROL";
 const CMD_MESSAGE_TYPE = "CMD";
 
 const elements = {
@@ -87,7 +87,7 @@ function isTelemetryMessageType(value) {
 }
 
 function isTractionOutMessageType(value) {
-  return normalizeMessageType(value) === TRACTION_OUT_MESSAGE_TYPE;
+  return normalizeMessageType(value) === CONTROL_MESSAGE_TYPE;
 }
 
 function isCmdMessageType(value) {
@@ -708,7 +708,7 @@ async function sendTractionOutCommand() {
     return;
   }
   if (!isTractionOutMessageType(resolveDeviceMessageType(selected))) {
-    window.alert("Set this device Type to TRACTION_OUT first.");
+    window.alert("Set this device Type to CONTROL first.");
     return;
   }
   if (state.tractionOutSending) {

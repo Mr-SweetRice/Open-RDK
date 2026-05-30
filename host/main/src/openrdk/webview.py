@@ -12,7 +12,22 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .constants import BAUD_RATE_MAX, BAUD_RATE_MIN, MESSAGE_TYPE_CMD
+from .color_support import (
+    PALETTE_DEFINITIONS,
+    COLOR_MODULE_TYPE,
+    default_device_profile,
+    get_device_profile,
+    merge_device_profile,
+    parse_color_cal_line,
+    parse_color_cfg_line,
+    parse_color_data_line,
+    parse_color_info_line,
+    parse_color_patch_line,
+    parse_color_selftest_line,
+    set_device_profile,
+    update_device_mode_profile,
+)
+from .constants import BAUD_RATE_MAX, BAUD_RATE_MIN, MESSAGE_TYPE_CMD, MESSAGE_TYPE_CONTROL
 from .functions import (
     clear_devices_registry,
     get_active_message_type,
@@ -373,6 +388,57 @@ class CmdSendPayload(BaseModel):
     command: str = ""
 
 
+class LineSensorConfigPayload(BaseModel):
+    track_type: int | None = None
+    digital_threshold: float | None = None
+    detect_threshold: float | None = None
+    calibration_time_ms: int | None = None
+    save: bool = True
+
+
+class LineSensorCalibrationStartPayload(BaseModel):
+    track_type: int | None = None
+    digital_threshold: float | None = None
+    detect_threshold: float | None = None
+    calibration_time_ms: int | None = None
+    save_config: bool = True
+
+
+class LineSensorCalibrationPayload(BaseModel):
+    min_raw: list[int]
+    max_raw: list[int]
+    save: bool = True
+
+
+class ColorConfigPayload(BaseModel):
+    sensor_name: str | None = None
+    palette_mode: int | None = None
+    sample_period_ms: int | None = None
+    led_mode: int | None = None
+    gain_mode: int | None = None
+    gain: int | None = None
+    integration_ms: int | None = None
+    classifier: int | None = None
+    confidence_milli: int | None = None
+    target_clear: int | None = None
+    patch_sample_count: int | None = None
+    save: bool = False
+
+
+class ColorSavePayload(BaseModel):
+    persist_cfg: bool = False
+    persist_cal: bool = False
+
+
+class ColorProfilePayload(BaseModel):
+    profile: dict
+    apply_to_firmware: bool = False
+
+
+class ColorCalibrationTargetPayload(BaseModel):
+    target: str | int
+
+
 def create_webview_app(
     db_path: str,
     comms_log_path: str,
@@ -381,11 +447,282 @@ def create_webview_app(
     app = FastAPI(title="RDK Msg Relay Webview")
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_new")
     broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
+    color_command_locks: dict[str, asyncio.Lock] = {}
 
     app.state.db_path = db_path
     app.state.comms_log_path = comms_log_path
     app.state.broker = broker
     app.state.enable_realtime_stream = bool(enable_realtime_stream)
+
+    def _color_device_or_error(serial_number: str) -> dict:
+        device = next(
+            (
+                item for item in _load_devices(db_path)
+                if item.get("serial_number") == serial_number
+            ),
+            None,
+        )
+        if device is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if str(device.get("module_type") or "").lower() != COLOR_MODULE_TYPE:
+            raise HTTPException(status_code=400, detail="device is not a color module")
+        if str(device.get("status") or "").lower() != "online connected":
+            raise HTTPException(status_code=409, detail="device is not online")
+        return device
+
+    def _color_command_lock(serial_number: str) -> asyncio.Lock:
+        lock = color_command_locks.get(serial_number)
+        if lock is None:
+            lock = asyncio.Lock()
+            color_command_locks[serial_number] = lock
+        return lock
+
+    async def _send_color_cmds(
+        serial_number: str,
+        commands: list[str],
+        timeout_sec: float = 2.0,
+    ) -> list[dict]:
+        if not commands:
+            return []
+
+        async with _color_command_lock(serial_number):
+            _color_device_or_error(serial_number)
+            previous_type = get_device_message_type(db_path=db_path, serial_number=serial_number) or "CMD"
+            if previous_type != "CMD":
+                if previous_type == "TELEMETRY":
+                    await asyncio.to_thread(
+                        set_device_telemetry_requested,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        enabled=False,
+                    )
+                    await asyncio.sleep(0.25)
+                await asyncio.to_thread(
+                    set_device_message_type,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    message_type="CMD",
+                )
+                await asyncio.sleep(0.08)
+
+            results: list[dict] = []
+            try:
+                for command in commands:
+                    result = await asyncio.to_thread(
+                        send_device_cmd_once,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        command=command,
+                        timeout_sec=timeout_sec,
+                    )
+                    if result is None:
+                        raise HTTPException(status_code=404, detail="device not found")
+                    results.append(result)
+                    if not bool(result.get("ok")):
+                        detail = str(result.get("error_kind") or result.get("response") or "command failed")
+                        status_code = 504 if detail == "cmd_send_timeout" else 409
+                        raise HTTPException(status_code=status_code, detail=f"{command}: {detail}")
+            finally:
+                if previous_type != "CMD":
+                    await asyncio.to_thread(
+                        set_device_message_type,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        message_type=previous_type,
+                    )
+                    if previous_type == "TELEMETRY":
+                        await asyncio.to_thread(
+                            set_device_telemetry_requested,
+                            db_path=db_path,
+                            serial_number=serial_number,
+                            enabled=True,
+                        )
+
+            return results
+
+    def _response_for(results: list[dict], prefix: str) -> str | None:
+        prefix_text = str(prefix or "")
+        for result in reversed(results):
+            response = str(result.get("response") or "").strip()
+            if response.startswith(prefix_text):
+                return response
+        return None
+
+    async def _color_snapshot(serial_number: str) -> dict:
+        results = await _send_color_cmds(
+            serial_number,
+            ["GET INFO", "GET CFG", "GET CAL", "GET DATA"],
+            timeout_sec=2.0,
+        )
+        info = parse_color_info_line(_response_for(results, "INFO,"))
+        cfg = parse_color_cfg_line(_response_for(results, "CFG,"))
+        cal = parse_color_cal_line(_response_for(results, "CAL,"))
+        data = parse_color_data_line(_response_for(results, "DATA,"))
+        if info is None or cfg is None or cal is None or data is None:
+            raise HTTPException(status_code=502, detail="invalid color module response")
+        return {
+            "serial": serial_number,
+            "info": info,
+            "cfg": cfg,
+            "cal": cal,
+            "data": data,
+            "profile": get_device_profile(serial_number),
+            "results": results,
+        }
+
+    async def _color_calibration(serial_number: str) -> dict:
+        cfg_result = await _send_color_cmds(serial_number, ["GET CFG"], timeout_sec=2.0)
+        cfg = parse_color_cfg_line(_response_for(cfg_result, "CFG,"))
+        mode = int(cfg.get("palette_mode") if cfg else 8)
+        labels = PALETTE_DEFINITIONS.get(str(mode), [])
+        commands = [f"GET CAL {mode}"]
+        commands.extend(f"GET CAL PATCH {mode} {int(item['slot'])}" for item in labels)
+        results = await _send_color_cmds(serial_number, commands, timeout_sec=2.0)
+        cal = parse_color_cal_line(_response_for(results, "CAL,"))
+        patches = [
+            parsed for parsed in (
+                parse_color_patch_line(str(item.get("response") or ""))
+                for item in results
+            )
+            if parsed is not None
+        ]
+        profile = update_device_mode_profile(
+            serial_number,
+            mode,
+            summary=cal,
+            patches=patches,
+        )
+        return {
+            "serial": serial_number,
+            "cfg": cfg,
+            "cal": cal,
+            "patches": patches,
+            "profile": profile,
+            "results": results,
+        }
+
+    def _target_token(target: str | int) -> str:
+        text = str(target).strip().upper()
+        if text in {"DARK", "BLACK"}:
+            return "DARK"
+        if text in {"WHITE"}:
+            return "WHITE"
+        try:
+            slot = int(text)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid calibration target")
+        if slot < 0 or slot > 15:
+            raise HTTPException(status_code=400, detail="invalid calibration target")
+        return str(slot)
+
+    def _commands_from_color_config(payload: ColorConfigPayload) -> list[str]:
+        commands: list[str] = []
+        if payload.sensor_name is not None:
+            name = str(payload.sensor_name).strip()
+            if name:
+                commands.append(f"SET CFG NAME {name[:31]}")
+        if payload.sample_period_ms is not None:
+            commands.append(f"SET CFG SAMPLE_MS {max(20, int(payload.sample_period_ms))}")
+        if payload.led_mode is not None:
+            commands.append(f"SET CFG LED {int(payload.led_mode)}")
+        if payload.gain_mode is not None:
+            commands.append(f"SET CFG GAIN_MODE {int(payload.gain_mode)}")
+        if payload.gain is not None:
+            commands.append(f"SET CFG GAIN {max(1, int(payload.gain))}")
+        if payload.integration_ms is not None:
+            commands.append(f"SET CFG INTEGRATION_MS {max(2, int(payload.integration_ms))}")
+        if payload.classifier is not None:
+            commands.append(f"SET CFG CLASSIFIER {int(payload.classifier)}")
+        if payload.confidence_milli is not None:
+            threshold = max(0.0, min(1.0, float(payload.confidence_milli) / 1000.0))
+            commands.append(f"SET CFG CONF_TH {threshold:.4f}")
+        if payload.target_clear is not None:
+            commands.append(f"SET CFG TARGET_CLEAR {max(1, int(payload.target_clear))}")
+        if payload.palette_mode is not None:
+            mode = int(payload.palette_mode)
+            if str(mode) not in PALETTE_DEFINITIONS:
+                raise HTTPException(status_code=400, detail="palette_mode must be 5, 8, or 16")
+            commands.append(f"SET CFG PALETTE_MODE {mode}")
+        if payload.patch_sample_count is not None:
+            commands.append(f"SET CFG PATCH_SAMPLES {max(1, int(payload.patch_sample_count))}")
+        if payload.save:
+            commands.append("SAVE CFG")
+        return commands
+
+    async def _send_line_sensor_cmds(
+        serial_number: str,
+        commands: list[str],
+        timeout_sec: float = 2.0,
+    ) -> list[dict]:
+        if not commands:
+            return []
+
+        device_before = next(
+            (
+                item for item in _load_devices(db_path)
+                if item.get("serial_number") == serial_number
+            ),
+            None,
+        )
+        if device_before is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if str(device_before.get("module_type") or "").lower() != "line_sensor_module":
+            raise HTTPException(status_code=400, detail="device is not a line sensor module")
+        if str(device_before.get("status") or "").lower() != "online connected":
+            raise HTTPException(status_code=409, detail="device is not online")
+
+        previous_type = get_device_message_type(db_path=db_path, serial_number=serial_number) or "CMD"
+        if previous_type != "CMD":
+            if previous_type == "TELEMETRY":
+                await asyncio.to_thread(
+                    set_device_telemetry_requested,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    enabled=False,
+                )
+                await asyncio.sleep(0.25)
+            await asyncio.to_thread(
+                set_device_message_type,
+                db_path=db_path,
+                serial_number=serial_number,
+                message_type="CMD",
+            )
+            await asyncio.sleep(0.08)
+
+        results: list[dict] = []
+        try:
+            for command in commands:
+                result = await asyncio.to_thread(
+                    send_device_cmd_once,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    command=command,
+                    timeout_sec=timeout_sec,
+                )
+                if result is None:
+                    raise HTTPException(status_code=404, detail="device not found")
+                results.append(result)
+                if not bool(result.get("ok")):
+                    detail = str(result.get("error_kind") or result.get("response") or "command failed")
+                    status_code = 504 if detail == "cmd_send_timeout" else 409
+                    raise HTTPException(status_code=status_code, detail=f"{command}: {detail}")
+        finally:
+            if previous_type != "CMD":
+                await asyncio.to_thread(
+                    set_device_message_type,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    message_type=previous_type,
+                )
+                if previous_type == "TELEMETRY":
+                    await asyncio.to_thread(
+                        set_device_telemetry_requested,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        enabled=True,
+                    )
+
+        return results
 
     @app.on_event("startup")
     async def _on_startup():
@@ -410,6 +747,22 @@ def create_webview_app(
     @app.get("/api/devices")
     async def devices():
         return {"devices": _load_devices(db_path)}
+
+    @app.get("/api/color/palettes")
+    async def color_palettes():
+        return {"palettes": PALETTE_DEFINITIONS}
+
+    @app.get("/api/color/devices")
+    async def color_devices():
+        devices = []
+        for device in _load_devices(db_path):
+            if str(device.get("module_type") or "").lower() != COLOR_MODULE_TYPE:
+                continue
+            serial = str(device.get("serial_number") or "").strip()
+            item = dict(device)
+            item["color_profile"] = get_device_profile(serial)
+            devices.append(item)
+        return {"devices": devices, "palettes": PALETTE_DEFINITIONS}
 
     @app.post("/api/devices/clear")
     async def clear_devices():
@@ -498,6 +851,194 @@ def create_webview_app(
             "supported_message_types": supported_message_types(),
         }
 
+    @app.get("/api/devices/{serial_number}/color/profile")
+    async def color_profile(serial_number: str):
+        _color_device_or_error(serial_number)
+        return {
+            "serial": serial_number,
+            "profile": get_device_profile(serial_number),
+            "palettes": PALETTE_DEFINITIONS,
+        }
+
+    @app.post("/api/devices/{serial_number}/color/profile")
+    async def update_color_profile(serial_number: str, payload: ColorProfilePayload):
+        _color_device_or_error(serial_number)
+        profile = set_device_profile(serial_number, merge_device_profile(serial_number, payload.profile))
+
+        firmware_results: list[dict] = []
+        if payload.apply_to_firmware:
+            commands: list[str] = []
+            for mode_key, mode_profile in dict(profile.get("modes") or {}).items():
+                patches = mode_profile.get("patches") if isinstance(mode_profile, dict) else None
+                if not isinstance(patches, list):
+                    continue
+                try:
+                    mode = int(mode_key)
+                except (TypeError, ValueError):
+                    continue
+                if str(mode) not in PALETTE_DEFINITIONS:
+                    continue
+                for patch in patches:
+                    if not isinstance(patch, dict) or not bool(patch.get("valid", True)):
+                        continue
+                    try:
+                        slot = int(patch.get("slot"))
+                        norm = patch.get("norm_rgb_milli") or {}
+                        lab = patch.get("lab") or {}
+                        nr = int(norm.get("r"))
+                        ng = int(norm.get("g"))
+                        nb = int(norm.get("b"))
+                        luma = int(patch.get("luma_milli", 0) or 0)
+                        ll = int(lab.get("l_centi"))
+                        la = int(lab.get("a_centi"))
+                        lb = int(lab.get("b_centi"))
+                        samples = int(patch.get("sample_count", 1) or 1)
+                    except (TypeError, ValueError):
+                        continue
+                    commands.append(
+                        f"SET CAL PROTO {mode} {slot} {nr} {ng} {nb} {luma} {ll} {la} {lb} {samples}"
+                    )
+            if commands:
+                commands.append("SAVE CAL")
+                firmware_results = await _send_color_cmds(serial_number, commands, timeout_sec=2.0)
+
+        return {
+            "serial": serial_number,
+            "profile": profile,
+            "firmware_results": firmware_results,
+        }
+
+    @app.get("/api/devices/{serial_number}/color/snapshot")
+    async def color_snapshot(serial_number: str):
+        return await _color_snapshot(serial_number)
+
+    @app.get("/api/devices/{serial_number}/color/calibration")
+    async def color_calibration(serial_number: str):
+        return await _color_calibration(serial_number)
+
+    @app.post("/api/devices/{serial_number}/color/config")
+    async def color_config(serial_number: str, payload: ColorConfigPayload):
+        commands = _commands_from_color_config(payload)
+        if commands:
+            commands.append("GET CFG")
+            await _send_color_cmds(serial_number, commands, timeout_sec=2.0)
+        return await _color_snapshot(serial_number)
+
+    @app.post("/api/devices/{serial_number}/color/save")
+    async def color_save(serial_number: str, payload: ColorSavePayload):
+        commands: list[str] = []
+        if payload.persist_cfg:
+            commands.append("SAVE CFG")
+        if payload.persist_cal:
+            commands.append("SAVE CAL")
+        results = await _send_color_cmds(serial_number, commands, timeout_sec=2.0) if commands else []
+        return {
+            "ok": True,
+            "results": results,
+            "snapshot": await _color_snapshot(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/color/selftest")
+    async def color_selftest(serial_number: str):
+        results = await _send_color_cmds(serial_number, ["RUN SELFTEST"], timeout_sec=2.0)
+        result = parse_color_selftest_line(_response_for(results, "SELFTEST,"))
+        return {
+            "ok": bool(result.get("ok")) if result else False,
+            "result": result,
+            "results": results,
+            "snapshot": await _color_snapshot(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/color/restore-defaults")
+    async def color_restore_defaults(serial_number: str):
+        results = await _send_color_cmds(
+            serial_number,
+            ["RESET CFG", "RESET CAL ALL", "SAVE CFG", "SAVE CAL"],
+            timeout_sec=2.0,
+        )
+        profile = set_device_profile(serial_number, default_device_profile(serial_number))
+        return {
+            "ok": True,
+            "results": results,
+            "profile": profile,
+            "snapshot": await _color_snapshot(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/color/calibration/start")
+    async def color_calibration_start(serial_number: str):
+        results = await _send_color_cmds(serial_number, ["START CAL", "GET DATA"], timeout_sec=2.0)
+        return {
+            "ok": True,
+            "results": results,
+            "snapshot": await _color_snapshot(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/color/calibration/stop")
+    async def color_calibration_stop(serial_number: str):
+        results = await _send_color_cmds(serial_number, ["STOP CAL", "GET CAL"], timeout_sec=2.0)
+        return {
+            "ok": True,
+            "results": results,
+            "calibration": await _color_calibration(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/color/calibration/select")
+    async def color_calibration_select(serial_number: str, payload: ColorCalibrationTargetPayload):
+        target = _target_token(payload.target)
+        results = await _send_color_cmds(serial_number, [f"SET CAL PATCH {target}", "GET DATA"], timeout_sec=2.0)
+        return {
+            "ok": True,
+            "target": target,
+            "results": results,
+            "snapshot": await _color_snapshot(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/color/calibration/commit")
+    async def color_calibration_commit(serial_number: str, payload: ColorCalibrationTargetPayload):
+        target = _target_token(payload.target)
+        results = await _send_color_cmds(serial_number, [f"COMMIT CAL PATCH {target}"], timeout_sec=2.0)
+
+        snapshot = await _color_snapshot(serial_number)
+        profile = snapshot.get("profile") or get_device_profile(serial_number)
+        try:
+            slot = int(target)
+        except (TypeError, ValueError):
+            slot = None
+        if slot is not None:
+            mode = int(snapshot.get("cfg", {}).get("palette_mode", 8))
+            patch_results = await _send_color_cmds(serial_number, [f"GET CAL PATCH {mode} {slot}"], timeout_sec=2.0)
+            patch = parse_color_patch_line(_response_for(patch_results, "PATCH,"))
+            if patch is not None:
+                mode_profile = profile["modes"].setdefault(str(mode), {
+                    "mode": str(mode),
+                    "labels": PALETTE_DEFINITIONS.get(str(mode), []),
+                    "summary": None,
+                    "patches": [],
+                    "last_calibrated_at": None,
+                    "updated_at": None,
+                })
+                patches = [
+                    item for item in mode_profile.get("patches", [])
+                    if int(item.get("slot", -999)) != slot
+                ]
+                patches.append(patch)
+                patches.sort(key=lambda item: int(item.get("slot", 0)))
+                profile = update_device_mode_profile(
+                    serial_number,
+                    mode,
+                    patches=patches,
+                    last_calibrated_at=__import__("datetime").datetime.now().isoformat(),
+                )
+                snapshot["profile"] = profile
+
+        return {
+            "ok": True,
+            "target": target,
+            "results": results,
+            "snapshot": snapshot,
+            "profile": profile,
+        }
+
     @app.get("/api/devices/{serial_number}/config/traction-out")
     async def get_device_traction_out_config(serial_number: str):
         value = get_device_traction_out_value(
@@ -536,8 +1077,8 @@ def create_webview_app(
         )
         if message_type is None:
             raise HTTPException(status_code=404, detail="device not found")
-        if message_type != "TRACTION_OUT":
-            raise HTTPException(status_code=409, detail="set message type to TRACTION_OUT first")
+        if message_type != MESSAGE_TYPE_CONTROL:
+            raise HTTPException(status_code=409, detail="set message type to CONTROL first")
 
         result = send_device_traction_out_once(
             db_path=db_path,
@@ -815,23 +1356,108 @@ def create_webview_app(
         Queue lightweight read commands (GET INFO / CFG / CAL) so the responses
         appear in the comms stream and update the monitor page.
         """
-        import asyncio as _aio
+        results = await _send_line_sensor_cmds(
+            serial_number,
+            ["GET INFO", "GET CFG", "GET CAL"],
+            timeout_sec=2.0,
+        )
+        return {"ok": True, "results": results}
 
-        async def _do():
-            for cmd in ("GET INFO", "GET CFG", "GET CAL"):
-                try:
-                    await _aio.to_thread(
-                        send_device_cmd_once,
-                        db_path=db_path,
-                        serial_number=serial_number,
-                        command=cmd,
-                        timeout_sec=2.0,
-                    )
-                except Exception:
-                    pass
+    @app.post("/api/devices/{serial_number}/line-sensor/config")
+    async def line_sensor_config(serial_number: str, payload: LineSensorConfigPayload):
+        commands: list[str] = []
+        if payload.track_type is not None:
+            track_type = int(payload.track_type)
+            if track_type not in (0, 1):
+                raise HTTPException(status_code=400, detail="track_type must be 0 or 1")
+            commands.append(f"SET CFG TRACK {track_type}")
+        if payload.digital_threshold is not None:
+            digital_threshold = float(payload.digital_threshold)
+            if digital_threshold < 0.05 or digital_threshold > 0.95:
+                raise HTTPException(status_code=400, detail="digital_threshold must be between 0.05 and 0.95")
+            commands.append(f"SET CFG DIGITAL_TH {digital_threshold:.4f}")
+        if payload.detect_threshold is not None:
+            detect_threshold = float(payload.detect_threshold)
+            if detect_threshold < 0.05 or detect_threshold > 0.95:
+                raise HTTPException(status_code=400, detail="detect_threshold must be between 0.05 and 0.95")
+            commands.append(f"SET CFG DETECT_TH {detect_threshold:.4f}")
+        if payload.calibration_time_ms is not None:
+            calibration_time_ms = int(payload.calibration_time_ms)
+            if calibration_time_ms < 100:
+                raise HTTPException(status_code=400, detail="calibration_time_ms must be at least 100")
+            commands.append(f"SET CFG CAL_TIME_MS {calibration_time_ms}")
+        if payload.save:
+            commands.append("SAVE CFG")
+        commands.append("GET CFG")
+        results = await _send_line_sensor_cmds(serial_number, commands, timeout_sec=2.0)
+        return {"ok": True, "results": results}
 
-        _aio.ensure_future(_do())
-        return {"ok": True}
+    @app.post("/api/devices/{serial_number}/line-sensor/calibration/start")
+    async def line_sensor_calibration_start(
+        serial_number: str,
+        payload: LineSensorCalibrationStartPayload,
+    ):
+        config_payload = LineSensorConfigPayload(
+            track_type=payload.track_type,
+            digital_threshold=payload.digital_threshold,
+            detect_threshold=payload.detect_threshold,
+            calibration_time_ms=payload.calibration_time_ms,
+            save=payload.save_config,
+        )
+        commands: list[str] = []
+        if config_payload.track_type is not None:
+            track_type = int(config_payload.track_type)
+            if track_type not in (0, 1):
+                raise HTTPException(status_code=400, detail="track_type must be 0 or 1")
+            commands.append(f"SET CFG TRACK {track_type}")
+        if config_payload.digital_threshold is not None:
+            digital_threshold = float(config_payload.digital_threshold)
+            if digital_threshold < 0.05 or digital_threshold > 0.95:
+                raise HTTPException(status_code=400, detail="digital_threshold must be between 0.05 and 0.95")
+            commands.append(f"SET CFG DIGITAL_TH {digital_threshold:.4f}")
+        if config_payload.detect_threshold is not None:
+            detect_threshold = float(config_payload.detect_threshold)
+            if detect_threshold < 0.05 or detect_threshold > 0.95:
+                raise HTTPException(status_code=400, detail="detect_threshold must be between 0.05 and 0.95")
+            commands.append(f"SET CFG DETECT_TH {detect_threshold:.4f}")
+        if config_payload.calibration_time_ms is not None:
+            calibration_time_ms = int(config_payload.calibration_time_ms)
+            if calibration_time_ms < 100:
+                raise HTTPException(status_code=400, detail="calibration_time_ms must be at least 100")
+            commands.append(f"SET CFG CAL_TIME_MS {calibration_time_ms}")
+        if commands and config_payload.save:
+            commands.append("SAVE CFG")
+        commands.extend(["START CAL", "GET CFG"])
+        results = await _send_line_sensor_cmds(serial_number, commands, timeout_sec=2.0)
+        return {"ok": True, "results": results}
+
+    @app.post("/api/devices/{serial_number}/line-sensor/calibration/stop")
+    async def line_sensor_calibration_stop(serial_number: str):
+        results = await _send_line_sensor_cmds(
+            serial_number,
+            ["STOP CAL", "GET CAL"],
+            timeout_sec=2.0,
+        )
+        return {"ok": True, "results": results}
+
+    @app.post("/api/devices/{serial_number}/line-sensor/calibration")
+    async def line_sensor_calibration(serial_number: str, payload: LineSensorCalibrationPayload):
+        if len(payload.min_raw) != 5 or len(payload.max_raw) != 5:
+            raise HTTPException(status_code=400, detail="min_raw and max_raw must have 5 values")
+        commands: list[str] = []
+        for idx, (min_value_raw, max_value_raw) in enumerate(zip(payload.min_raw, payload.max_raw)):
+            min_value = int(min_value_raw)
+            max_value = int(max_value_raw)
+            if min_value < 0 or min_value > 4095 or max_value < 0 or max_value > 4095:
+                raise HTTPException(status_code=400, detail="calibration values must be between 0 and 4095")
+            if max_value <= min_value:
+                raise HTTPException(status_code=400, detail="each max_raw value must be greater than min_raw")
+            commands.append(f"SET CAL {idx} {min_value} {max_value}")
+        if payload.save:
+            commands.append("SAVE CAL")
+        commands.append("GET CAL")
+        results = await _send_line_sensor_cmds(serial_number, commands, timeout_sec=2.0)
+        return {"ok": True, "results": results}
 
     app.mount("/static", StaticFiles(directory=os.path.join(static_dir, "static")), name="static")
 

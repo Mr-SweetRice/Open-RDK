@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import tempfile
+import time
 from datetime import datetime
 
 from .constants import HOST_TIMEZONE
@@ -13,39 +14,40 @@ COLOR_PROFILE_DB_PATH = os.path.join(
 )
 
 PALETTE_DEFINITIONS: dict[str, list[dict]] = {
-    "4": [
-        {"slot": 0, "name": "red", "enabled": True, "hex": "#e11d48"},
-        {"slot": 1, "name": "green", "enabled": True, "hex": "#16a34a"},
-        {"slot": 2, "name": "blue", "enabled": True, "hex": "#2563eb"},
-        {"slot": 3, "name": "yellow", "enabled": True, "hex": "#facc15"},
+    "5": [
+        {"slot": 0, "name": "black", "enabled": True, "hex": "#050505"},
+        {"slot": 1, "name": "white", "enabled": True, "hex": "#ffffff"},
+        {"slot": 2, "name": "blue", "enabled": True, "hex": "#006dff"},
+        {"slot": 3, "name": "green", "enabled": True, "hex": "#30ff00"},
+        {"slot": 4, "name": "red", "enabled": True, "hex": "#ff0000"},
     ],
     "8": [
         {"slot": 0, "name": "black", "enabled": True, "hex": "#050505"},
         {"slot": 1, "name": "white", "enabled": True, "hex": "#ffffff"},
-        {"slot": 2, "name": "red", "enabled": True, "hex": "#e11d48"},
-        {"slot": 3, "name": "yellow", "enabled": True, "hex": "#facc15"},
-        {"slot": 4, "name": "green", "enabled": True, "hex": "#16a34a"},
-        {"slot": 5, "name": "cyan", "enabled": True, "hex": "#06b6d4"},
-        {"slot": 6, "name": "blue", "enabled": True, "hex": "#2563eb"},
-        {"slot": 7, "name": "magenta", "enabled": True, "hex": "#db2777"},
+        {"slot": 2, "name": "violet", "enabled": True, "hex": "#8300ff"},
+        {"slot": 3, "name": "blue", "enabled": True, "hex": "#006dff"},
+        {"slot": 4, "name": "cyan", "enabled": True, "hex": "#00ffd5"},
+        {"slot": 5, "name": "green", "enabled": True, "hex": "#a5ff00"},
+        {"slot": 6, "name": "orange", "enabled": True, "hex": "#ff9b00"},
+        {"slot": 7, "name": "red", "enabled": True, "hex": "#ff0000"},
     ],
     "16": [
         {"slot": 0, "name": "black", "enabled": True, "hex": "#050505"},
         {"slot": 1, "name": "white", "enabled": True, "hex": "#ffffff"},
-        {"slot": 2, "name": "gray", "enabled": True, "hex": "#9ca3af"},
-        {"slot": 3, "name": "red", "enabled": True, "hex": "#e11d48"},
-        {"slot": 4, "name": "orange", "enabled": True, "hex": "#f97316"},
-        {"slot": 5, "name": "yellow", "enabled": True, "hex": "#facc15"},
-        {"slot": 6, "name": "lime", "enabled": True, "hex": "#84cc16"},
-        {"slot": 7, "name": "green", "enabled": True, "hex": "#16a34a"},
-        {"slot": 8, "name": "cyan", "enabled": True, "hex": "#06b6d4"},
-        {"slot": 9, "name": "sky", "enabled": True, "hex": "#38bdf8"},
-        {"slot": 10, "name": "blue", "enabled": True, "hex": "#2563eb"},
-        {"slot": 11, "name": "violet", "enabled": True, "hex": "#8b5cf6"},
-        {"slot": 12, "name": "magenta", "enabled": True, "hex": "#db2777"},
-        {"slot": 13, "name": "pink", "enabled": True, "hex": "#ec4899"},
-        {"slot": 14, "name": "brown", "enabled": True, "hex": "#92400e"},
-        {"slot": 15, "name": "olive", "enabled": True, "hex": "#6b8e23"},
+        {"slot": 2, "name": "380nm", "enabled": True, "hex": "#6100ff"},
+        {"slot": 3, "name": "405nm", "enabled": True, "hex": "#8300ff"},
+        {"slot": 4, "name": "429nm", "enabled": True, "hex": "#004dff"},
+        {"slot": 5, "name": "454nm", "enabled": True, "hex": "#006dff"},
+        {"slot": 6, "name": "478nm", "enabled": True, "hex": "#00b7ff"},
+        {"slot": 7, "name": "503nm", "enabled": True, "hex": "#00ffd5"},
+        {"slot": 8, "name": "528nm", "enabled": True, "hex": "#30ff00"},
+        {"slot": 9, "name": "552nm", "enabled": True, "hex": "#a5ff00"},
+        {"slot": 10, "name": "577nm", "enabled": True, "hex": "#ffff00"},
+        {"slot": 11, "name": "602nm", "enabled": True, "hex": "#ff9b00"},
+        {"slot": 12, "name": "626nm", "enabled": True, "hex": "#ff3f00"},
+        {"slot": 13, "name": "651nm", "enabled": True, "hex": "#ff0000"},
+        {"slot": 14, "name": "675nm", "enabled": True, "hex": "#d00000"},
+        {"slot": 15, "name": "700nm", "enabled": True, "hex": "#7a0000"},
     ],
 }
 
@@ -91,7 +93,7 @@ def default_device_profile(serial_number: str) -> dict:
         "module_type": COLOR_MODULE_TYPE,
         "updated_at": None,
         "modes": {
-            "4": _default_mode_profile("4"),
+            "5": _default_mode_profile("5"),
             "8": _default_mode_profile("8"),
             "16": _default_mode_profile("16"),
         },
@@ -129,7 +131,14 @@ def save_profiles(data: dict, path: str = COLOR_PROFILE_DB_PATH):
         with os.fdopen(fd, "w", encoding="utf-8") as fp:
             json.dump(data, fp, indent=2, sort_keys=True)
             fp.write("\n")
-        os.replace(tmp_path, path)
+        for attempt in range(8):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -143,7 +152,7 @@ def merge_device_profile(serial_number: str, payload: dict | None) -> dict:
     merged["updated_at"] = payload.get("updated_at")
     modes = payload.get("modes")
     if isinstance(modes, dict):
-        for mode_key in ("4", "8", "16"):
+        for mode_key in ("5", "8", "16"):
             incoming = modes.get(mode_key)
             if not isinstance(incoming, dict):
                 continue

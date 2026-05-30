@@ -105,16 +105,19 @@ print(result["response"])
 
 ---
 
-### `send_raw_traction(command, timeout_sec=1.5) → dict`
-Send a text command in TRACTION_OUT mode and wait for ACK.
+### `send_raw_control(command, timeout_sec=1.5) → dict`
+Send a text command in `CONTROL (0x04)` mode and wait for ACK.
 
-Switches the device to `TRACTION_OUT` message type before sending. No retry logic.
+Switches the device to `CONTROL` message type before sending. No retry logic.
 
 ```python
-result = motor.send_raw_traction("CLR OUT")
+result = motor.send_raw_control("CLR OUT")
 ```
 
 Return shape is the same as `send_raw_cmd`.
+
+### `send_raw_traction(command, timeout_sec=1.5) → dict`
+Compatibility alias for `send_raw_control`. Existing motor scripts can keep using it, but new code should use `send_raw_control` for generic module control commands.
 
 ---
 

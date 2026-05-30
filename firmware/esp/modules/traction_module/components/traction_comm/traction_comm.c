@@ -212,7 +212,7 @@ static int64_t s_pending_baud_apply_us = 0;
 #define FRAME_MSG_TYPE_CMD               0x01U
 #define FRAME_MSG_TYPE_TEST              0x02U
 #define FRAME_MSG_TYPE_TELEMETRY         0x03U
-#define FRAME_MSG_TYPE_TRACTION_OUT      0x04U
+#define FRAME_MSG_TYPE_CONTROL           0x04U
 
 #define FRAME_TELEMETRY_TX_PERIOD_US     100000LL
 #define TRACTION_COMM_DEFAULT_BAUD_RATE  512000U
@@ -1427,7 +1427,7 @@ static void handle_stream_frame(const uint8_t *frame_payload, size_t payload_len
         return;
     }
 
-    if (msg_type == FRAME_MSG_TYPE_TRACTION_OUT) {
+    if (msg_type == FRAME_MSG_TYPE_CONTROL) {
         bool traction_cmd_ok = false;
         bool handled = try_apply_traction_out_command(msg_text, &traction_cmd_ok);
         if (handled && traction_cmd_ok) {

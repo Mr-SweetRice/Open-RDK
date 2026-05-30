@@ -21,8 +21,8 @@ from ..constants import (
     LINK_STATUS_LIVE,
     LINK_STATUS_NOT_LIVE,
     MESSAGE_TYPE_CMD,
+    MESSAGE_TYPE_CONTROL,
     MESSAGE_TYPE_TELEMETRY,
-    MESSAGE_TYPE_TRACTION_OUT,
     MODULE_INFO_PREFIX_BYTE,
     MODULE_QUERY_MESSAGE_BYTES,
     MODULE_QUERY_TIMEOUT_SEC,
@@ -162,7 +162,7 @@ def send_device_traction_out_once(
         message_type_value = _normalize_message_type_name(item.get("message_type"))
         device_node_value = str(item.get("device_node") or "").strip()
 
-    if message_type_value != MESSAGE_TYPE_TRACTION_OUT:
+    if message_type_value != MESSAGE_TYPE_CONTROL:
         return {
             "ok": False, "serial_number": serial_number,
             "traction_out_value": int(normalized_value),
@@ -240,7 +240,7 @@ def send_device_traction_command_once(
         message_type_value = _normalize_message_type_name(item.get("message_type"))
         device_node_value = str(item.get("device_node") or "").strip()
 
-    if message_type_value != MESSAGE_TYPE_TRACTION_OUT:
+    if message_type_value != MESSAGE_TYPE_CONTROL:
         return {
             "ok": False, "serial_number": serial_number, "command": command_text,
             "ack": "MODE REQUIRED", "error_kind": "traction_out_mode_required", "latency_ms": None,
@@ -506,7 +506,7 @@ def _keepalive_loop(
                 last_db_refresh_at = now_mono
 
             telemetry_mode = device_message_type == MESSAGE_TYPE_TELEMETRY
-            traction_out_mode = device_message_type == MESSAGE_TYPE_TRACTION_OUT
+            traction_out_mode = device_message_type == MESSAGE_TYPE_CONTROL
             cmd_mode = device_message_type == MESSAGE_TYPE_CMD
             if not traction_out_mode:
                 _cancel_traction_out_request(serial_number, "traction_out_mode_inactive")
@@ -695,7 +695,7 @@ def _keepalive_loop(
                             hb_ok, _, _ = _send_stream_frame_and_wait(
                                 ser=keepalive_serial, stream_reader=stream_reader,
                                 port=device_node, db_path=db_path, serial_number=serial_number,
-                                message_type_name=MESSAGE_TYPE_TRACTION_OUT,
+                                message_type_name=MESSAGE_TYPE_CONTROL,
                                 sequence=stream_seq, sequence_abs=stream_seq_abs,
                                 message_bytes=heartbeat_cmd,
                                 timeout_sec=min(max(FRAME_RESPONSE_TIMEOUT_SEC, 0.15), 0.75),
@@ -728,7 +728,7 @@ def _keepalive_loop(
                         frame_ok, frame_ack, frame_errors = _send_stream_frame_and_wait(
                             ser=keepalive_serial, stream_reader=stream_reader,
                             port=device_node, db_path=db_path, serial_number=serial_number,
-                            message_type_name=MESSAGE_TYPE_TRACTION_OUT,
+                            message_type_name=MESSAGE_TYPE_CONTROL,
                             sequence=tx_seq, sequence_abs=tx_seq_abs,
                             message_bytes=command_bytes,
                             timeout_sec=min(max(FRAME_RESPONSE_TIMEOUT_SEC, 0.15), 0.75),
@@ -955,7 +955,7 @@ def _keepalive_loop(
                         raise RuntimeError("stream reader unavailable")
                     stream_reader.clear_frames()
                     active_payload = None
-                    if active_type == MESSAGE_TYPE_TRACTION_OUT:
+                    if active_type == MESSAGE_TYPE_CONTROL:
                         active_payload = _build_traction_out_payload(device_traction_out_value)
                     elif active_type == MESSAGE_TYPE_CMD:
                         current_cmd_request = _pop_cmd_request(serial_number)

@@ -182,6 +182,9 @@ def main():
         "MSG_RELAY_ENABLE_HTTP_REDIRECT",
         default=True,
     )
+    enable_https = _parse_env_flag("MSG_RELAY_ENABLE_HTTPS", default=False)
+    tls_cert_file = os.getenv("MSG_RELAY_TLS_CERT_FILE") or None
+    tls_key_file = os.getenv("MSG_RELAY_TLS_KEY_FILE") or None
 
     runtime = CommsRuntime(
         db_path=db_path,
@@ -191,6 +194,9 @@ def main():
         enable_mdns=enable_mdns,
         mdns_name=mdns_name,
         enable_http_redirect=enable_http_redirect,
+        enable_https=enable_https,
+        tls_cert_file=tls_cert_file,
+        tls_key_file=tls_key_file,
         webview_host=web_host,
         webview_port=web_port,
         auto_start=True,
@@ -202,7 +208,8 @@ def main():
         f"webview={'on' if enable_webview else 'off'} "
         f"webview_updates={'on' if enable_webview_updates else 'off'} "
         f"mdns={'on' if enable_mdns else 'off'} "
-        f"http_redirect={'on' if enable_http_redirect else 'off'}",
+        f"http_redirect={'on' if enable_http_redirect else 'off'} "
+        f"https={'on' if enable_https else 'off'}",
         flush=True,
     )
     if enable_webview:

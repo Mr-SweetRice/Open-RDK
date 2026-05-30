@@ -42,6 +42,24 @@ print(data["response"])
 
 ---
 
+### Configuration and calibration commands
+
+The host relay web UI sends these line-sensor commands in `CMD` mode:
+
+| Command | Purpose |
+|---------|---------|
+| `GET CFG` | Read track type, thresholds, and calibration time |
+| `GET CAL` | Read per-sensor calibration min/max values |
+| `SET CFG TRACK <0|1>` | Select line/track polarity |
+| `SET CFG DIGITAL_TH <float>` | Set digital threshold |
+| `SET CFG DETECT_TH <float>` | Set line detection threshold |
+| `SET CFG CAL_TIME_MS <ms>` | Set calibration duration |
+| `SET CAL <sensor> <min> <max>` | Update calibration bounds for one sensor |
+| `START CAL` / `STOP CAL` | Run/stop firmware calibration |
+| `SAVE CFG` / `SAVE CAL` | Persist settings in NVS |
+
+---
+
 ### `start_telemetry() → dict`
 Switch the device to `TELEMETRY` message type and request continuous telemetry streaming.
 

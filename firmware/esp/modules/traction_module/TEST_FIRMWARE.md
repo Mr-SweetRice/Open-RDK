@@ -15,6 +15,8 @@ From this point onward, every firmware addition/update must be recorded here.
 
 - Module name: `traction_module`
 - Target: ESP32-C3 (as requested)
+- Current framed motor output channel: generic `CONTROL (0x04)`. Older notes in this historical log may mention `TRACTION_OUT`; the host keeps that as a compatibility alias only.
+- Active firmware-local tools were removed. Motor configuration and tuning now live in the host relay web UI under `host/main/src/openrdk/web_new`.
 - Current structure:
   - `CMakeLists.txt`
   - `main/CMakeLists.txt`

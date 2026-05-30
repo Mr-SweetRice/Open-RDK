@@ -9,7 +9,7 @@ It also lists all communication calls currently implemented by firmware modules.
 ## 1. Transport and Framing
 
 - Transport: USB serial/JTAG or UART
-- Default baud: `115200`
+- Default baud: `512000`
 - Framed sync bytes: `AA 55 AA 55`
 - Host module id in control frames: `0x00`
 - Max framed message payload (`len` field): `200` bytes
@@ -40,7 +40,7 @@ Full frame:
 - Firmware replies:
   - `AA55AA55 <FW_MODULE_ID> 05 <name_len> <module_name_ascii_bytes>`
 
-### 1.2 Stream Frame Format (commands/test/telemetry/output)
+### 1.2 Stream Frame Format (commands/test/telemetry/control)
 
 Full stream frame:
 
@@ -58,19 +58,28 @@ Where:
 - `0x01` -> `CMD`
 - `0x02` -> `TEST`
 - `0x03` -> `TELEMETRY`
-- `0x04` -> `TRACTION_OUT`
+- `0x04` -> `CONTROL`
+
+`CONTROL` is the generic low-latency command channel for module-specific actions
+that do not belong to periodic telemetry. The traction firmware uses it for motor
+output commands today, and other modules can use the same type for their own
+small command payloads when needed.
+
+Compatibility note: old host registries may still contain `TRACTION_OUT`; the
+host normalizes that name to `CONTROL`. New firmware and docs must use
+`CONTROL`.
 
 Host default payloads (when no explicit payload is provided):
 - `CMD`: `COMMAND`
 - `TEST`: `TESTING`
 - `TELEMETRY`: `TELEMETRY`
-- `TRACTION_OUT`: `SET OUT 30`
+- `CONTROL`: `CONTROL`
 
 ## 2. Host Runtime Behavior
 
 Host source files:
 - `host/main/src/openrdk/constants.py`
-- `host/main/src/openrdk/functions.py`
+- `host/main/src/openrdk/functions/`
 - `host/main/src/openrdk/webview.py`
 
 ### 2.1 Module IDs used in host
@@ -109,10 +118,10 @@ Expected firmware ACK strings:
 ### Common framed responses
 - `TEST` message type: responds `I RECIEVED TEST`
 - Unknown `CMD`: responds `I RECIEVED CMD`
-- `TRACTION_OUT` accepted and valid: `OK`
-- `TRACTION_OUT` invalid/unsupported: `ERR`
+- `CONTROL` accepted and valid: `OK`
+- `CONTROL` invalid/unsupported: `ERR`
 
-### `TRACTION_OUT` calls
+### `CONTROL` calls
 - `SET OUT <value>`
 - `SET OUT RAW <value>`
 - `CLR OUT`
@@ -189,8 +198,8 @@ Expected firmware ACK strings:
 ### Framed common responses
 - `TEST` message type: `I RECIEVED TEST`
 - Unknown `CMD`: `I RECIEVED CMD`
-- `TRACTION_OUT` accepted/valid: `OK`
-- `TRACTION_OUT` invalid: `ERR`
+- `CONTROL` accepted/valid: `OK`
+- `CONTROL` invalid: `ERR`
 
 ### `CMD` calls
 - `GET DATA`
@@ -207,13 +216,14 @@ Expected firmware ACK strings:
 - `SET CFG DIGITAL_TH <float>`
 - `SET CFG DETECT_TH <float>`
 - `SET CFG CAL_TIME_MS <ms>`
+- `SET CAL <sensor_index_0_to_7> <min_raw> <max_raw>`
 
 ### `TELEMETRY` calls
 - `TELEMETRY_START[:host_epoch_ms]`
 - `TELEMETRY_SYNC[:host_epoch_ms]`
 - `TELEMETRY_STOP`
 
-### `TRACTION_OUT` compatibility calls (accepted for host mode compatibility)
+### `CONTROL` compatibility calls (accepted for host mode compatibility)
 - `SET OUT <value>`
 - `SET OUT RAW <value>`
 - `CLR OUT`
@@ -235,20 +245,25 @@ Expected firmware ACK strings:
 ### Framed common responses
 - `TEST` message type: `I RECIEVED TEST`
 - Unknown `CMD`: `I RECIEVED CMD`
-- `TRACTION_OUT` accepted/valid: `OK`
-- `TRACTION_OUT` invalid: `ERR`
+- `CONTROL` accepted/valid: `OK`
+- `CONTROL` invalid: `ERR`
 
 ### Palette modes and built-in slot names
-- Mode `4`: `red`, `green`, `blue`, `yellow`
-- Mode `8`: `black`, `white`, `red`, `yellow`, `green`, `cyan`, `blue`, `magenta`
-- Mode `16`: `black`, `white`, `gray`, `red`, `orange`, `yellow`, `lime`, `green`, `cyan`, `sky`, `blue`, `violet`, `magenta`, `pink`, `brown`, `olive`
+- Mode `5`: `black`, `white`, `blue`, `green`, `red`
+- Mode `8`: `black`, `white`, `violet`, `blue`, `cyan`, `green`, `orange`, `red`
+- Mode `16`: `black`, `white`, `380nm`, `405nm`, `429nm`, `454nm`, `478nm`, `503nm`, `528nm`, `552nm`, `577nm`, `602nm`, `626nm`, `651nm`, `675nm`, `700nm`
+
+Mode `5` uses proportional chromatic intervals across `380..700 nm` collapsed
+into blue, green, and red bands, plus black and white. Mode `8` uses six
+proportional chromatic bands plus black and white. Mode `16` uses black and
+white plus the explicit spectral points listed above.
 
 ### `CMD` calls
 - `GET DATA`
 - `GET TELEM`
 - `GET CFG`
 - `GET CAL`
-- `GET CAL <4|8|16>`
+- `GET CAL <5|8|16>`
 - `GET CAL PATCH <mode> <slot>`
 - `GET CAL PATCH <slot-or-name> [mode]`
 - `GET INFO`
@@ -260,7 +275,7 @@ Expected firmware ACK strings:
 - `RESET CFG`
 - `RESET CAL`
 - `RESET CAL ALL`
-- `RESET CAL <4|8|16>`
+- `RESET CAL <5|8|16>`
 - `SET CFG NAME <text>`
 - `SET CFG SAMPLE_MS <ms>`
 - `SET CFG LED <OFF|ON|AUTO|0|1|2>`
@@ -270,7 +285,7 @@ Expected firmware ACK strings:
 - `SET CFG CLASSIFIER <NORM_RGB|LAB|0|1>`
 - `SET CFG CONF_TH <float_0_to_1>`
 - `SET CFG TARGET_CLEAR <value>`
-- `SET CFG PALETTE_MODE <4|8|16>`
+- `SET CFG PALETTE_MODE <5|8|16>`
 - `SET CFG PATCH_SAMPLES <count>`
 - `SET CAL PATCH <DARK|WHITE|slot|slot-name>`
 - `COMMIT CAL PATCH <DARK|WHITE|slot|slot-name>`
@@ -286,7 +301,7 @@ Expected firmware ACK strings:
 - `TELEMETRY_SYNC[:host_epoch_ms]`
 - `TELEMETRY_STOP`
 
-### `TRACTION_OUT` compatibility calls
+### `CONTROL` compatibility calls
 - `SET OUT <value>`
 - `SET OUT RAW <value>`
 - `CLR OUT`
@@ -364,11 +379,7 @@ SELFTEST,<ok>,<sensor_id>,<message>
 ### Persistence notes
 - Configuration is stored in NVS blob `cfg`
 - Calibration is stored in NVS blob `cal`
-- Calibration profiles are versioned and stored separately for palette modes `4`, `8`, and `16`
-
-## 3.4 `test_firware` placeholder (`firmware/esp/modules/test_firware`)
-
-Current placeholder implementation does not define protocol command handlers yet.
+- Calibration profiles are versioned and stored separately for palette modes `5`, `8`, and `16`
 
 ## 4. Legacy Line Fallback Policy
 

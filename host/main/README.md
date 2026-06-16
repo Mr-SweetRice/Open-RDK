@@ -166,6 +166,7 @@ host/main/
 - `MSG_RELAY_ENABLE_HTTP_REDIRECT` (`true`/`false`, default `true`; redirects `http://rdk.local` to the webview port when port 80 is available)
 - `MSG_RELAY_ENABLE_HTTPS` (`true`/`false`, default `false`; serves the web UI over HTTPS when enabled)
 - `MSG_RELAY_TLS_CERT_FILE` and `MSG_RELAY_TLS_KEY_FILE` (optional existing cert/key paths; otherwise a local self-signed certificate for `rdk.local`, `localhost`, and local IPs is generated under `host/main/certs/`)
+- `OPENRDK_USB_DENY_PATH_PREFIXES` (comma-separated Linux USB topology prefixes that Open-RDK must never probe; defaults to `1-1.1` to avoid the camera branch on the top-right Raspberry Pi USB port. Set to an empty value to disable.)
 
 ## Notes
 - Does not require Docker. Legacy Docker setup is in `host/legacy_runtime/`.

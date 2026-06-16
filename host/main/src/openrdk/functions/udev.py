@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 from typing import Any
@@ -20,6 +21,8 @@ from ..constants import (
     SERIAL_NUMBER_ESP32_SHORT,
     STATUS_OFFLINE_DISCONNECTED,
     STATUS_ONLINE_CONNECTED,
+    DEFAULT_USB_DENY_PATH_PREFIXES,
+    USB_DENY_PATH_PREFIXES_ENV,
 )
 from . import _state
 from .comms_log import _now_iso
@@ -120,6 +123,81 @@ def _device_node(dev: Any) -> str | None:
     if dev.sys_name:
         return f"/dev/{dev.sys_name}"
     return None
+
+
+def _split_prefixes(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return DEFAULT_USB_DENY_PATH_PREFIXES
+    prefixes: list[str] = []
+    for raw in value.replace(";", ",").split(","):
+        cleaned = raw.strip().strip("/")
+        if cleaned:
+            prefixes.append(cleaned)
+    return tuple(prefixes)
+
+
+def _configured_usb_deny_path_prefixes() -> tuple[str, ...]:
+    return _split_prefixes(os.getenv(USB_DENY_PATH_PREFIXES_ENV))
+
+
+def _sys_path(dev: Any) -> str:
+    for attr in ("sys_path", "device_path"):
+        value = getattr(dev, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _usb_path_tokens(dev: Any) -> set[str]:
+    tokens: set[str] = set()
+    path = _sys_path(dev)
+    for part in path.replace("\\", "/").split("/"):
+        if part.startswith("usb"):
+            tokens.add(part)
+        if "-" in part and part[:1].isdigit():
+            tokens.add(part)
+    for key in ("ID_PATH", "ID_PATH_TAG"):
+        value = dev.properties.get(key)
+        if isinstance(value, str):
+            normalized = value.replace("_", ".").replace(":", ".")
+            for part in normalized.split("-"):
+                if part[:1].isdigit():
+                    tokens.add(part)
+    return tokens
+
+
+def _usb_token_matches_prefix(token: str, prefix: str) -> bool:
+    safe_token = str(token or "").strip().strip("/")
+    safe_prefix = str(prefix or "").strip().strip("/")
+    if not safe_token or not safe_prefix:
+        return False
+    return (
+        safe_token == safe_prefix
+        or safe_token.startswith(f"{safe_prefix}.")
+        or safe_token.startswith(f"{safe_prefix}:")
+    )
+
+
+def _sys_path_text_for_match(value: str) -> str:
+    return str(value or "").replace("\\", "/").strip("/")
+
+
+def _is_denied_usb_path(dev: Any) -> bool:
+    prefixes = _configured_usb_deny_path_prefixes()
+    if not prefixes:
+        return False
+    sys_path = _sys_path_text_for_match(_sys_path(dev))
+    tokens = _usb_path_tokens(dev)
+    for prefix in prefixes:
+        safe_prefix = _sys_path_text_for_match(prefix)
+        if not safe_prefix:
+            continue
+        if "/" in safe_prefix and safe_prefix in sys_path:
+            return True
+        for token in tokens:
+            if _usb_token_matches_prefix(token, safe_prefix):
+                return True
+    return False
 
 
 def _usb_parent_device(dev: Any) -> Any | None:
@@ -303,6 +381,8 @@ def _update_registry(
 
 
 def matches(dev: Any) -> bool:
+    if _is_denied_usb_path(dev):
+        return False
     serial_short = _device_property_with_fallback(dev, "ID_SERIAL_SHORT")
     if SERIAL_NUMBER_ESP32_SHORT and serial_short == SERIAL_NUMBER_ESP32_SHORT:
         return True

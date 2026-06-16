@@ -176,3 +176,9 @@ SERIAL_NUMBER_ESP32_SHORT = "98:3D:AE:41:97:C4"
 ID_VENDOR_ESP32 = "303a"
 ID_MODEL_ESP32 = "1001"
 MANUFACTURER_ESP32 = "Espressif"
+
+# Linux USB topology branches that Open-RDK must not probe for RDK modules.
+# Camera branch reported on the Raspberry Pi top-right USB port:
+# usb1/1-1/1-1.1/1-1.1:1.0/video4linux/video0
+DEFAULT_USB_DENY_PATH_PREFIXES = ("1-1.1",)
+USB_DENY_PATH_PREFIXES_ENV = "OPENRDK_USB_DENY_PATH_PREFIXES"

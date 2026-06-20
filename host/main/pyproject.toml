@@ -15,8 +15,12 @@ dependencies = [
   "uvicorn==0.32.1",
   "websockets==13.1",
   "esptool>=4.7,<6",
-  "zeroconf==0.147.3",
   "cryptography>=42,<49",
+]
+
+[project.optional-dependencies]
+mdns = [
+  "zeroconf==0.147.3",
 ]
 
 [project.scripts]

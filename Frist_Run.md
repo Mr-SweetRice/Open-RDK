@@ -69,6 +69,14 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
+mDNS (`http://rdk.local:8765`) is optional. On Raspberry Pi 4 or newer, install with mDNS support if you want the `.local` address:
+
+```bash
+pip install -e ".[mdns]"
+```
+
+On Raspberry Pi 1, use the normal install above (`pip install -e .`) so `zeroconf` is not installed. The relay will still run, but use `http://<ip-do-host>:8765` instead of `http://rdk.local:8765`.
+
 Permita acesso a portas seriais, se necessario:
 
 ```bash

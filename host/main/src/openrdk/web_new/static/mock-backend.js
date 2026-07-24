@@ -60,10 +60,24 @@
       telemetry_active: true,
     },
     {
+      serial_number: "DS-001-C3A5",
+      name: "Front Distance",
+      module_type: "distance_sensor_module",
+      device_node: "/dev/ttyUSB3",
+      status: "online connected",
+      link_status: "live",
+      message_type: "TELEMETRY",
+      traction_out_value: 0,
+      error_count: 0,
+      last_error_kind: "-",
+      last_error_at: "-",
+      telemetry_active: true,
+    },
+    {
       serial_number: "UN-X07-1F02",
       name: "",
       module_type: "NOT-RDK-MODULE",
-      device_node: "/dev/ttyUSB3",
+      device_node: "/dev/ttyUSB4",
       status: "offline disconnected",
       link_status: "not live",
       message_type: "CMD",
@@ -81,6 +95,7 @@
   const COLOR_SERIAL = "CL-001-D4E9";
   const TR_SERIAL    = "TR-001-B2C8";
   const LS_SERIAL    = "LS-001-A3F7";
+  const DS_SERIAL    = "DS-001-C3A5";
   let lineCounter = 0;
   let seqAbs = 0;
   const events = [];
@@ -113,6 +128,11 @@
     pushEvent({ sender: COLOR_SERIAL, direction: "rx", phase: "hello", message_type: "TEST", device_serial: COLOR_SERIAL, message: "HELLO ACK color_module" });
     pushEvent({ sender: "host", direction: "tx", phase: "module", message_type: "CMD", device_serial: COLOR_SERIAL, message: "GET MODULE" });
     pushEvent({ sender: COLOR_SERIAL, direction: "rx", phase: "module", message_type: "CMD", device_serial: COLOR_SERIAL, message: "MODULE,color_module,2.1.0" });
+
+    pushEvent({ sender: "host", direction: "tx", phase: "hello", message_type: "TEST", device_serial: DS_SERIAL, message: "HELLO" });
+    pushEvent({ sender: DS_SERIAL, direction: "rx", phase: "hello", message_type: "TEST", device_serial: DS_SERIAL, message: "HELLO ACK distance_sensor_module" });
+    pushEvent({ sender: "host", direction: "tx", phase: "module", message_type: "CMD", device_serial: DS_SERIAL, message: "GET MODULE" });
+    pushEvent({ sender: DS_SERIAL, direction: "rx", phase: "module", message_type: "CMD", device_serial: DS_SERIAL, message: "MODULE,distance_sensor_module,1.0.0" });
 
     // a few CMD round-trips
     for (let i = 0; i < 6; i += 1) {
@@ -311,6 +331,168 @@
       colorState.confidence = 600 + Math.floor(Math.random() * 380);
     }
   }, 600);
+
+  // ---------- distance sensor simulation ----------
+  const distanceState = {
+    filteredMm: 720,
+    rawMm: 728,
+    echoUs: 4245,
+    valid: true,
+    healthFlags: (1 << 0) | (1 << 5) | (1 << 6),
+    sampleTimestampMs: Date.now(),
+    cfg: {
+      name: "Front Distance",
+      sampleMs: 100,
+      maxMm: 4000,
+      filterWindow: 3,
+    },
+    info: {
+      sensorModel: "HC-SR04",
+      moduleId: 20,
+      triggerGpio: 3,
+      echoGpio: 10,
+    },
+    selftest: null,
+  };
+  let distancePhase = 0;
+
+  function distanceHealth(flags) {
+    const value = Number(flags) || 0;
+    return {
+      value,
+      valid: Boolean(value & (1 << 0)),
+      no_echo: Boolean(value & (1 << 1)),
+      echo_stuck: Boolean(value & (1 << 2)),
+      below_min: Boolean(value & (1 << 3)),
+      above_max: Boolean(value & (1 << 4)),
+      filter_active: Boolean(value & (1 << 5)),
+      config_loaded: Boolean(value & (1 << 6)),
+    };
+  }
+
+  function distanceStatus() {
+    const health = distanceHealth(distanceState.healthFlags);
+    if (distanceState.valid) return "OK";
+    if (health.echo_stuck) return "ECHO_STUCK";
+    if (health.no_echo) return "NO_ECHO";
+    if (health.below_min) return "BELOW_MIN";
+    if (health.above_max) return "ABOVE_MAX";
+    return "NOT_READY";
+  }
+
+  function distanceLine() {
+    return [
+      "DS",
+      distanceState.valid ? Math.round(distanceState.filteredMm) : -1,
+      Number.isFinite(distanceState.rawMm) ? Math.round(distanceState.rawMm) : -1,
+      Math.max(0, Math.round(distanceState.echoUs || 0)),
+      distanceState.valid ? 1 : 0,
+      distanceState.healthFlags,
+      distanceState.sampleTimestampMs,
+    ].join(",");
+  }
+
+  function distanceSnapshot() {
+    const health = distanceHealth(distanceState.healthFlags);
+    const data = {
+      distance_mm: distanceState.valid ? Math.round(distanceState.filteredMm) : null,
+      distance_cm: distanceState.valid ? distanceState.filteredMm / 10 : null,
+      distance_m: distanceState.valid ? distanceState.filteredMm / 1000 : null,
+      raw_mm: Number.isFinite(distanceState.rawMm) ? Math.round(distanceState.rawMm) : null,
+      echo_us: Math.max(0, Math.round(distanceState.echoUs || 0)),
+      valid: distanceState.valid,
+      status: distanceStatus(),
+      health_flags: distanceState.healthFlags,
+      health,
+      sample_timestamp_ms: distanceState.sampleTimestampMs,
+      age_ms: Math.max(0, Date.now() - distanceState.sampleTimestampMs),
+      raw: distanceLine(),
+    };
+    const cfg = {
+      name: distanceState.cfg.name,
+      sample_ms: distanceState.cfg.sampleMs,
+      max_mm: distanceState.cfg.maxMm,
+      filter_window: distanceState.cfg.filterWindow,
+      raw: `CFG,${distanceState.cfg.name},${distanceState.cfg.sampleMs},${distanceState.cfg.maxMm},${distanceState.cfg.filterWindow}`,
+    };
+    const info = {
+      name: distanceState.cfg.name,
+      module_type: "distance_sensor_module",
+      firmware_module: "distance_sensor_module",
+      module_id: distanceState.info.moduleId,
+      sensor_model: distanceState.info.sensorModel,
+      trigger_gpio: distanceState.info.triggerGpio,
+      echo_gpio: distanceState.info.echoGpio,
+      health_flags: distanceState.healthFlags,
+      health,
+      raw: `INFO,${distanceState.cfg.name},distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,${distanceState.healthFlags}`,
+    };
+    return {
+      serial: DS_SERIAL,
+      device: findDevice(DS_SERIAL),
+      online: true,
+      data,
+      cfg,
+      info,
+      selftest: distanceState.selftest,
+    };
+  }
+
+  function advanceDistanceSample() {
+    distancePhase += 0.075;
+    const base = 760 + Math.sin(distancePhase) * 520 + Math.sin(distancePhase * 0.37) * 90;
+    const raw = Math.max(20, base + (Math.random() - 0.5) * 30);
+    const faultRoll = Math.random();
+    distanceState.sampleTimestampMs = Date.now();
+    if (faultRoll < 0.025) {
+      distanceState.valid = false;
+      distanceState.filteredMm = -1;
+      distanceState.rawMm = NaN;
+      distanceState.echoUs = 0;
+      distanceState.healthFlags = (1 << 1) | (1 << 5) | (1 << 6);
+    } else if (faultRoll < 0.035) {
+      distanceState.valid = false;
+      distanceState.filteredMm = -1;
+      distanceState.rawMm = NaN;
+      distanceState.echoUs = 0;
+      distanceState.healthFlags = (1 << 2) | (1 << 5) | (1 << 6);
+    } else if (raw > distanceState.cfg.maxMm) {
+      distanceState.valid = false;
+      distanceState.filteredMm = -1;
+      distanceState.rawMm = raw;
+      distanceState.echoUs = raw / 0.1715;
+      distanceState.healthFlags = (1 << 4) | (1 << 5) | (1 << 6);
+    } else {
+      distanceState.valid = true;
+      distanceState.rawMm = raw;
+      distanceState.filteredMm = raw * 0.985 + 8;
+      distanceState.echoUs = raw / 0.1715;
+      distanceState.healthFlags = (1 << 0) | (1 << 5) | (1 << 6);
+    }
+  }
+
+  function emitDistanceSample() {
+    const distanceDev = findDevice(DS_SERIAL);
+    if (!distanceDev?.telemetry_active) return;
+    advanceDistanceSample();
+    const event = pushEvent({
+      sender: DS_SERIAL,
+      direction: "rx",
+      phase: "stream",
+      message_type: "TELEMETRY",
+      device_serial: DS_SERIAL,
+      message: distanceLine(),
+    });
+    broadcast({ type: "comms", event });
+  }
+
+  function scheduleDistanceSample() {
+    window.setTimeout(() => {
+      emitDistanceSample();
+      scheduleDistanceSample();
+    }, Math.max(60, Number(distanceState.cfg.sampleMs) || 100));
+  }
+  scheduleDistanceSample();
 
   // ---------- line sensor simulation ----------
   const lineState = {
@@ -588,6 +770,69 @@
       colorState.calibration_samples = 0;
       colorState.calibration_target_slot = -1;
       return jsonResponse({ snapshot: colorSnapshot(), profile: fullProfile() });
+    }
+
+    // ---------- distance sensor api ----------
+    m = path.match(/^\/api\/devices\/([^/]+)\/distance-sensor\/snapshot$/);
+    if (m && method === "GET") {
+      const dev = findDevice(decodeURIComponent(m[1]));
+      if (!dev) return notFound();
+      return jsonResponse(distanceSnapshot());
+    }
+    m = path.match(/^\/api\/devices\/([^/]+)\/distance-sensor\/refresh$/);
+    if (m && method === "POST") {
+      const dev = findDevice(decodeURIComponent(m[1]));
+      if (!dev) return notFound();
+      advanceDistanceSample();
+      return jsonResponse({
+        ...distanceSnapshot(),
+        results: [
+          { ok: true, command: "GET INFO", response: distanceSnapshot().info.raw },
+          { ok: true, command: "GET CFG", response: distanceSnapshot().cfg.raw },
+          { ok: true, command: "GET DATA", response: distanceLine() },
+        ],
+      });
+    }
+    m = path.match(/^\/api\/devices\/([^/]+)\/distance-sensor\/config$/);
+    if (m && method === "POST") {
+      const dev = findDevice(decodeURIComponent(m[1]));
+      if (!dev) return notFound();
+      if (body?.name != null) {
+        distanceState.cfg.name = String(body.name || "").trim().slice(0, 31);
+        dev.name = distanceState.cfg.name;
+      }
+      if (body?.sample_ms != null) {
+        distanceState.cfg.sampleMs = Math.max(60, Math.min(2000, Number(body.sample_ms) || 100));
+      }
+      if (body?.max_mm != null) {
+        distanceState.cfg.maxMm = Math.max(20, Math.min(4000, Number(body.max_mm) || 4000));
+      }
+      if ([1, 3, 5, 7].includes(Number(body?.filter_window))) {
+        distanceState.cfg.filterWindow = Number(body.filter_window);
+      }
+      return jsonResponse(distanceSnapshot());
+    }
+    m = path.match(/^\/api\/devices\/([^/]+)\/distance-sensor\/selftest$/);
+    if (m && method === "POST") {
+      const dev = findDevice(decodeURIComponent(m[1]));
+      if (!dev) return notFound();
+      distanceState.selftest = {
+        ok: distanceState.valid,
+        health_flags: distanceState.healthFlags,
+        health: distanceHealth(distanceState.healthFlags),
+        distance_mm: distanceState.valid ? Math.round(distanceState.filteredMm) : null,
+        raw: `SELFTEST,${distanceState.valid ? 1 : 0},${distanceState.healthFlags},${distanceState.valid ? Math.round(distanceState.filteredMm) : -1}`,
+      };
+      return jsonResponse(distanceSnapshot());
+    }
+    m = path.match(/^\/api\/devices\/([^/]+)\/distance-sensor\/stream\/(start|stop)$/);
+    if (m && method === "POST") {
+      const dev = findDevice(decodeURIComponent(m[1]));
+      if (!dev) return notFound();
+      dev.message_type = "TELEMETRY";
+      dev.telemetry_active = m[2] === "start";
+      if (dev.telemetry_active) advanceDistanceSample();
+      return jsonResponse({ ok: true, device: dev });
     }
 
     // ---------- line sensor api ----------

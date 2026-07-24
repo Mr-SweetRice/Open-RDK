@@ -2,7 +2,9 @@
 
 Base class for all module types. Holds the device reference, validates online state, and exposes raw serial command helpers.
 
-Inherited by [TractionModule](traction-module.md) and [LineSensorModule](line-sensor-module.md).
+Inherited by [TractionModule](traction-module.md),
+[LineSensorModule](line-sensor-module.md), and
+[DistanceSensorModule](distance-sensor-module.md).
 
 → [CommsRuntime](runtime.md) · [Errors](errors.md)
 
@@ -10,12 +12,15 @@ Inherited by [TractionModule](traction-module.md) and [LineSensorModule](line-se
 
 ## Constructor
 
-Not instantiated directly. Use [`CommsRuntime.traction()`](runtime.md#tractionserialnumber--tractionmodule), [`CommsRuntime.line_sensor()`](runtime.md#line_sensorserialnumber--linesensormodule), or [`CommsRuntime.module()`](runtime.md#moduleserialnumber--tractionmodule--linesensormodule).
+Not instantiated directly. Use `CommsRuntime.traction()`,
+`CommsRuntime.line_sensor()`, `CommsRuntime.distance_sensor()`, or
+`CommsRuntime.module()`.
 
 ```python
 # Subclass signature (same for all module types):
 TractionModule(runtime, serial_number, snapshot=None)
 LineSensorModule(runtime, serial_number, snapshot=None)
+DistanceSensorModule(runtime, serial_number, snapshot=None)
 ```
 
 | Parameter | Description |
@@ -39,6 +44,7 @@ Set on each subclass. The registry's `module_type` must match when the device is
 | `BaseModule` | `None` (no check) |
 | `TractionModule` | `"traction_module"` |
 | `LineSensorModule` | `"line_sensor_module"` |
+| `DistanceSensorModule` | `"distance_sensor_module"` |
 
 ---
 

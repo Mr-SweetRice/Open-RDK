@@ -34,6 +34,7 @@ from .functions import (
     get_device_message_type,
     get_device_traction_out_value,
     get_active_serial_baud,
+    get_latest_ds_frame,
     get_latest_ls_frame,
     resume_keepalive_monitors,
     send_device_cmd_once,
@@ -410,6 +411,14 @@ class LineSensorCalibrationPayload(BaseModel):
     save: bool = True
 
 
+class DistanceSensorConfigPayload(BaseModel):
+    name: str | None = None
+    sample_ms: int | None = None
+    max_mm: int | None = None
+    filter_window: int | None = None
+    save: bool = True
+
+
 class ColorConfigPayload(BaseModel):
     sensor_name: str | None = None
     palette_mode: int | None = None
@@ -448,6 +457,7 @@ def create_webview_app(
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_new")
     broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
     color_command_locks: dict[str, asyncio.Lock] = {}
+    distance_command_locks: dict[str, asyncio.Lock] = {}
 
     app.state.db_path = db_path
     app.state.comms_log_path = comms_log_path
@@ -723,6 +733,317 @@ def create_webview_app(
                     )
 
         return results
+
+    def _distance_device_or_error(
+        serial_number: str,
+        *,
+        require_online: bool = True,
+    ) -> dict:
+        device = next(
+            (
+                item for item in _load_devices(db_path)
+                if item.get("serial_number") == serial_number
+            ),
+            None,
+        )
+        if device is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if str(device.get("module_type") or "").lower() != "distance_sensor_module":
+            raise HTTPException(status_code=400, detail="device is not a distance sensor module")
+        if require_online and str(device.get("status") or "").lower() != "online connected":
+            raise HTTPException(status_code=409, detail="device is not online")
+        return device
+
+    def _distance_command_lock(serial_number: str) -> asyncio.Lock:
+        lock = distance_command_locks.get(serial_number)
+        if lock is None:
+            lock = asyncio.Lock()
+            distance_command_locks[serial_number] = lock
+        return lock
+
+    async def _send_distance_cmds(
+        serial_number: str,
+        commands: list[str],
+        timeout_sec: float = 2.0,
+    ) -> list[dict]:
+        if not commands:
+            return []
+
+        async with _distance_command_lock(serial_number):
+            device_before = _distance_device_or_error(serial_number)
+            previous_type = get_device_message_type(
+                db_path=db_path,
+                serial_number=serial_number,
+            ) or "CMD"
+            previous_telemetry_requested = bool(
+                device_before.get("telemetry_requested", False)
+            )
+            if previous_type != "CMD":
+                if previous_type == "TELEMETRY" and previous_telemetry_requested:
+                    await asyncio.to_thread(
+                        set_device_telemetry_requested,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        enabled=False,
+                    )
+                    await asyncio.sleep(0.08)
+                await asyncio.to_thread(
+                    set_device_message_type,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    message_type="CMD",
+                )
+                await asyncio.sleep(0.05)
+
+            results: list[dict] = []
+            try:
+                for command in commands:
+                    result = await asyncio.to_thread(
+                        send_device_cmd_once,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        command=command,
+                        timeout_sec=timeout_sec,
+                    )
+                    if result is None:
+                        raise HTTPException(status_code=404, detail="device not found")
+                    results.append(result)
+                    if not bool(result.get("ok")):
+                        detail = str(
+                            result.get("error_kind")
+                            or result.get("response")
+                            or "command failed"
+                        )
+                        status_code = 504 if detail == "cmd_send_timeout" else 409
+                        raise HTTPException(
+                            status_code=status_code,
+                            detail=f"{command}: {detail}",
+                        )
+            finally:
+                if previous_type != "CMD":
+                    await asyncio.to_thread(
+                        set_device_message_type,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        message_type=previous_type,
+                    )
+                    if previous_type == "TELEMETRY" and previous_telemetry_requested:
+                        await asyncio.to_thread(
+                            set_device_telemetry_requested,
+                            db_path=db_path,
+                            serial_number=serial_number,
+                            enabled=True,
+                        )
+
+            return results
+
+    def _distance_health(flags: int) -> dict:
+        value = max(0, int(flags))
+        return {
+            "value": value,
+            "valid": bool(value & (1 << 0)),
+            "no_echo": bool(value & (1 << 1)),
+            "echo_stuck": bool(value & (1 << 2)),
+            "below_min": bool(value & (1 << 3)),
+            "above_max": bool(value & (1 << 4)),
+            "filter_active": bool(value & (1 << 5)),
+            "config_loaded": bool(value & (1 << 6)),
+        }
+
+    def _distance_status(valid: bool, flags: int) -> str:
+        health = _distance_health(flags)
+        if valid:
+            return "OK"
+        if health["echo_stuck"]:
+            return "ECHO_STUCK"
+        if health["no_echo"]:
+            return "NO_ECHO"
+        if health["below_min"]:
+            return "BELOW_MIN"
+        if health["above_max"]:
+            return "ABOVE_MAX"
+        return "NOT_READY"
+
+    def _parse_distance_data_line(line: str | None) -> dict | None:
+        parts = [part.strip() for part in str(line or "").split(",")]
+        if len(parts) < 7 or parts[0] != "DS":
+            return None
+        try:
+            distance_mm = int(parts[1])
+            raw_mm = int(parts[2])
+            echo_us = int(parts[3])
+            valid_raw = int(parts[4])
+            health_flags = int(parts[5], 0)
+            sample_timestamp_ms = int(parts[6])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if valid_raw not in (0, 1) or (valid_raw == 1 and distance_mm < 0):
+            return None
+        valid = bool(valid_raw)
+        return {
+            "distance_mm": distance_mm if valid and distance_mm >= 0 else None,
+            "distance_cm": round(distance_mm / 10.0, 3)
+            if valid and distance_mm >= 0 else None,
+            "distance_m": round(distance_mm / 1000.0, 4)
+            if valid and distance_mm >= 0 else None,
+            "raw_mm": raw_mm if raw_mm >= 0 else None,
+            "echo_us": max(0, echo_us),
+            "valid": valid,
+            "status": _distance_status(valid, health_flags),
+            "health_flags": health_flags,
+            "health": _distance_health(health_flags),
+            "sample_timestamp_ms": sample_timestamp_ms,
+            "raw": str(line or "").strip(),
+        }
+
+    def _parse_distance_cfg_line(line: str | None) -> dict | None:
+        parts = [part.strip() for part in str(line or "").split(",")]
+        if len(parts) < 5 or parts[0] != "CFG":
+            return None
+        try:
+            sample_ms = int(parts[2])
+            max_mm = int(parts[3])
+            filter_window = int(parts[4])
+        except (TypeError, ValueError, IndexError):
+            return None
+        return {
+            "name": parts[1],
+            "sample_ms": sample_ms,
+            "max_mm": max_mm,
+            "filter_window": filter_window,
+            "raw": str(line or "").strip(),
+        }
+
+    def _parse_distance_info_line(line: str | None) -> dict | None:
+        parts = [part.strip() for part in str(line or "").split(",")]
+        if len(parts) < 9 or parts[0] != "INFO":
+            return None
+        try:
+            module_id = int(parts[4], 0)
+            trigger_gpio = int(parts[6])
+            echo_gpio = int(parts[7])
+            health_flags = int(parts[8], 0)
+        except (TypeError, ValueError, IndexError):
+            return None
+        return {
+            "name": parts[1],
+            "module_type": parts[2],
+            "firmware_module": parts[3],
+            "module_id": module_id,
+            "sensor_model": parts[5],
+            "trigger_gpio": trigger_gpio,
+            "echo_gpio": echo_gpio,
+            "health_flags": health_flags,
+            "health": _distance_health(health_flags),
+            "raw": str(line or "").strip(),
+        }
+
+    def _parse_distance_selftest_line(line: str | None) -> dict | None:
+        parts = [part.strip() for part in str(line or "").split(",")]
+        if len(parts) < 4 or parts[0] != "SELFTEST":
+            return None
+        try:
+            ok_raw = int(parts[1])
+            health_flags = int(parts[2], 0)
+            distance_mm = int(parts[3])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if ok_raw not in (0, 1):
+            return None
+        return {
+            "ok": bool(ok_raw),
+            "health_flags": health_flags,
+            "health": _distance_health(health_flags),
+            "distance_mm": distance_mm if distance_mm >= 0 else None,
+            "raw": str(line or "").strip(),
+        }
+
+    def _distance_result_response(results: list[dict], prefix: str) -> str | None:
+        for item in reversed(results):
+            response = str(item.get("response") or "").strip()
+            if response.startswith(prefix):
+                return response
+        return None
+
+    def _distance_snapshot_from_results(results: list[dict]) -> dict:
+        payload: dict = {}
+        data = _parse_distance_data_line(_distance_result_response(results, "DS,"))
+        cfg = _parse_distance_cfg_line(_distance_result_response(results, "CFG,"))
+        info = _parse_distance_info_line(_distance_result_response(results, "INFO,"))
+        selftest = _parse_distance_selftest_line(
+            _distance_result_response(results, "SELFTEST,")
+        )
+        if data is not None:
+            payload["data"] = data
+        if cfg is not None:
+            payload["cfg"] = cfg
+        if info is not None:
+            payload["info"] = info
+        if selftest is not None:
+            payload["selftest"] = selftest
+        return payload
+
+    async def _distance_snapshot(serial_number: str) -> dict:
+        device = _distance_device_or_error(serial_number, require_online=False)
+        result: dict = {
+            "serial": serial_number,
+            "device": device,
+            "online": str(device.get("status") or "").lower() == "online connected",
+            "data": None,
+            "cfg": None,
+            "info": None,
+        }
+
+        cached = get_latest_ds_frame(serial_number)
+        if cached is not None:
+            received_at, text = cached
+            data = _parse_distance_data_line(text)
+            if data is not None:
+                data["age_ms"] = round(
+                    max(0.0, (time.monotonic() - float(received_at)) * 1000.0),
+                    1,
+                )
+                result["data"] = data
+
+        if broker is not None:
+            def _scan_broker() -> dict:
+                out: dict = {}
+                for event in reversed(
+                    broker.history(limit=300, serial_filter=serial_number)
+                ):
+                    if str(event.get("direction") or "") != "rx":
+                        continue
+                    message = str(event.get("message") or "").strip()
+                    if message.startswith("DS,") and "data" not in out:
+                        parsed = _parse_distance_data_line(message)
+                        if parsed is not None:
+                            # Broker history can be bootstrapped from an old log
+                            # and has no monotonic receipt time. Never present that
+                            # fallback as a fresh live sample.
+                            parsed["age_ms"] = 60_000.0
+                            out["data"] = parsed
+                    elif message.startswith("CFG,") and "cfg" not in out:
+                        parsed = _parse_distance_cfg_line(message)
+                        if parsed is not None:
+                            out["cfg"] = parsed
+                    elif message.startswith("INFO,") and "info" not in out:
+                        parsed = _parse_distance_info_line(message)
+                        if parsed is not None:
+                            out["info"] = parsed
+                    elif message.startswith("SELFTEST,") and "selftest" not in out:
+                        parsed = _parse_distance_selftest_line(message)
+                        if parsed is not None:
+                            out["selftest"] = parsed
+                    if {"data", "cfg", "info", "selftest"}.issubset(out):
+                        break
+                return out
+
+            history_payload = await asyncio.to_thread(_scan_broker)
+            for key, value in history_payload.items():
+                if result.get(key) is None:
+                    result[key] = value
+
+        return result
 
     @app.on_event("startup")
     async def _on_startup():
@@ -1289,6 +1610,137 @@ def create_webview_app(
         finally:
             broker.unregister(subscriber_id)
 
+    @app.get("/api/devices/{serial_number}/distance-sensor/snapshot")
+    async def distance_sensor_snapshot(serial_number: str):
+        return await _distance_snapshot(serial_number)
+
+    @app.post("/api/devices/{serial_number}/distance-sensor/refresh")
+    async def distance_sensor_refresh(serial_number: str):
+        results = await _send_distance_cmds(
+            serial_number,
+            ["GET INFO", "GET CFG", "GET DATA"],
+            timeout_sec=2.0,
+        )
+        response_payload = _distance_snapshot_from_results(results)
+        if response_payload.get("data") is None:
+            raise HTTPException(
+                status_code=502,
+                detail="invalid distance sensor data response",
+            )
+        snapshot = await _distance_snapshot(serial_number)
+        snapshot.update(response_payload)
+        snapshot["results"] = results
+        return snapshot
+
+    @app.post("/api/devices/{serial_number}/distance-sensor/config")
+    async def distance_sensor_config(
+        serial_number: str,
+        payload: DistanceSensorConfigPayload,
+    ):
+        commands: list[str] = []
+        if payload.name is not None:
+            name = str(payload.name).strip().replace(",", "-")
+            if not name:
+                raise HTTPException(status_code=400, detail="name cannot be empty")
+            commands.append(f"SET CFG NAME {name[:31]}")
+        if payload.sample_ms is not None:
+            sample_ms = int(payload.sample_ms)
+            if sample_ms < 60 or sample_ms > 2000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="sample_ms must be between 60 and 2000",
+                )
+            commands.append(f"SET CFG SAMPLE_MS {sample_ms}")
+        if payload.max_mm is not None:
+            max_mm = int(payload.max_mm)
+            if max_mm < 20 or max_mm > 4000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="max_mm must be between 20 and 4000",
+                )
+            commands.append(f"SET CFG MAX_MM {max_mm}")
+        if payload.filter_window is not None:
+            filter_window = int(payload.filter_window)
+            if filter_window not in (1, 3, 5, 7):
+                raise HTTPException(
+                    status_code=400,
+                    detail="filter_window must be 1, 3, 5, or 7",
+                )
+            commands.append(f"SET CFG FILTER {filter_window}")
+        if payload.save and commands:
+            commands.append("SAVE CFG")
+        commands.extend(["GET CFG", "GET DATA"])
+
+        results = await _send_distance_cmds(
+            serial_number,
+            commands,
+            timeout_sec=2.0,
+        )
+        response_payload = _distance_snapshot_from_results(results)
+        if response_payload.get("cfg") is None:
+            raise HTTPException(
+                status_code=502,
+                detail="invalid distance sensor config response",
+            )
+        snapshot = await _distance_snapshot(serial_number)
+        snapshot.update(response_payload)
+        snapshot["results"] = results
+        return snapshot
+
+    @app.post("/api/devices/{serial_number}/distance-sensor/selftest")
+    async def distance_sensor_selftest(serial_number: str):
+        results = await _send_distance_cmds(
+            serial_number,
+            ["RUN SELFTEST", "GET DATA"],
+            timeout_sec=2.0,
+        )
+        response_payload = _distance_snapshot_from_results(results)
+        if response_payload.get("selftest") is None:
+            raise HTTPException(
+                status_code=502,
+                detail="invalid distance sensor selftest response",
+            )
+        snapshot = await _distance_snapshot(serial_number)
+        snapshot.update(response_payload)
+        snapshot["results"] = results
+        return snapshot
+
+    @app.post("/api/devices/{serial_number}/distance-sensor/stream/start")
+    async def distance_sensor_stream_start(serial_number: str):
+        async with _distance_command_lock(serial_number):
+            _distance_device_or_error(serial_number)
+            updated = await asyncio.to_thread(
+                set_device_message_type,
+                db_path=db_path,
+                serial_number=serial_number,
+                message_type="TELEMETRY",
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="device not found")
+            updated = await asyncio.to_thread(
+                set_device_telemetry_requested,
+                db_path=db_path,
+                serial_number=serial_number,
+                enabled=True,
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="device not found")
+        return {"ok": True, "device": updated}
+
+    @app.post("/api/devices/{serial_number}/distance-sensor/stream/stop")
+    async def distance_sensor_stream_stop(serial_number: str):
+        async with _distance_command_lock(serial_number):
+            _distance_device_or_error(serial_number, require_online=False)
+            updated = await asyncio.to_thread(
+                set_device_telemetry_requested,
+                db_path=db_path,
+                serial_number=serial_number,
+                enabled=False,
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="device not found")
+        return {"ok": True, "device": updated}
+
     @app.get("/api/devices/{serial_number}/line-sensor/snapshot")
     async def line_sensor_snapshot(serial_number: str):
         """
@@ -1464,6 +1916,13 @@ def create_webview_app(
     @app.get("/", include_in_schema=False)
     async def index():
         return FileResponse(os.path.join(static_dir, "index.html"))
+
+    @app.get("/distance-sensor", include_in_schema=False)
+    async def distance_sensor_page():
+        return FileResponse(
+            os.path.join(static_dir, "distance-sensor.html"),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/line-sensor", include_in_schema=False)
     async def line_sensor_page():

@@ -3,7 +3,7 @@
 Flash ESP32-C3 firmware from within the SDK. Requires `esptool` installed in the same Python environment.
 
 ```bash
-pip install esptool
+pip install "esptool>=4.9,<6"
 ```
 
 → [CommsRuntime](runtime.md) · [Errors](errors.md)
@@ -25,17 +25,30 @@ The device will reboot automatically with the new firmware after flashing comple
 
 ## Supported Firmware Types
 
+As of `openrdk` 0.2.0, the SDK manifest contains:
+
 | Type | Chip | Binary |
 |------|------|--------|
 | `"traction_module"` | ESP32-C3 | `traction_module.bin` |
 | `"line_sensor_module"` | ESP32-C3 | `line_sensor_module.bin` |
+| `"distance_sensor_module"` | ESP32-C3 | `distance_sensor_module.bin` |
 
 Firmware binaries are expected under the SDK package's firmware asset directory when using the SDK flashing helpers. Build artifacts under `firmware/esp/modules/*/build/` are not tracked in git; generate them with ESP-IDF and copy package assets only when preparing a release bundle.
+
+For the HC-SR04 module, build and package all three required images with:
+
+```powershell
+tools/scripts/package_firmware.ps1 -ModuleName distance_sensor_module
+```
+
+```bash
+tools/scripts/package_firmware.sh distance_sensor_module
+```
 
 Available at runtime:
 ```python
 runtime.supported_firmware_types
-# ['traction_module', 'line_sensor_module']
+# ['traction_module', 'line_sensor_module', 'distance_sensor_module']
 ```
 
 ---
@@ -46,17 +59,17 @@ Flash a device that is already in the registry (identified by serial number).
 
 ```python
 result = runtime.flash_firmware(
-    serial_number: str,
-    firmware_type: str,
-    baud: int = 460800,
-    on_output: Callable[[str], None] | None = None,
-) -> dict
+    "98:3D:AE:41:97:C4",
+    "distance_sensor_module",
+    baud=460800,
+    on_output=None,
+)
 ```
 
 | Parameter | Description |
 |-----------|-------------|
 | `serial_number` | Device serial from registry (e.g. `"98:3D:AE:41:97:C4"`) |
-| `firmware_type` | `"traction_module"` or `"line_sensor_module"` |
+| `firmware_type` | `"traction_module"`, `"line_sensor_module"`, or `"distance_sensor_module"` |
 | `baud` | Flash baud rate (default `460800`) |
 | `on_output` | Optional callback receiving each esptool output line. If `None`, lines are printed to stdout with `[flash]` prefix |
 
@@ -66,6 +79,9 @@ Internally:
 - Locks the device port and serial number so the keepalive and udev cannot interfere
 - Stops the keepalive thread for this device and waits for it to exit
 - Runs `esptool` as a subprocess
+- Uses a watchdog reset after flashing ESP32-C3 targets so native USB
+  Serial/JTAG boards start the application instead of remaining in the ROM
+  downloader
 - Releases the lock after completion (keepalive and udev resume normally)
 
 Returns:
@@ -96,21 +112,23 @@ Flash a device directly by port path. Use this for brand-new devices not yet in 
 
 ```python
 result = runtime.flash_firmware_by_port(
-    device_node: str,
-    firmware_type: str,
-    baud: int = 460800,
-    on_output: Callable[[str], None] | None = None,
-) -> dict
+    "/dev/ttyACM0",
+    "distance_sensor_module",
+    baud=460800,
+    on_output=None,
+)
 ```
 
 | Parameter | Description |
 |-----------|-------------|
 | `device_node` | Serial port path (e.g. `"/dev/ttyACM0"`) |
-| `firmware_type` | `"traction_module"` or `"line_sensor_module"` |
+| `firmware_type` | `"traction_module"`, `"line_sensor_module"`, or `"distance_sensor_module"` |
 | `baud` | Flash baud rate |
 | `on_output` | Optional output callback |
 
-Does **not** stop any keepalive thread (no registry lookup). Use when the device has no entry in the registry.
+If the port is already associated with a registry entry, the helper stops that
+device's keepalive thread before flashing. It also works when the port has no
+registry entry.
 
 Returns the same dict as `flash_firmware` (without `serial_number`).
 

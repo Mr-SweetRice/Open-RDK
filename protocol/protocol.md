@@ -87,6 +87,7 @@ Host source files:
 - `0x11` -> `traction_module`
 - `0x12` -> `line_sensor_module`
 - `0x13` -> `color_module`
+- `0x14` -> `distance_sensor_module`
 
 Note: module-name query (`0x04`) is the primary identity signal; module-id mapping is fallback.
 
@@ -110,6 +111,12 @@ Expected firmware ACK strings:
 - `POST /api/devices/{serial}/traction-out/send`
 - `POST /api/devices/{serial}/telemetry/start`
 - `POST /api/devices/{serial}/telemetry/stop`
+- `GET /api/devices/{serial}/distance-sensor/snapshot`
+- `POST /api/devices/{serial}/distance-sensor/refresh`
+- `POST /api/devices/{serial}/distance-sensor/config`
+- `POST /api/devices/{serial}/distance-sensor/selftest`
+- `POST /api/devices/{serial}/distance-sensor/stream/start`
+- `POST /api/devices/{serial}/distance-sensor/stream/stop`
 
 ## 3. Firmware Command Catalog (All Current Calls)
 
@@ -380,6 +387,93 @@ SELFTEST,<ok>,<sensor_id>,<message>
 - Configuration is stored in NVS blob `cfg`
 - Calibration is stored in NVS blob `cal`
 - Calibration profiles are versioned and stored separately for palette modes `5`, `8`, and `16`
+
+## 3.4 `distance_sensor_module` (`firmware/esp/modules/distance_sensor_module`)
+
+### Identity and hardware profile
+
+- Hello ACK module id: `0x14`
+- Module query name: `distance_sensor_module`
+- MCU target: ESP32-C3
+- Sensor: HC-SR04
+- Trigger: GPIO3
+- Echo: GPIO10
+- Minimum measurement period: `60 ms`
+
+The HC-SR04 is powered from `5 V`. Its ECHO output must be reduced to a
+maximum of `3.3 V` before it reaches GPIO10. The supported wiring uses a
+`10 kΩ` resistor from ECHO to GPIO10 and a `20 kΩ` resistor from GPIO10 to
+GND. TRIG connects directly to GPIO3 and both boards must share GND.
+
+### `CMD` calls
+
+- `GET DATA`
+- `GET TELEM`
+- `GET CFG`
+- `GET INFO`
+- `RUN SELFTEST`
+- `SET CFG NAME <text>`
+- `SET CFG SAMPLE_MS <60..2000>`
+- `SET CFG MAX_MM <20..4000>`
+- `SET CFG FILTER <1|3|5|7>`
+- `SAVE CFG`
+- `RESET CFG`
+
+### `TELEMETRY` calls
+
+- `TELEMETRY_START[:host_epoch_ms]`
+- `TELEMETRY_SYNC[:host_epoch_ms]`
+- `TELEMETRY_STOP`
+
+### Response payload contracts
+
+`GET DATA`, `GET TELEM`, and streamed telemetry return:
+
+```text
+DS,<distance_mm>,<raw_distance_mm>,<echo_us>,<valid>,<health_flags>,<sample_timestamp_ms>
+```
+
+An absent sensor or missing echo is still a valid protocol response:
+`distance_mm` and `raw_distance_mm` are `-1`, `valid` is `0`, and the
+corresponding health bit is set. This prevents a measurement failure from
+being mistaken for a serial communication timeout.
+
+Health flags:
+
+- bit `0`: measurement valid
+- bit `1`: no echo / rising-edge timeout
+- bit `2`: echo stuck high / falling-edge timeout
+- bit `3`: measured distance below the supported minimum
+- bit `4`: measured distance above the configured maximum
+- bit `5`: median filter enabled
+- bit `6`: configuration loaded
+
+`GET CFG` returns:
+
+```text
+CFG,<sensor_name>,<sample_period_ms>,<max_distance_mm>,<filter_window>
+```
+
+`GET INFO` returns:
+
+```text
+INFO,<sensor_name>,distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,<health_flags>
+```
+
+`RUN SELFTEST` returns:
+
+```text
+SELFTEST,<ok>,<health_flags>,<distance_mm>
+```
+
+### Persistence notes
+
+- Configuration is stored in NVS.
+- Defaults are `100 ms`, `4000 mm`, and a median window of `3`.
+- Invalid or incompatible stored configuration is ignored and runtime defaults
+  are used.
+- `RESET CFG` restores defaults in RAM. Follow it with `SAVE CFG` to persist
+  those defaults across a reboot.
 
 ## 4. Legacy Line Fallback Policy
 

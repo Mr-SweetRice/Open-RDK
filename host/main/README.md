@@ -1,5 +1,7 @@
 # RDK Host Comms (`host/main`)
 
+Current Python package version: `openrdk` 0.2.0.
+
 ## Purpose
 This service runs on the **host (Raspberry Pi)** and handles:
 - ESP device attach/detach tracking (`pyudev`)
@@ -48,7 +50,7 @@ Web stream:
 - Frontend: subscribes to `/ws/comms`, updates live
 
 ## SDK Layers
-- **Sanitized layer**: `TractionModule`, `LineSensorModule` — typed classes, safe methods.
+- **Sanitized layer**: `TractionModule`, `LineSensorModule`, `DistanceSensorModule` — typed classes, safe methods.
 - **Raw layer**: `send_raw_cmd`, `send_raw_control` — for advanced use. `send_raw_traction` remains as a compatibility alias.
 
 ## Web UI (`src/openrdk/web_new`)
@@ -57,7 +59,7 @@ Web stream:
 - `index.html`: shell layout (device panel + comms panel)
 - `static/app.js`: state, websocket consumer, device selection, render logic
 - `static/theme.css`: shared UI theme
-- `line-sensor.html`, `traction-motor-config.html`, `traction-pid-tuner.html`, `traction-position-tuner.html`, `color.html`: module tools served by the host relay
+- `line-sensor.html`, `distance-sensor.html`, `traction-motor-config.html`, `traction-pid-tuner.html`, `traction-position-tuner.html`, `color.html`: module tools served by the host relay
 
 ### Behavior
 - Device list shows editable display name, serial number, module type, link/status, tty port (`device_node`).
@@ -115,6 +117,12 @@ Base URL: `http://<host-ip>:8765`
 - `POST /api/devices/{serial_number}/line-sensor/config`
 - `POST /api/devices/{serial_number}/line-sensor/calibration/start`
 - `POST /api/devices/{serial_number}/line-sensor/calibration`
+- `GET /api/devices/{serial_number}/distance-sensor/snapshot`
+- `POST /api/devices/{serial_number}/distance-sensor/refresh`
+- `POST /api/devices/{serial_number}/distance-sensor/config`
+- `POST /api/devices/{serial_number}/distance-sensor/selftest`
+- `POST /api/devices/{serial_number}/distance-sensor/stream/start`
+- `POST /api/devices/{serial_number}/distance-sensor/stream/stop`
 - `GET /api/comms?limit=300&serial=<optional>`
 - `WS /ws/comms`
 - `GET /` — web UI

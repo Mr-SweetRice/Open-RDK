@@ -334,6 +334,7 @@ function renderDevices() {
     const kindClass =
       moduleType === "traction_module"    ? "kind-traction" :
       moduleType === "line_sensor_module" ? "kind-line" :
+      moduleType === "distance_sensor_module" ? "kind-distance" :
       moduleType === "color_module"       ? "kind-color" : "kind-unknown";
     const initial = (() => {
       const name = (resolveName(device) || "?").trim();

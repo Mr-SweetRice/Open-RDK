@@ -38,6 +38,17 @@ _FIRMWARE_MANIFEST: dict[str, dict] = {
             "0x10000": "line_sensor_module/line_sensor_module.bin",
         },
     },
+    "distance_sensor_module": {
+        "chip": "esp32c3",
+        "flash-mode": "dio",
+        "flash-size": "2MB",
+        "flash-freq": "80m",
+        "files": {
+            "0x0":     "distance_sensor_module/bootloader.bin",
+            "0x8000":  "distance_sensor_module/partition-table.bin",
+            "0x10000": "distance_sensor_module/distance_sensor_module.bin",
+        },
+    },
 }
 
 SUPPORTED_FIRMWARE_TYPES: list[str] = list(_FIRMWARE_MANIFEST.keys())
@@ -140,6 +151,14 @@ def flash_firmware_on_port(
         )
 
     manifest = _FIRMWARE_MANIFEST[firmware_type]
+    # ESP32-C3 boards using the native USB Serial/JTAG port can remain in the
+    # ROM downloader after an RTS hard reset. A watchdog reset releases the
+    # download strap and reliably starts the newly flashed application.
+    after_reset = (
+        "watchdog-reset"
+        if str(manifest.get("chip", "")).strip().lower() == "esp32c3"
+        else "hard-reset"
+    )
 
     for relative_path in manifest["files"].values():
         full_path = _FIRMWARE_DIR / relative_path
@@ -152,7 +171,7 @@ def flash_firmware_on_port(
         "--port", device_node,
         "--baud", str(baud),
         "--before", "default-reset",
-        "--after", "hard-reset",
+        "--after", after_reset,
         "--connect-attempts", "5",
         "write-flash",
         "--flash-mode", manifest["flash-mode"],

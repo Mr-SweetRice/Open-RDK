@@ -33,5 +33,6 @@ runtime.stop()
 | [BaseModule](base-module.md) | Shared properties and raw command helpers |
 | [TractionModule](traction-module.md) | Motor control, PID, angle movement |
 | [LineSensorModule](line-sensor-module.md) | Sensor reads and telemetry |
+| [DistanceSensorModule](distance-sensor-module.md) | HC-SR04 distance reads, configuration, and telemetry |
 | [Flashing](flashing.md) | Firmware flash via serial, BOOT button workflow |
 | [Errors](errors.md) | All exception types and when they are raised |

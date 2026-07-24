@@ -238,10 +238,12 @@ body[data-rail="collapsed"] .rail-action span { display: none; }
 }
 .device-avatar.kind-traction    { color: #ffb874; }
 .device-avatar.kind-line        { color: var(--cyan); }
+.device-avatar.kind-distance    { color: #8ac7ff; }
 .device-avatar.kind-color       { color: var(--magenta); }
 .device-avatar.kind-unknown     { color: var(--text-dim); }
 .device-item.selected .device-avatar.kind-traction,
 .device-item.selected .device-avatar.kind-line,
+.device-item.selected .device-avatar.kind-distance,
 .device-item.selected .device-avatar.kind-color,
 .device-item.selected .device-avatar.kind-unknown { background: var(--accent); color: var(--accent-fg); }
 

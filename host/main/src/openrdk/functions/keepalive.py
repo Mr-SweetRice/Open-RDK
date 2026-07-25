@@ -54,6 +54,22 @@ from .transport import (
     _send_stream_frame_and_wait,
 )
 
+_SENSOR_TELEMETRY_RX_TIMEOUT_SEC = 3.0
+
+
+def _latest_sensor_telemetry_timestamp(serial_number: str) -> float | None:
+    """Return the newest cached LS/DS receive timestamp for a device."""
+    with _state._LATEST_LS_LOCK:
+        cached_ls = _state._LATEST_LS_FRAMES.get(serial_number)
+    with _state._LATEST_DS_LOCK:
+        cached_ds = _state._LATEST_DS_FRAMES.get(serial_number)
+    timestamps = [
+        float(cached[0])
+        for cached in (cached_ls, cached_ds)
+        if cached is not None
+    ]
+    return max(timestamps) if timestamps else None
+
 
 def _complete_traction_out_request(request: dict | None, result: dict):
     if not isinstance(request, dict):
@@ -889,22 +905,24 @@ def _keepalive_loop(
                                 if sync_errors <= 0:
                                     error_delta += 1
                                 error_kind = error_kind or "telemetry_sync_timeout"
-                        # Refresh last_telemetry_rx_at from the LS cache — covers frames
+                        # Refresh last_telemetry_rx_at from sensor caches; this covers frames
                         # received during the SYNC wait (they are cached via _log_stream_rx_frame
                         # even when drain is blocked), so a slow/failed SYNC doesn't falsely
                         # mark the link as dead.
-                        with _state._LATEST_LS_LOCK:
-                            _cached_ls = _state._LATEST_LS_FRAMES.get(serial_number)
-                        if _cached_ls is not None:
-                            _cached_ts = _cached_ls[0]
+                        _cached_ts = _latest_sensor_telemetry_timestamp(serial_number)
+                        if _cached_ts is not None:
                             if _cached_ts > last_telemetry_rx_at:
                                 last_telemetry_rx_at = _cached_ts
                                 last_telemetry_timeout_error_at = 0.0
 
-                        link_live = (time.monotonic() - last_telemetry_rx_at) <= 1.0
+                        link_live = (
+                            time.monotonic() - last_telemetry_rx_at
+                        ) <= _SENSOR_TELEMETRY_RX_TIMEOUT_SEC
                         if (not link_live) and (
                             last_telemetry_timeout_error_at <= 0.0
-                            or (time.monotonic() - last_telemetry_timeout_error_at) >= 1.0
+                            or (
+                                time.monotonic() - last_telemetry_timeout_error_at
+                            ) >= _SENSOR_TELEMETRY_RX_TIMEOUT_SEC
                         ):
                             error_delta += 1
                             error_kind = error_kind or "telemetry_rx_timeout"

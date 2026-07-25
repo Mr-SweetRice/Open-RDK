@@ -2,6 +2,9 @@
 
 Host relay, web UI, SDK, and ESP32-C3 firmware modules for the RDK platform.
 
+The current Python SDK release is `openrdk` 0.2.0 and includes the
+HC-SR04-based `distance_sensor_module`.
+
 ## Layout
 
 - `host/main/`: Python host relay, SDK entrypoint, mDNS/HTTPS web UI, and module tools.
@@ -39,6 +42,10 @@ idf.py set-target esp32c3
 idf.py build
 idf.py -p <PORT> flash monitor
 ```
+
+Active module types include traction, line sensor, color, and HC-SR04
+distance sensor firmware. The distance sensor uses GPIO3 for TRIG and GPIO10
+for ECHO through a 5 V to 3.3 V divider.
 
 The active firmware module tools were removed from firmware directories; configuration and tuning now happen through the host relay UI.
 

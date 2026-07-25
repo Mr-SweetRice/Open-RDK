@@ -2,7 +2,9 @@
 
 Main SDK entrypoint. Manages USB device discovery (udev), per-device keepalive threads, device registry, and the optional webview dashboard.
 
-→ [BaseModule](base-module.md) · [TractionModule](traction-module.md) · [LineSensorModule](line-sensor-module.md) · [Flashing](flashing.md) · [Errors](errors.md)
+This page documents the `openrdk` 0.2.0 API.
+
+→ [BaseModule](base-module.md) · [TractionModule](traction-module.md) · [LineSensorModule](line-sensor-module.md) · [DistanceSensorModule](distance-sensor-module.md) · [Flashing](flashing.md) · [Errors](errors.md)
 
 ---
 
@@ -67,7 +69,7 @@ Last unhandled exception from the runtime thread, or `None`.
 Last unhandled exception from the webview thread, or `None`.
 
 ### `supported_firmware_types → list[str]`
-Firmware types available for flashing. Currently `["traction_module", "line_sensor_module"]`.
+Firmware types available for flashing. Currently `["traction_module", "line_sensor_module", "distance_sensor_module"]`.
 
 ---
 
@@ -201,7 +203,7 @@ runtime.rename_device("98:3D:AE:41:97:C4", "motor_left")
 
 ## Module Factory
 
-### `module(serial_number: str) → TractionModule | LineSensorModule`
+### `module(serial_number: str) → TractionModule | LineSensorModule | DistanceSensorModule`
 Return the correct typed module based on the device's detected `module_type`. Raises `UnsupportedModuleTypeError` if the type is not recognized.
 
 ```python
@@ -224,6 +226,16 @@ Return a `LineSensorModule` without checking `module_type`.
 
 ```python
 sensor = runtime.line_sensor("98:3D:AE:41:97:C4")
+```
+
+---
+
+### `distance_sensor(serial_number: str) → DistanceSensorModule`
+Return a typed HC-SR04 distance sensor module.
+
+```python
+sensor = runtime.distance_sensor("98:3D:AE:41:97:C4")
+distance_cm = sensor.get_distance_cm()
 ```
 
 ---

@@ -5,6 +5,9 @@
 **/managed_components/
 **/*.elf
 **/*.bin
+!host/main/src/openrdk/firmware/distance_sensor_module/*.bin
+!host/main/src/openrdk/firmware/traction_module/*.bin
+!host/main/src/openrdk/firmware/line_sensor_module/*.bin
 **/core.*
 **/build.bad*/
 

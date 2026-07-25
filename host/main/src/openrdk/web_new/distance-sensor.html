@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Distance Sensor Monitor</title>
+    <link rel="stylesheet" href="static/theme.css?v=20260518o" />
+    <link rel="stylesheet" href="static/styles.css?v=20260518o" />
+    <link rel="stylesheet" href="static/distance-sensor.css?v=20260723a" />
+  </head>
+  <body data-rail="expanded">
+    <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
+    <main class="shell">
+      <aside class="rail" id="rail">
+        <a class="rail-brand" href="/" title="Back to RDK home">
+          <span class="rail-brand-mark">R</span>
+          <span class="rail-brand-text">RDK</span>
+        </a>
+        <button class="rail-toggle" id="railToggle" type="button" title="Collapse rail" aria-label="Collapse rail">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 6l-6 6 6 6"/>
+          </svg>
+        </button>
+        <div class="rail-section-title"><span>Module</span></div>
+        <nav class="rail-devices">
+          <a class="rail-nav-link is-active" href="/distance-sensor">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 12h3"/><path d="M17 12h3"/><path d="M8 8a6 6 0 0 1 0 8"/><path d="M11 5a10 10 0 0 1 0 14"/><circle cx="3" cy="12" r="1.5" fill="currentColor"/>
+            </svg>
+            <span>Distance Sensor</span>
+          </a>
+        </nav>
+      </aside>
+
+      <section class="stage panel">
+        <header class="stage-header distance-header">
+          <div class="stage-titleblock">
+            <div class="stage-eyebrow">HC-SR04 · Distance Sensor Module</div>
+            <h2>Distance Monitor</h2>
+            <div class="toolbar-status">
+              <span id="connectionBadge" class="badge nodata">disconnected</span>
+              <span id="dataBadge" class="badge nodata">no data</span>
+              <span id="rateBadge" class="badge">0 Hz</span>
+            </div>
+          </div>
+          <div class="distance-actions">
+            <label class="field compact">
+              <span>Device</span>
+              <select id="deviceSelect" aria-label="Distance sensor device"></select>
+            </label>
+            <button id="refreshBtn" class="action-btn accent" type="button">Refresh</button>
+            <button id="startStreamBtn" class="action-btn" type="button">Start Stream</button>
+            <button id="stopStreamBtn" class="action-btn" type="button">Stop Stream</button>
+          </div>
+        </header>
+
+        <div class="stage-body">
+          <div id="offlineBanner" class="distance-banner" role="status" aria-live="polite">
+            No echo / disconnected. Connect a distance sensor module to begin.
+          </div>
+
+          <div class="distance-shell">
+            <section class="distance-main-grid">
+              <article class="panel distance-hero">
+                <div class="panel-kicker">Filtered Distance</div>
+                <div class="distance-reading-row">
+                  <div>
+                    <strong id="distanceValue" class="distance-value">—</strong>
+                    <span id="distanceUnitLabel" class="distance-unit">cm</span>
+                  </div>
+                  <label class="field compact unit-picker">
+                    <span>Unit</span>
+                    <select id="unitSelect">
+                      <option value="mm">mm</option>
+                      <option value="cm" selected>cm</option>
+                      <option value="m">m</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="measurementStatus" class="measurement-status" role="status" aria-live="polite">Waiting for a measurement</div>
+
+                <div id="rangeTrack" class="range-track" role="progressbar" aria-label="Measured distance within configured range" aria-valuemin="0" aria-valuemax="4000">
+                  <div id="rangeFill" class="range-fill"></div>
+                  <div id="rangeMarker" class="range-marker"></div>
+                </div>
+                <div class="range-scale">
+                  <span>0</span>
+                  <span id="rangeScaleMax">4000 mm</span>
+                </div>
+                <div id="lastValidNote" class="last-valid-note">No valid echo received yet.</div>
+
+                <div class="distance-metrics">
+                  <div>
+                    <span>Raw distance</span>
+                    <strong id="rawDistanceValue">—</strong>
+                  </div>
+                  <div>
+                    <span>Echo pulse</span>
+                    <strong id="echoUsValue">—</strong>
+                  </div>
+                  <div>
+                    <span>Sample age</span>
+                    <strong id="sampleAgeValue">—</strong>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel history-card">
+                <div class="panel-heading-row">
+                  <div>
+                    <div class="panel-kicker">Live History</div>
+                    <div class="panel-subtitle">Latest 30 seconds · invalid echoes appear as gaps</div>
+                  </div>
+                  <button id="clearHistoryBtn" class="action-btn" type="button">Clear</button>
+                </div>
+                <div class="history-canvas-wrap">
+                  <canvas id="historyCanvas" role="img" aria-label="Distance measurements over the latest 30 seconds">
+                    Distance measurements over the latest 30 seconds.
+                  </canvas>
+                  <div id="historyEmpty" class="history-empty">Waiting for samples…</div>
+                </div>
+              </article>
+            </section>
+
+            <section class="distance-detail-grid">
+              <article class="panel">
+                <div class="panel-kicker">Health</div>
+                <div class="health-grid">
+                  <div class="health-item" data-flag="valid"><span>Valid echo</span><strong id="healthValid">off</strong></div>
+                  <div class="health-item" data-flag="noEcho"><span>No echo</span><strong id="healthNoEcho">off</strong></div>
+                  <div class="health-item" data-flag="echoStuck"><span>Echo stuck</span><strong id="healthEchoStuck">off</strong></div>
+                  <div class="health-item" data-flag="belowMin"><span>Below minimum</span><strong id="healthBelowMin">off</strong></div>
+                  <div class="health-item" data-flag="aboveMax"><span>Above maximum</span><strong id="healthAboveMax">off</strong></div>
+                  <div class="health-item" data-flag="filterActive"><span>Filter active</span><strong id="healthFilter">off</strong></div>
+                  <div class="health-item" data-flag="configLoaded"><span>Config loaded</span><strong id="healthConfig">off</strong></div>
+                </div>
+                <div class="selftest-row">
+                  <button id="selftestBtn" class="action-btn" type="button">Run Self-test</button>
+                  <span id="selftestResult" class="inline-note" role="status" aria-live="polite">Self-test not run.</span>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-kicker">Configuration</div>
+                <div class="config-grid">
+                  <label class="field">
+                    <span>Name</span>
+                    <input id="nameInput" type="text" maxlength="31" placeholder="Distance Sensor" />
+                  </label>
+                  <label class="field">
+                    <span>Sample period (ms)</span>
+                    <input id="sampleMsInput" type="number" min="60" max="2000" step="10" value="100" />
+                  </label>
+                  <label class="field">
+                    <span>Maximum distance (mm)</span>
+                    <input id="maxMmInput" type="number" min="20" max="4000" step="10" value="4000" />
+                  </label>
+                  <label class="field">
+                    <span>Filter window</span>
+                    <select id="filterWindowInput">
+                      <option value="1">1 · no filtering</option>
+                      <option value="3" selected>3 samples</option>
+                      <option value="5">5 samples</option>
+                      <option value="7">7 samples</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="config-actions">
+                  <button id="applyConfigBtn" class="action-btn accent" type="button">Apply &amp; Save</button>
+                  <span id="actionStatus" class="inline-note" role="status" aria-live="polite"></span>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-kicker">Hardware</div>
+                <div class="hardware-list">
+                  <div><span>Sensor</span><strong id="sensorModelValue">HC-SR04</strong></div>
+                  <div><span>Trigger</span><strong id="triggerGpioValue">GPIO 3</strong></div>
+                  <div><span>Echo</span><strong id="echoGpioValue">GPIO 10</strong></div>
+                  <div><span>Module ID</span><strong id="moduleIdValue">0x14</strong></div>
+                </div>
+                <p class="voltage-note">
+                  HC-SR04 ECHO is 5 V. Use the specified resistor divider before the ESP32-C3 GPIO input.
+                </p>
+              </article>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      if (new URLSearchParams(window.location.search).get("mock") === "1") {
+        document.write('<script src="static/mock-backend.js?v=20260723a"><\/script>');
+      }
+    </script>
+    <script src="static/distance-sensor.js?v=20260723a"></script>
+    <script src="static/shell.js?v=20260518o"></script>
+  </body>
+</html>

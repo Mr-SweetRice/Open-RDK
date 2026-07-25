@@ -21,6 +21,7 @@ from .errors import (
     ModuleTypeMismatchError,
 )
 from .functions import (
+    get_latest_ds_frame,
     get_latest_ls_frame,
     send_device_cmd_once,
     send_device_traction_command_once,
@@ -864,6 +865,394 @@ class LineSensorModule(BaseModule):
             "strength": data["strength"],
             "line_detected": data["line_detected"],
         }
+
+
+class DistanceSensorModule(BaseModule):
+    """SDK wrapper for an HC-SR04 distance sensor module."""
+
+    EXPECTED_MODULE_TYPE = "distance_sensor_module"
+    MIN_DISTANCE_MM = 20
+    MAX_DISTANCE_MM = 4000
+    MIN_SAMPLE_PERIOD_MS = 60
+    MAX_SAMPLE_PERIOD_MS = 2000
+    FILTER_WINDOWS = (1, 3, 5, 7)
+
+    HEALTH_FLAG_NAMES = {
+        0: "valid",
+        1: "no_echo",
+        2: "echo_stuck",
+        3: "below_min",
+        4: "above_max",
+        5: "filter_active",
+        6: "config_loaded",
+    }
+
+    def __init__(
+        self,
+        runtime: "CommsRuntime",
+        serial_number: str,
+        snapshot: dict | None = None,
+    ):
+        super().__init__(
+            runtime=runtime,
+            serial_number=serial_number,
+            snapshot=snapshot,
+            default_message_type=MESSAGE_TYPE_CMD,
+        )
+
+    @classmethod
+    def decode_health_flags(cls, value: int | str | None) -> dict[str, bool]:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        return {
+            name: bool(parsed & (1 << bit))
+            for bit, name in cls.HEALTH_FLAG_NAMES.items()
+        }
+
+    @staticmethod
+    def _measurement_status(valid: bool, health: dict[str, bool]) -> str:
+        if valid:
+            return "OK"
+        if health.get("echo_stuck"):
+            return "ECHO_STUCK"
+        if health.get("no_echo"):
+            return "NO_ECHO"
+        if health.get("below_min"):
+            return "BELOW_MIN"
+        if health.get("above_max"):
+            return "ABOVE_MAX"
+        return "NOT_READY"
+
+    @classmethod
+    def _parse_data_response(cls, response: str) -> dict:
+        """
+        Parse the canonical telemetry payload:
+        DS,<distance_mm>,<raw_distance_mm>,<echo_us>,<valid>,
+           <health_flags>,<sample_timestamp_ms>
+
+        A transitional firmware variant may include a textual status between
+        ``valid`` and ``health_flags``. Accepting both keeps host and firmware
+        upgrades backward compatible.
+        """
+        parts = [part.strip() for part in str(response or "").split(",")]
+        if len(parts) < 7 or parts[0] != "DS":
+            raise CommandFailedError(f"unexpected GET DATA response: {response}")
+
+        has_status_field = len(parts) >= 8
+        status_index = 5 if has_status_field else None
+        health_index = 6 if has_status_field else 5
+        timestamp_index = 7 if has_status_field else 6
+
+        try:
+            distance_mm = int(parts[1])
+            raw_distance_mm = int(parts[2])
+            echo_us = int(parts[3])
+            valid_value = int(parts[4])
+            if valid_value not in (0, 1):
+                raise ValueError("valid must be 0 or 1")
+            if valid_value == 1 and distance_mm < 0:
+                raise ValueError("valid distance must be non-negative")
+            health_flags = int(parts[health_index])
+            sample_timestamp_ms = int(parts[timestamp_index])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise CommandFailedError(f"invalid GET DATA response: {response}") from exc
+
+        valid = bool(valid_value)
+        health = cls.decode_health_flags(health_flags)
+        status = (
+            str(parts[status_index] or "").strip().upper()
+            if status_index is not None
+            else ""
+        )
+        if not status:
+            status = cls._measurement_status(valid, health)
+
+        distance_cm = (float(distance_mm) / 10.0) if valid and distance_mm >= 0 else None
+        distance_m = (float(distance_mm) / 1000.0) if valid and distance_mm >= 0 else None
+        return {
+            "kind": "DS",
+            "distance_mm": distance_mm,
+            "filtered_distance_mm": distance_mm,
+            "raw_distance_mm": raw_distance_mm,
+            "echo_us": echo_us,
+            "valid": valid,
+            "status": status,
+            "health_flags": health_flags,
+            "health": health,
+            "sample_timestamp_ms": sample_timestamp_ms,
+            "distance_cm": distance_cm,
+            "distance_m": distance_m,
+        }
+
+    @staticmethod
+    def _parse_cfg_response(response: str) -> dict:
+        # CFG,<sensor_name>,<sample_period_ms>,<max_distance_mm>,<filter_window>
+        parts = [part.strip() for part in str(response or "").split(",")]
+        if len(parts) < 5 or parts[0] != "CFG":
+            raise CommandFailedError(f"unexpected GET CFG response: {response}")
+        try:
+            sample_period_ms = int(parts[2])
+            max_distance_mm = int(parts[3])
+            filter_window = int(parts[4])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise CommandFailedError(f"invalid GET CFG response: {response}") from exc
+        return {
+            "sensor_name": parts[1],
+            "sample_period_ms": sample_period_ms,
+            "max_distance_mm": max_distance_mm,
+            "filter_window": filter_window,
+        }
+
+    @classmethod
+    def _parse_info_response(cls, response: str) -> dict:
+        # INFO,<name>,<module_type>,<firmware_module>,<module_id>,
+        #      <sensor_model>,<trigger_pin>,<echo_pin>,<health_flags>
+        parts = [part.strip() for part in str(response or "").split(",")]
+        if len(parts) < 9 or parts[0] != "INFO":
+            raise CommandFailedError(f"unexpected GET INFO response: {response}")
+        try:
+            module_id = int(parts[4])
+            trigger_pin = int(parts[6])
+            echo_pin = int(parts[7])
+            health_flags = int(parts[8])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise CommandFailedError(f"invalid GET INFO response: {response}") from exc
+        return {
+            "sensor_name": parts[1],
+            "module_type": parts[2],
+            "firmware_module": parts[3],
+            "module_id": module_id,
+            "module_id_hex": f"0x{module_id:02X}",
+            "sensor_model": parts[5],
+            "trigger_pin": trigger_pin,
+            "echo_pin": echo_pin,
+            "health_flags": health_flags,
+            "health": cls.decode_health_flags(health_flags),
+        }
+
+    @classmethod
+    def _parse_selftest_response(cls, response: str) -> dict:
+        # SELFTEST,<ok>,<health_flags>,<distance_mm>
+        parts = [part.strip() for part in str(response or "").split(",")]
+        if len(parts) < 4 or parts[0] != "SELFTEST":
+            raise CommandFailedError(f"unexpected RUN SELFTEST response: {response}")
+        try:
+            ok_value = int(parts[1])
+            if ok_value not in (0, 1):
+                raise ValueError("ok must be 0 or 1")
+            health_flags = int(parts[2])
+            distance_mm = int(parts[3])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise CommandFailedError(f"invalid RUN SELFTEST response: {response}") from exc
+        ok = bool(ok_value)
+        health = cls.decode_health_flags(health_flags)
+        return {
+            "ok": ok,
+            "status": "OK" if ok else cls._measurement_status(False, health),
+            "health_flags": health_flags,
+            "health": health,
+            "distance_mm": distance_mm,
+        }
+
+    @staticmethod
+    def _normalize_unit(unit: str) -> str:
+        value = str(unit or "mm").strip().lower()
+        aliases = {
+            "mm": "mm",
+            "millimeter": "mm",
+            "millimeters": "mm",
+            "millimetre": "mm",
+            "millimetres": "mm",
+            "cm": "cm",
+            "centimeter": "cm",
+            "centimeters": "cm",
+            "centimetre": "cm",
+            "centimetres": "cm",
+            "m": "m",
+            "meter": "m",
+            "meters": "m",
+            "metre": "m",
+            "metres": "m",
+        }
+        normalized = aliases.get(value)
+        if normalized is None:
+            raise ValueError("unit must be 'mm', 'cm', or 'm'")
+        return normalized
+
+    @classmethod
+    def _distance_from_data(cls, data: dict, unit: str):
+        if not bool(data.get("valid")):
+            return None
+        normalized = cls._normalize_unit(unit)
+        distance_mm = int(data["distance_mm"])
+        if distance_mm < 0:
+            return None
+        if normalized == "mm":
+            return distance_mm
+        if normalized == "cm":
+            return float(distance_mm) / 10.0
+        return float(distance_mm) / 1000.0
+
+    def get_data(self, timeout_sec: float = 1.5) -> dict:
+        """Read and parse one HC-SR04 measurement."""
+        result = self.send_raw_cmd("GET DATA", timeout_sec=timeout_sec)
+        return self._parse_data_response(str(result.get("response") or "").strip())
+
+    def read(self, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`get_data`."""
+        return self.get_data(timeout_sec=timeout_sec)
+
+    def get_distance_mm(self, timeout_sec: float = 1.5) -> int | None:
+        """Return filtered distance in millimetres, or None for an invalid sample."""
+        return self._distance_from_data(self.get_data(timeout_sec), "mm")
+
+    def get_distance_cm(self, timeout_sec: float = 1.5) -> float | None:
+        """Return filtered distance in centimetres, or None for an invalid sample."""
+        return self._distance_from_data(self.get_data(timeout_sec), "cm")
+
+    def get_distance(
+        self,
+        unit: str = "mm",
+        timeout_sec: float = 1.5,
+    ) -> int | float | None:
+        """Return filtered distance in ``mm``, ``cm``, or ``m``."""
+        return self._distance_from_data(self.get_data(timeout_sec), unit)
+
+    def get_info(self, timeout_sec: float = 1.5) -> dict:
+        """Read module identity, HC-SR04 pins, and health flags."""
+        result = self.send_raw_cmd("GET INFO", timeout_sec=timeout_sec)
+        return self._parse_info_response(str(result.get("response") or "").strip())
+
+    def get_config(self, timeout_sec: float = 1.5) -> dict:
+        """Read the current sampling and filter configuration."""
+        result = self.send_raw_cmd("GET CFG", timeout_sec=timeout_sec)
+        return self._parse_cfg_response(str(result.get("response") or "").strip())
+
+    def _config_after_command(self, command: str, timeout_sec: float) -> dict:
+        result = self.send_raw_cmd(command, timeout_sec=timeout_sec)
+        response = str(result.get("response") or "").strip()
+        if response.startswith("CFG,"):
+            return self._parse_cfg_response(response)
+        return self.get_config(timeout_sec=timeout_sec)
+
+    def set_name(self, name: str, timeout_sec: float = 1.5) -> dict:
+        clean = str(name or "").strip().replace(",", "-")[:32]
+        if not clean:
+            raise ValueError("name is required")
+        return self._config_after_command(f"SET CFG NAME {clean}", timeout_sec)
+
+    def set_sample_period_ms(self, value: int, timeout_sec: float = 1.5) -> dict:
+        sample_period_ms = int(value)
+        if not self.MIN_SAMPLE_PERIOD_MS <= sample_period_ms <= self.MAX_SAMPLE_PERIOD_MS:
+            raise ValueError(
+                f"sample_period_ms must be between "
+                f"{self.MIN_SAMPLE_PERIOD_MS} and {self.MAX_SAMPLE_PERIOD_MS}"
+            )
+        return self._config_after_command(
+            f"SET CFG SAMPLE_MS {sample_period_ms}",
+            timeout_sec,
+        )
+
+    def set_sample_period(self, value: int, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`set_sample_period_ms`."""
+        return self.set_sample_period_ms(value, timeout_sec=timeout_sec)
+
+    def set_max_distance_mm(self, value: int, timeout_sec: float = 1.5) -> dict:
+        max_distance_mm = int(value)
+        if not self.MIN_DISTANCE_MM <= max_distance_mm <= self.MAX_DISTANCE_MM:
+            raise ValueError(
+                f"max_distance_mm must be between "
+                f"{self.MIN_DISTANCE_MM} and {self.MAX_DISTANCE_MM}"
+            )
+        return self._config_after_command(
+            f"SET CFG MAX_MM {max_distance_mm}",
+            timeout_sec,
+        )
+
+    def set_max_distance(self, value: int, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`set_max_distance_mm`."""
+        return self.set_max_distance_mm(value, timeout_sec=timeout_sec)
+
+    def set_filter_window(self, value: int, timeout_sec: float = 1.5) -> dict:
+        filter_window = int(value)
+        if filter_window not in self.FILTER_WINDOWS:
+            allowed = ", ".join(str(item) for item in self.FILTER_WINDOWS)
+            raise ValueError(f"filter_window must be one of: {allowed}")
+        return self._config_after_command(
+            f"SET CFG FILTER {filter_window}",
+            timeout_sec,
+        )
+
+    def save_config(self, timeout_sec: float = 1.5) -> dict:
+        """Persist the current configuration in NVS."""
+        return self.send_raw_cmd("SAVE CFG", timeout_sec=timeout_sec)
+
+    def reset_config(self, timeout_sec: float = 1.5) -> dict:
+        """Restore firmware defaults and return the resulting configuration."""
+        return self._config_after_command("RESET CFG", timeout_sec)
+
+    def run_selftest(self, timeout_sec: float = 1.5) -> dict:
+        """Run the firmware self-test and return its structured result."""
+        result = self.send_raw_cmd("RUN SELFTEST", timeout_sec=timeout_sec)
+        return self._parse_selftest_response(str(result.get("response") or "").strip())
+
+    def selftest(self, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`run_selftest`."""
+        return self.run_selftest(timeout_sec=timeout_sec)
+
+    def start_telemetry(self) -> dict:
+        """Enable continuous DS telemetry."""
+        self._set_message_type(MESSAGE_TYPE_TELEMETRY)
+        updated = set_device_telemetry_requested(
+            db_path=self.runtime.db_path,
+            serial_number=self.serial_number,
+            enabled=True,
+        )
+        if not isinstance(updated, dict):
+            raise DeviceNotFoundError(f"device not found: {self.serial_number}")
+        self._snapshot.update(updated)
+        return dict(updated)
+
+    def stop_telemetry(self) -> dict:
+        """Disable continuous DS telemetry."""
+        self._set_message_type(MESSAGE_TYPE_TELEMETRY)
+        updated = set_device_telemetry_requested(
+            db_path=self.runtime.db_path,
+            serial_number=self.serial_number,
+            enabled=False,
+        )
+        if not isinstance(updated, dict):
+            raise DeviceNotFoundError(f"device not found: {self.serial_number}")
+        self._snapshot.update(updated)
+        return dict(updated)
+
+    def start_streaming(self) -> dict:
+        """Start continuous telemetry for non-blocking cached reads."""
+        return self.start_telemetry()
+
+    def stop_streaming(self) -> dict:
+        """Stop continuous telemetry."""
+        return self.stop_telemetry()
+
+    def get_latest_data(self) -> dict | None:
+        """Return the latest cached DS frame without blocking, or None."""
+        result = get_latest_ds_frame(self.serial_number)
+        if result is None:
+            return None
+        _received_at, text = result
+        try:
+            return self._parse_data_response(text)
+        except Exception:
+            return None
+
+    def get_latest_distance(self, unit: str = "mm") -> int | float | None:
+        """Return the latest valid cached distance in the selected unit."""
+        data = self.get_latest_data()
+        if data is None:
+            return None
+        return self._distance_from_data(data, unit)
 
 
 def run_together(*callables) -> list:

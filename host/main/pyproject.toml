@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openrdk"
-version = "0.1.0"
+version = "0.2.0"
 description = "RDK host relay runtime and SDK for ESP modules"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ dependencies = [
   "fastapi==0.115.6",
   "uvicorn==0.32.1",
   "websockets==13.1",
-  "esptool>=4.7,<6",
+  "esptool>=4.9,<6",
   "cryptography>=42,<49",
 ]
 

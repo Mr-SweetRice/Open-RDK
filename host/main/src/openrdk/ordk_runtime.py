@@ -456,6 +456,10 @@ class CommsRuntime:
             from .modules import LineSensorModule
 
             return LineSensorModule(self, serial_number=serial_number, snapshot=snapshot)
+        if module_type == "distance_sensor_module":
+            from .modules import DistanceSensorModule
+
+            return DistanceSensorModule(self, serial_number=serial_number, snapshot=snapshot)
         raise UnsupportedModuleTypeError(
             f"unsupported module_type '{module_type or 'unknown'}' for {serial_number}"
         )
@@ -526,3 +530,13 @@ class CommsRuntime:
         from .modules import LineSensorModule
 
         return LineSensorModule(self, serial_number=serial_number, snapshot=self.require_device(serial_number))
+
+    def distance_sensor(self, serial_number: str):
+        self.ensure_running()
+        from .modules import DistanceSensorModule
+
+        return DistanceSensorModule(
+            self,
+            serial_number=serial_number,
+            snapshot=self.require_device(serial_number),
+        )

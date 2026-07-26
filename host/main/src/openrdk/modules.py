@@ -6,6 +6,15 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from .color_support import (
+    get_device_profile,
+    parse_color_cal_line,
+    parse_color_cfg_line,
+    parse_color_data_line,
+    parse_color_info_line,
+    parse_color_patch_line,
+    parse_color_selftest_line,
+)
 from .constants import (
     MESSAGE_TYPE_CMD,
     MESSAGE_TYPE_CONTROL,
@@ -548,6 +557,156 @@ class TractionModule(BaseModule):
         }
 
 
+class ColorSensorModule(BaseModule):
+    """SDK wrapper for the firmware ``color_module``."""
+
+    EXPECTED_MODULE_TYPE = "color_module"
+
+    @staticmethod
+    def _response(result: dict) -> str:
+        return str(result.get("response") or "").strip()
+
+    @staticmethod
+    def _parsed(response: str, parser, operation: str) -> dict:
+        parsed = parser(response)
+        if parsed is None:
+            raise CommandFailedError(f"unexpected {operation} response: {response}")
+        return parsed
+
+    def _query(self, command: str, parser, operation: str, timeout_sec: float) -> dict:
+        result = self.send_raw_cmd(command, timeout_sec=timeout_sec)
+        parsed = self._parsed(self._response(result), parser, operation)
+        parsed["raw_result"] = result
+        return parsed
+
+    def _label_for_slot(self, palette_mode: int, slot: int) -> dict | None:
+        if slot < 0:
+            return None
+        profile = get_device_profile(self.serial_number)
+        mode = profile.get("modes", {}).get(str(palette_mode), {})
+        for label in mode.get("labels", []):
+            try:
+                if int(label.get("slot")) == slot:
+                    return dict(label)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _add_color_names(self, data: dict) -> dict:
+        palette_mode = int(data["palette_mode"])
+        detected_slot = int(data["detected_slot"])
+        detected_label = self._label_for_slot(palette_mode, detected_slot)
+        data["color_name"] = (
+            str(detected_label.get("name"))
+            if detected_label is not None
+            else "unclassified"
+        )
+        data["detected_color"] = (
+            {
+                "slot": detected_slot,
+                "name": data["color_name"],
+                "hex": detected_label.get("hex"),
+                "enabled": bool(detected_label.get("enabled", True)),
+            }
+            if detected_label is not None
+            else None
+        )
+        for candidate in data.get("top", []):
+            label = self._label_for_slot(palette_mode, int(candidate["slot"]))
+            candidate["name"] = (
+                str(label.get("name")) if label is not None else "unclassified"
+            )
+            candidate["hex"] = label.get("hex") if label is not None else None
+        return data
+
+    def get_data(self, timeout_sec: float = 1.5) -> dict:
+        data = self._query("GET DATA", parse_color_data_line, "GET DATA", timeout_sec)
+        return self._add_color_names(data)
+
+    def get_color(self, timeout_sec: float = 1.5) -> str:
+        """Return the current host-configured color name, or ``unclassified``."""
+        return self.get_data(timeout_sec=timeout_sec)["color_name"]
+
+    def get_config(self, timeout_sec: float = 1.5) -> dict:
+        return self._query("GET CFG", parse_color_cfg_line, "GET CFG", timeout_sec)
+
+    def get_info(self, timeout_sec: float = 1.5) -> dict:
+        return self._query("GET INFO", parse_color_info_line, "GET INFO", timeout_sec)
+
+    def get_calibration(self, palette_mode: int | None = None, timeout_sec: float = 1.5) -> dict:
+        command = "GET CAL" if palette_mode is None else f"GET CAL {int(palette_mode)}"
+        return self._query(command, parse_color_cal_line, "GET CAL", timeout_sec)
+
+    def get_calibration_patch(
+        self,
+        slot: int,
+        palette_mode: int | None = None,
+        timeout_sec: float = 1.5,
+    ) -> dict:
+        command = (
+            f"GET CAL PATCH {int(slot)}"
+            if palette_mode is None
+            else f"GET CAL PATCH {int(palette_mode)} {int(slot)}"
+        )
+        return self._query(command, parse_color_patch_line, "GET CAL PATCH", timeout_sec)
+
+    def run_selftest(self, timeout_sec: float = 2.0) -> dict:
+        return self._query("RUN SELFTEST", parse_color_selftest_line, "RUN SELFTEST", timeout_sec)
+
+    def set_config(self, field: str, value, timeout_sec: float = 1.5) -> dict:
+        """Set a firmware CFG field and return the updated parsed configuration."""
+        normalized = str(field or "").strip().upper()
+        allowed = {
+            "NAME", "SAMPLE_MS", "GAIN", "INTEGRATION_MS", "CONF_TH",
+            "TARGET_CLEAR", "PALETTE_MODE", "PATCH_SAMPLES", "LED",
+            "GAIN_MODE", "CLASSIFIER",
+        }
+        if normalized not in allowed:
+            raise ValueError(f"unsupported color configuration field: {field}")
+        clean_value = str(value).replace(",", "-").replace("\r", " ").replace("\n", " ")
+        result = self.send_raw_cmd(
+            f"SET CFG {normalized} {clean_value}",
+            timeout_sec=timeout_sec,
+        )
+        parsed = parse_color_cfg_line(self._response(result))
+        if parsed is None:
+            parsed = self.get_config(timeout_sec=timeout_sec)
+            parsed["set_result"] = result
+        else:
+            parsed["raw_result"] = result
+        return parsed
+
+    def save_config(self, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd("SAVE CFG", timeout_sec=timeout_sec)
+
+    def reset_config(self, timeout_sec: float = 1.5) -> dict:
+        self.send_raw_cmd("RESET CFG", timeout_sec=timeout_sec)
+        return self.get_config(timeout_sec=timeout_sec)
+
+    def start_calibration(self, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd("START CAL", timeout_sec=timeout_sec)
+
+    def stop_calibration(self, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd("STOP CAL", timeout_sec=timeout_sec)
+
+    def select_calibration_patch(self, slot: int, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd(f"SET CAL PATCH {int(slot)}", timeout_sec=timeout_sec)
+
+    def commit_calibration_patch(self, slot: int, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd(f"COMMIT CAL PATCH {int(slot)}", timeout_sec=timeout_sec)
+
+    def save_calibration(self, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd("SAVE CAL", timeout_sec=timeout_sec)
+
+    def reset_calibration(
+        self,
+        palette_mode: int | str | None = None,
+        timeout_sec: float = 1.5,
+    ) -> dict:
+        target = "" if palette_mode is None else f" {str(palette_mode).upper()}"
+        return self.send_raw_cmd(f"RESET CAL{target}", timeout_sec=timeout_sec)
+
+
 class LineSensorModule(BaseModule):
     """
     SDK wrapper for the line sensor module.
@@ -562,6 +721,9 @@ class LineSensorModule(BaseModule):
         vals = sensor.get_values()      # [0.12, 0.45, 0.98, 0.40, 0.10]
         pos  = sensor.get_position()    # {"position": 0.05, "line_detected": True, ...}
 
+        # Optional: keep the last detected position through temporary dead zones.
+        sensor.set_lost_position_mode("hold")
+
         sensor.calibrate(duration_ms=3000)   # move sensor over line while running
         sensor.save_calibration()
     """
@@ -569,22 +731,64 @@ class LineSensorModule(BaseModule):
     EXPECTED_MODULE_TYPE = "line_sensor_module"
     SENSOR_COUNT = 5
 
-    def __init__(self, runtime: "CommsRuntime", serial_number: str, snapshot: dict | None = None):
+    def __init__(
+        self,
+        runtime: "CommsRuntime",
+        serial_number: str,
+        snapshot: dict | None = None,
+        lost_position_mode: str = "zero",
+    ):
         super().__init__(
             runtime=runtime,
             serial_number=serial_number,
             snapshot=snapshot,
             default_message_type=MESSAGE_TYPE_CMD,
         )
+        self._last_data_timestamp = 0.0
+        self._lost_position_mode = self._normalize_lost_position_mode(
+            lost_position_mode
+        )
+        self._last_valid_position: float | None = None
 
     # ---- Parsing helpers ----
 
     @staticmethod
+    def _normalize_lost_position_mode(mode: str) -> str:
+        normalized = str(mode or "").strip().lower()
+        if normalized in {"zero", "reset"}:
+            return "zero"
+        if normalized in {"hold", "last", "hold_last"}:
+            return "hold"
+        raise ValueError("lost_position_mode must be 'zero' or 'hold'")
+
+    @property
+    def lost_position_mode(self) -> str:
+        return self._lost_position_mode
+
+    def set_lost_position_mode(self, mode: str) -> None:
+        """Choose whether loss reports zero or holds the last detected position."""
+        self._lost_position_mode = self._normalize_lost_position_mode(mode)
+        if self._lost_position_mode == "zero":
+            self._last_valid_position = None
+
+    def _position_with_loss_policy(self, data: dict) -> float:
+        position = float(data["position"])
+        if bool(data.get("line_detected")):
+            self._last_valid_position = position
+            return position
+        if (
+            self._lost_position_mode == "hold"
+            and self._last_valid_position is not None
+        ):
+            return self._last_valid_position
+        return position
+
+    @staticmethod
     def _parse_data_response(response: str) -> dict:
         # LS,raw[0..4],value[0..4],digital[0..4],position,strength,
-        #    line_detected,calibrating,calibration_remaining_ms,input_lag_ms
+        #    line_detected,calibrating,calibration_remaining_ms
         parts = [p.strip() for p in str(response or "").split(",")]
-        if len(parts) < 22 or parts[0] != "LS":
+        if len(parts) < 21 or parts[0] != "LS":
             raise CommandFailedError(f"unexpected GET DATA response: {response}")
         try:
             raw     = [int(parts[i + 1]) for i in range(5)]
@@ -595,7 +799,6 @@ class LineSensorModule(BaseModule):
             line_detected          = bool(int(parts[18]))
             calibrating            = bool(int(parts[19]))
             calibration_remaining_ms = int(parts[20])
-            input_lag_ms           = float(parts[21])
         except (TypeError, ValueError, IndexError) as exc:
             raise CommandFailedError(f"invalid GET DATA response: {response}") from exc
         return {
@@ -607,7 +810,6 @@ class LineSensorModule(BaseModule):
             "line_detected": line_detected,
             "calibrating": calibrating,
             "calibration_remaining_ms": calibration_remaining_ms,
-            "input_lag_ms": input_lag_ms,
         }
 
     @staticmethod
@@ -650,7 +852,13 @@ class LineSensorModule(BaseModule):
 
     def get_data(self, timeout_sec: float = 1.5) -> dict:
         """
-        Full sensor snapshot. Keys:
+        Return the next sensor snapshot from the runtime-owned telemetry stream.
+
+        The first call enables telemetry for this sensor. Subsequent calls wait
+        for a frame newer than the one returned previously, so control loops are
+        paced by real sensor updates instead of repeatedly consuming stale data.
+
+        Keys:
           raw      — list[int]   raw ADC values (0–4095) per sensor
           values   — list[float] normalized reflectance (0.0–1.0) per sensor
           digital  — list[bool]  per-sensor threshold output
@@ -659,11 +867,38 @@ class LineSensorModule(BaseModule):
           line_detected — bool   True when strength ≥ detect_threshold
           calibrating            — bool
           calibration_remaining_ms — int
-          input_lag_ms           — float
         """
-        result = self.send_raw_cmd("GET DATA", timeout_sec=timeout_sec)
-        response = str(result.get("response") or "").strip()
-        return self._parse_data_response(response)
+        timeout = max(0.0, float(timeout_sec))
+        deadline = time.monotonic() + timeout
+        self._ensure_online()
+        snapshot = self.runtime.require_device(
+            self.serial_number,
+            wait_timeout_sec=min(timeout, 1.0),
+        )
+        stream_active = (
+            str(snapshot.get("message_type") or "").upper() == MESSAGE_TYPE_TELEMETRY
+            and bool(snapshot.get("telemetry_requested"))
+        )
+        stream_requested_at = time.monotonic()
+        if not stream_active:
+            self.start_telemetry()
+            deadline = max(deadline, stream_requested_at + 5.0)
+
+        while True:
+            result = get_latest_ls_frame(self.serial_number)
+            if result is not None:
+                timestamp, response = result
+                is_new = timestamp > self._last_data_timestamp
+                belongs_to_stream = stream_active or timestamp >= stream_requested_at
+                if is_new and belongs_to_stream:
+                    data = self._parse_data_response(response)
+                    self._last_data_timestamp = timestamp
+                    return data
+            if time.monotonic() >= deadline:
+                raise CommandFailedError(
+                    f"timed out waiting for line sensor telemetry: {self.serial_number}"
+                )
+            time.sleep(0.002)
 
     def get_values(self, timeout_sec: float = 1.5) -> list:
         """
@@ -685,7 +920,7 @@ class LineSensorModule(BaseModule):
         """
         data = self.get_data(timeout_sec)
         return {
-            "position": data["position"],
+            "position": self._position_with_loss_policy(data),
             "strength": data["strength"],
             "line_detected": data["line_detected"],
         }
@@ -861,7 +1096,7 @@ class LineSensorModule(BaseModule):
         if data is None:
             return None
         return {
-            "position": data["position"],
+            "position": self._position_with_loss_policy(data),
             "strength": data["strength"],
             "line_detected": data["line_detected"],
         }

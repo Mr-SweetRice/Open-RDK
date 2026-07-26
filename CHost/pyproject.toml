@@ -1,0 +1,40 @@
+[build-system]
+requires = [
+  "scikit-build-core>=0.10,<0.12",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "openrdkC"
+version = "0.1.0"
+description = "Optional native C host runtime for Open-RDK"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "See repository LICENSE" }
+authors = [
+  { name = "Open-RDK" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: C",
+  "Operating System :: POSIX :: Linux",
+]
+
+[tool.scikit-build]
+cmake.source-dir = "."
+wheel.packages = ["python/openrdkC"]
+build-dir = "build/{wheel_tag}"
+sdist.include = [
+  "CMakeLists.txt",
+  "include/**",
+  "src/**",
+  "python/**",
+  "tests/**",
+  "tools/**",
+  "README.md",
+  "STEP1.md",
+  "STEP3.md",
+  "IMPLEMENTATION.md",
+  "requirements-build.txt",
+  "requirements-system-debian.txt",
+]

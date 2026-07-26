@@ -256,6 +256,10 @@
     }
 
     elements.deviceSelect.disabled = false;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a distance sensor";
+    elements.deviceSelect.appendChild(placeholder);
     for (const device of state.devices) {
       const option = document.createElement("option");
       option.value = String(device.serial_number || "");
@@ -266,13 +270,10 @@
     }
 
     if (!state.devices.some((device) => device.serial_number === previous)) {
-      const online = state.devices.find((device) => isOnline(device));
-      state.selectedSerial = String(
-        online?.serial_number || state.devices[0].serial_number || "",
-      );
+      state.selectedSerial = "";
       resetViewState();
     }
-    elements.deviceSelect.value = state.selectedSerial;
+    elements.deviceSelect.value = state.selectedSerial || "";
     persistSelection();
     renderConnection();
   }

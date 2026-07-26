@@ -7,7 +7,6 @@ $env:PYTHONPATH="host/main/src"; python test/devices.py - WINDOWS
 """
 
 from __future__ import annotations
-from pdb import main
 import time
 from openrdk import CommsRuntime
 
@@ -23,6 +22,7 @@ def webview():
         openrdk.post("webview_complete")
         time.sleep(3)
         openrdk.list_devices(verbose="full")
+        
 
         input("\npress Enter to quit\n")
 
@@ -33,4 +33,4 @@ def webview():
         openrdk.stop()
 
 if __name__ == "__main__":
-    main()
+    webview()

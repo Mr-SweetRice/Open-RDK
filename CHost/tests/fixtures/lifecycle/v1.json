@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "normal_connect",
+      "events": ["udev_add", "open_ok", "hello_ack", "module_reply", "online"],
+      "states": ["DISCOVERED", "OPENING", "HANDSHAKE", "QUERY_MODULE", "ONLINE_CMD"]
+    },
+    {
+      "id": "disconnect_during_partial_frame",
+      "events": ["online", "rx_partial", "udev_remove"],
+      "states": ["ONLINE_TELEMETRY", "ONLINE_TELEMETRY", "REMOVED"],
+      "requirements": ["discard_partial_frame", "complete_pending_with_io_error", "close_fd"]
+    },
+    {
+      "id": "reconnect_new_node",
+      "events": ["io_hup", "backoff_elapsed", "udev_add_new_node", "open_ok", "hello_ack", "module_reply"],
+      "states": ["RECONNECT_WAIT", "OPENING", "OPENING", "HANDSHAKE", "QUERY_MODULE", "ONLINE_CMD"]
+    },
+    {
+      "id": "command_timeout",
+      "events": ["command_queued", "command_written", "deadline_elapsed"],
+      "states": ["ONLINE_CMD", "ONLINE_CMD", "ONLINE_CMD"],
+      "requirements": ["complete_once", "timeout_error", "queue_remains_usable"]
+    },
+    {
+      "id": "shutdown_with_pending_command",
+      "events": ["command_queued", "stop_requested", "event_loop_exit", "join", "destroy"],
+      "states": ["ONLINE_CMD", "STOPPING", "STOPPING", "STOPPING", "REMOVED"],
+      "requirements": ["pending_gets_shutting_down", "no_callback_after_destroy", "idempotent_stop"]
+    },
+    {
+      "id": "port_owned_by_standard_host",
+      "events": ["udev_add", "lock_failed"],
+      "states": ["DISCOVERED", "DISCOVERED"],
+      "requirements": ["device_busy_error", "do_not_open_or_steal_port"]
+    }
+  ]
+}
+

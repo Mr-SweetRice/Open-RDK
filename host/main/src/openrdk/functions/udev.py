@@ -465,7 +465,6 @@ def bootstrap_connected_devices(context: Any, db_path: str):
     _mark_all_devices_offline(db_path)
 
     boot_count = 0
-    monitor_targets: list[tuple[str | None, str | None]] = []
     for dev in context.list_devices(subsystem="tty"):
         if matches(dev):
             _update_registry(dev, STATUS_ONLINE_CONNECTED, db_path, link_live=False, link_status=LINK_STATUS_NOT_LIVE)
@@ -474,7 +473,27 @@ def bootstrap_connected_devices(context: Any, db_path: str):
             module_id = None
             node = _device_node(dev)
             serial_number = _extract_serial(dev)
-            if node:
+            known_message_type = None
+            known_module_type = None
+            if serial_number:
+                with _state._DB_LOCK:
+                    data = _load_db(db_path)
+                    known = _find_device_by_serial(data["devices"], serial_number)
+                    if known:
+                        known_message_type = _normalize_message_type_name(
+                            known.get("message_type")
+                        )
+                        known_module_type = _normalize_module_type(
+                            known.get("module_type") or known.get("firmware_module")
+                        )
+            skip_handshake_probe = bool(node) and (
+                known_message_type == MESSAGE_TYPE_CONTROL
+                or bool(
+                    known_module_type
+                    and known_module_type != DEFAULT_MODULE_TYPE
+                )
+            )
+            if node and not skip_handshake_probe:
                 link_live, module_type, module_id = _probe_link_via_handshake(
                     port=node, db_path=db_path, serial_number=serial_number,
                     baud=get_active_serial_baud(),
@@ -489,10 +508,14 @@ def bootstrap_connected_devices(context: Any, db_path: str):
                 module_type=reported_module_type, module_id=module_id,
             ):
                 boot_count += 1
-            monitor_targets.append((serial_number, node))
-
-    for serial_number, node in monitor_targets:
-        _start_keepalive_monitor(serial_number=serial_number, device_node=node, db_path=db_path)
+            # Start each monitor as soon as its device is bootstrapped. Waiting
+            # until every serial probe completes creates a startup window where
+            # the registry says "online" but no worker can service requests.
+            _start_keepalive_monitor(
+                serial_number=serial_number,
+                device_node=node,
+                db_path=db_path,
+            )
 
 
 def _run_windows_serial_loop(

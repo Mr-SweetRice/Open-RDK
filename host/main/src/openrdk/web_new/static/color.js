@@ -1,6 +1,8 @@
+const requestedSerial = new URLSearchParams(window.location.search).get("serial") || "";
+
 const state = {
   devices: [],
-  selectedSerial: null,
+  selectedSerial: requestedSerial || null,
   snapshot: null,
   calibration: null,
   profile: null,
@@ -78,6 +80,16 @@ function selectedDevice() {
     return null;
   }
   return state.devices.find((item) => item.serial_number === state.selectedSerial) || null;
+}
+
+function syncSelectedSerialInUrl() {
+  const url = new URL(window.location.href);
+  if (state.selectedSerial) {
+    url.searchParams.set("serial", state.selectedSerial);
+  } else {
+    url.searchParams.delete("serial");
+  }
+  window.history.replaceState({}, "", url);
 }
 
 function selectedModeKey() {
@@ -194,6 +206,10 @@ function renderDeviceSelect() {
   }
 
   elements.deviceSelect.disabled = false;
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select a color module";
+  elements.deviceSelect.appendChild(placeholder);
   for (const device of state.devices) {
     const option = document.createElement("option");
     option.value = device.serial_number;
@@ -204,9 +220,10 @@ function renderDeviceSelect() {
   if (previous && state.devices.some((item) => item.serial_number === previous)) {
     state.selectedSerial = previous;
   } else {
-    state.selectedSerial = state.devices[0].serial_number;
+    state.selectedSerial = null;
   }
-  elements.deviceSelect.value = state.selectedSerial;
+  elements.deviceSelect.value = state.selectedSerial || "";
+  syncSelectedSerialInUrl();
 }
 
 function renderSnapshot() {
@@ -815,6 +832,7 @@ async function initialize() {
 
 elements.deviceSelect.addEventListener("change", async (event) => {
   state.selectedSerial = String(event.target.value || "");
+  syncSelectedSerialInUrl();
   state.snapshot = null;
   state.profile = null;
   state.calibration = null;

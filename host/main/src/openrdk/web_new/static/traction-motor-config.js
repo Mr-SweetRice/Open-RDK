@@ -228,16 +228,22 @@
 
   async function resolveRelayDeviceSerial() {
     const urlSerial = new URLSearchParams(window.location.search).get("serial");
-    if (urlSerial) return urlSerial;
+    if (!urlSerial) {
+      throw new Error("No motor selected. Open this page from a traction module.");
+    }
     const response = await fetch("/api/devices");
     if (!response.ok) throw new Error("device list unavailable");
     const payload = await response.json();
     const devices = Array.isArray(payload.devices) ? payload.devices : [];
     const traction = devices.find((device) =>
+      String(device.serial_number || "") === urlSerial &&
       String(device.module_type || "").toLowerCase() === "traction_module" &&
       String(device.status || "").toLowerCase() === "online connected"
     );
-    return traction?.serial_number || null;
+    if (!traction) {
+      throw new Error(`Selected traction module is unavailable: ${urlSerial}`);
+    }
+    return traction.serial_number;
   }
 
   async function setRelayCmdMode(serial) {
@@ -246,31 +252,6 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message_type: "CMD" }),
     });
-  }
-
-  async function pauseHostSerialMonitors() {
-    try {
-      const response = await fetch("/api/serial-monitors/pause", { method: "POST" });
-      if (response.ok) await sleep(300);
-    } catch (_err) {
-      // Standalone/static use: no host monitor endpoint.
-    }
-  }
-
-  async function resumeHostSerialMonitors() {
-    try {
-      await fetch("/api/serial-monitors/resume", { method: "POST" });
-    } catch (_err) {
-      // Standalone/static use: no host monitor endpoint.
-    }
-  }
-
-  function resumeHostSerialMonitorsForUnload() {
-    try {
-      navigator.sendBeacon("/api/serial-monitors/resume", "");
-    } catch (_err) {
-      // ignore
-    }
   }
 
   function bridgeLabelFromValue(value) {

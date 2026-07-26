@@ -60,6 +60,23 @@
   }
 })();
 
+// Keep the selected module identity while moving between configuration subpages.
+(function () {
+  const serial = new URLSearchParams(window.location.search).get("serial");
+  if (!serial) return;
+  const scopedPaths = new Set([
+    "/traction-pid-tuner",
+    "/traction-position-tuner",
+    "/traction-motor-config",
+  ]);
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    const url = new URL(anchor.href, window.location.origin);
+    if (!scopedPaths.has(url.pathname)) continue;
+    url.searchParams.set("serial", serial);
+    anchor.href = url.pathname + url.search + url.hash;
+  }
+})();
+
 
 // ---- Contextual tools rail on the host page ----
 (function () {
@@ -94,29 +111,29 @@
     const cls = avatar ? avatar.className : "";
     let tools = [];
     let title = "Tools";
+    const serial = selected.querySelector(".serial")?.textContent?.trim() || "";
+    const serialQuery = "?serial=" + encodeURIComponent(serial);
     if (cls.includes("kind-traction")) {
       title = "Traction Tools";
       tools = [
-        ['/traction-pid-tuner',      'Speed Tuner',  ICON_SPEED],
-        ['/traction-position-tuner', 'Position',     ICON_TARGET],
-        ['/traction-motor-config',   'Motor Config', ICON_GEAR],
+        ['/traction-pid-tuner' + serialQuery,      'Speed Tuner',  ICON_SPEED],
+        ['/traction-position-tuner' + serialQuery, 'Position',     ICON_TARGET],
+        ['/traction-motor-config' + serialQuery,   'Motor Config', ICON_GEAR],
       ];
     } else if (cls.includes("kind-line")) {
       title = "Sensor Tools";
-      const serial = selected.querySelector(".serial")?.textContent?.trim() || "";
       tools = [
-        ['/line-sensor?serial=' + encodeURIComponent(serial), 'Live Monitor', ICON_LINE],
+        ['/line-sensor' + serialQuery, 'Live Monitor', ICON_LINE],
       ];
     } else if (cls.includes("kind-distance")) {
       title = "Sensor Tools";
-      const serial = selected.querySelector(".serial")?.textContent?.trim() || "";
       tools = [
-        ['/distance-sensor?serial=' + encodeURIComponent(serial), 'Distance Monitor', ICON_DISTANCE],
+        ['/distance-sensor' + serialQuery, 'Distance Monitor', ICON_DISTANCE],
       ];
     } else if (cls.includes("kind-color")) {
       title = "Color Tools";
       tools = [
-        ['/color', 'Color Studio', ICON_COLOR],
+        ['/color' + serialQuery, 'Color Studio', ICON_COLOR],
       ];
     } else {
       railTools.hidden = true;

@@ -374,17 +374,8 @@
     setInterval(poll, 100);
     poll(); // immediate first fetch
 
-    // --- streaming: re-affirm every 3 s, only when device is live ---
-    async function startStream() {
-      if (!serial || !deviceLive) return;
-      try {
-        await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/start`, { method: "POST" });
-      } catch (_) {}
-    }
-    setTimeout(startStream, 600);
-    setInterval(startStream, 3000);
-
-    // --- device live check: runs before first stream attempt ---
+    // The runtime owns telemetry. This page only observes its cached frames.
+    // --- device live check ---
     setDeviceLive(false); // start as not live until confirmed
     checkDeviceStatus();
     setInterval(checkDeviceStatus, 3000);

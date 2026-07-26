@@ -1,0 +1,9 @@
+build/
+dist/
+.venv/
+*.egg-info/
+__pycache__/
+*.py[cod]
+*.so
+compile_commands.json
+

@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "protocol": {
+    "sync_hex": "aa55aa55",
+    "max_payload": 200,
+    "sequence_bytes": 3,
+    "message_types": {"CMD": 1, "TEST": 2, "TELEMETRY": 3, "CONTROL": 4}
+  },
+  "control_frames": [
+    {
+      "id": "host_hello",
+      "direction": "tx",
+      "hex": "aa55aa550001"
+    },
+    {
+      "id": "traction_hello_ack",
+      "direction": "rx",
+      "hex": "aa55aa551106"
+    },
+    {
+      "id": "host_module_query",
+      "direction": "tx",
+      "hex": "aa55aa550004"
+    },
+    {
+      "id": "color_module_query_response",
+      "direction": "rx",
+      "hex": "aa55aa5513050c636f6c6f725f6d6f64756c65"
+    }
+  ],
+  "stream_frames": [
+    {
+      "id": "traction_get_pid_rpm",
+      "module_type": "traction_module",
+      "message_type": "CMD",
+      "sequence": 1,
+      "payload_utf8": "GET PID RPM",
+      "frame_hex": "aa55aa550b474554205049442052504d01000001"
+    },
+    {
+      "id": "traction_pid_rpm_response",
+      "module_type": "traction_module",
+      "message_type": "CMD",
+      "sequence": 1,
+      "payload_utf8": "P,1.0000,0.1000,0.0100,50.0000"
+    },
+    {
+      "id": "traction_control_output",
+      "module_type": "traction_module",
+      "message_type": "CONTROL",
+      "sequence": 2,
+      "payload_utf8": "SET OUT 35"
+    },
+    {
+      "id": "line_sensor_data",
+      "module_type": "line_sensor_module",
+      "message_type": "TELEMETRY",
+      "sequence": 258,
+      "payload_utf8": "LS,100,200,300,400,500,0.1000,0.2000,0.9000,0.2000,0.1000,0,0,1,0,0,0.0000,0.9000,1,0,0"
+    },
+    {
+      "id": "line_sensor_cfg",
+      "module_type": "line_sensor_module",
+      "message_type": "CMD",
+      "sequence": 259,
+      "payload_utf8": "CFG,0,0.4500,0.2000,3000,line"
+    },
+    {
+      "id": "color_data",
+      "module_type": "color_module",
+      "message_type": "TELEMETRY",
+      "sequence": 65537,
+      "payload_utf8": "TEL,8,7,875,7,875,3,100,5,50,100,200,300,400,167,333,500,6123,-456,789,555,4,24,2,1,0,1,-1,0,123456"
+    },
+    {
+      "id": "color_cfg",
+      "module_type": "color_module",
+      "message_type": "CMD",
+      "sequence": 65538,
+      "payload_utf8": "CFG,color,50,2,1,4,24,1,750,400,8,32"
+    },
+    {
+      "id": "distance_data",
+      "module_type": "distance_sensor_module",
+      "message_type": "TELEMETRY",
+      "sequence": 16777215,
+      "payload_utf8": "DS,425,1,0,50,4000,5,0,123456"
+    },
+    {
+      "id": "sequence_wrap",
+      "module_type": "distance_sensor_module",
+      "message_type": "TELEMETRY",
+      "sequence": 0,
+      "payload_utf8": "DS,426,1,0,50,4000,5,0,123506"
+    }
+  ],
+  "malformed_cases": [
+    {
+      "id": "noise_before_sync",
+      "input_hex": "0001027faa55aa55034f4b2101000001",
+      "expected": "resynchronize_and_emit_one"
+    },
+    {
+      "id": "partial_sync",
+      "chunks_hex": ["00aa55", "aa", "55034f4b2101000001"],
+      "expected": "buffer_then_emit_one"
+    },
+    {
+      "id": "zero_length",
+      "input_hex": "aa55aa5500",
+      "expected": "reject_and_resynchronize"
+    },
+    {
+      "id": "length_above_max",
+      "input_hex": "aa55aa55c9",
+      "expected": "reject_and_resynchronize"
+    },
+    {
+      "id": "truncated_payload",
+      "input_hex": "aa55aa550a414243",
+      "expected": "retain_partial_no_emit"
+    },
+    {
+      "id": "unknown_message_type",
+      "input_hex": "aa55aa55024f4bff000001",
+      "expected": "reject_unknown_type"
+    },
+    {
+      "id": "duplicate_sequence",
+      "payload_utf8": "OK",
+      "message_type": "CMD",
+      "sequences": [42, 42],
+      "expected": "detect_duplicate_without_crash"
+    }
+  ]
+}
+

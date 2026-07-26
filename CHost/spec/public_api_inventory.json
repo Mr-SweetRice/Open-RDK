@@ -1,0 +1,1193 @@
+{
+  "files": {
+    "modules.py": {
+      "BaseModule": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "module_type",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "status",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "is_online",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "refresh",
+            "positional": [
+              "self",
+              "snapshot"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "send_raw_cmd",
+            "positional": [
+              "self",
+              "command",
+              "timeout_sec",
+              "retries",
+              "retry_delay_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "send_raw_control",
+            "positional": [
+              "self",
+              "command",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "send_raw_traction",
+            "positional": [
+              "self",
+              "command",
+              "timeout_sec"
+            ]
+          }
+        ],
+        "properties": [
+          "is_online",
+          "module_type",
+          "status"
+        ]
+      },
+      "ColorSensorModule": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_data",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_color",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_info",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_calibration",
+            "positional": [
+              "self",
+              "palette_mode",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_calibration_patch",
+            "positional": [
+              "self",
+              "slot",
+              "palette_mode",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "run_selftest",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_config",
+            "positional": [
+              "self",
+              "field",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "save_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "reset_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "start_calibration",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop_calibration",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "select_calibration_patch",
+            "positional": [
+              "self",
+              "slot",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "commit_calibration_patch",
+            "positional": [
+              "self",
+              "slot",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "save_calibration",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "reset_calibration",
+            "positional": [
+              "self",
+              "palette_mode",
+              "timeout_sec"
+            ]
+          }
+        ],
+        "properties": []
+      },
+      "DistanceSensorModule": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "decode_health_flags",
+            "positional": [
+              "cls",
+              "value"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_data",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "read",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_distance_mm",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_distance_cm",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_distance",
+            "positional": [
+              "self",
+              "unit",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_info",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_name",
+            "positional": [
+              "self",
+              "name",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_sample_period_ms",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_sample_period",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_max_distance_mm",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_max_distance",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_filter_window",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "save_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "reset_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "run_selftest",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "selftest",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "start_telemetry",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop_telemetry",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "start_streaming",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop_streaming",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_latest_data",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_latest_distance",
+            "positional": [
+              "self",
+              "unit"
+            ]
+          }
+        ],
+        "properties": []
+      },
+      "LineSensorModule": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "lost_position_mode",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_lost_position_mode",
+            "positional": [
+              "self",
+              "mode"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_data",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_values",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_raw",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_position",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_info",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_calibration",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_track_type",
+            "positional": [
+              "self",
+              "track_type",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_digital_threshold",
+            "positional": [
+              "self",
+              "threshold",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_detect_threshold",
+            "positional": [
+              "self",
+              "threshold",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_calibration_time",
+            "positional": [
+              "self",
+              "duration_ms",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_name",
+            "positional": [
+              "self",
+              "name",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "save_config",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "calibrate",
+            "positional": [
+              "self",
+              "duration_ms",
+              "timeout_sec",
+              "wait"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop_calibration",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "save_calibration",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "start_telemetry",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop_telemetry",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "start_streaming",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop_streaming",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_latest_data",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_latest_values",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_latest_position",
+            "positional": [
+              "self"
+            ]
+          }
+        ],
+        "properties": [
+          "lost_position_mode"
+        ]
+      },
+      "Motors": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "names",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "move",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec",
+              "duration",
+              "join"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "move_angle",
+            "positional": [
+              "self",
+              "angle_deg",
+              "timeout_sec",
+              "join"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "join",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "run_together",
+            "positional": [
+              "self"
+            ]
+          }
+        ],
+        "properties": [
+          "names"
+        ]
+      },
+      "TractionModule": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "join",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "move",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec",
+              "duration"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "forward",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "backward",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "forward_raw",
+            "positional": [
+              "self",
+              "value",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_position_telemetry",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_position_pid",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "move_angle",
+            "positional": [
+              "self",
+              "angle_deg",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "move_angle_forward",
+            "positional": [
+              "self",
+              "angle_deg",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "move_angle_backward",
+            "positional": [
+              "self",
+              "angle_deg",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "set_pid_rpm",
+            "positional": [
+              "self",
+              "kp",
+              "ki",
+              "kd",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_pid_rpm",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          }
+        ],
+        "properties": []
+      }
+    },
+    "ordk_runtime.py": {
+      "CommsRuntime": {
+        "methods": [
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "db_path",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "comms_log_path",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "is_running",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "webview_enabled",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "webview_updates_enabled",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "is_webview_running",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "webview_url",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "mdns_url",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "last_error",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "last_webview_error",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "start",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "ensure_running",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "stop",
+            "positional": [
+              "self",
+              "timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "list_devices",
+            "positional": [
+              "self",
+              "verbose"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_device",
+            "positional": [
+              "self",
+              "serial_number"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "require_device",
+            "positional": [
+              "self",
+              "serial_number",
+              "wait_timeout_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "wait_online",
+            "positional": [
+              "self",
+              "serial_number",
+              "timeout_sec",
+              "stable_sec"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "lan_ip",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "post",
+            "positional": [
+              "self",
+              "post_option"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "find_device_by_serial",
+            "positional": [
+              "self",
+              "serial"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "find_device_by_name",
+            "positional": [
+              "self",
+              "name"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "get_serial_by_name",
+            "positional": [
+              "self",
+              "name"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "rename_device",
+            "positional": [
+              "self",
+              "serial",
+              "name"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "module",
+            "positional": [
+              "self",
+              "serial_number"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "supported_firmware_types",
+            "positional": [
+              "self"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "flash_firmware",
+            "positional": [
+              "self",
+              "serial_number",
+              "firmware_type",
+              "baud",
+              "on_output"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "flash_firmware_by_port",
+            "positional": [
+              "self",
+              "device_node",
+              "firmware_type",
+              "baud",
+              "on_output"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "traction",
+            "positional": [
+              "self",
+              "serial_number"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "motors",
+            "positional": [
+              "self",
+              "motors",
+              "inverted"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "line_sensor",
+            "positional": [
+              "self",
+              "serial_number"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "distance_sensor",
+            "positional": [
+              "self",
+              "serial_number"
+            ]
+          },
+          {
+            "is_async": false,
+            "keyword_only": [],
+            "name": "color_sensor",
+            "positional": [
+              "self",
+              "serial_number"
+            ]
+          }
+        ],
+        "properties": [
+          "comms_log_path",
+          "db_path",
+          "is_running",
+          "is_webview_running",
+          "lan_ip",
+          "last_error",
+          "last_webview_error",
+          "mdns_url",
+          "supported_firmware_types",
+          "webview_enabled",
+          "webview_updates_enabled",
+          "webview_url"
+        ]
+      }
+    }
+  },
+  "schema_version": 1,
+  "source": "standard-host-read-only"
+}

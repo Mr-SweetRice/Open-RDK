@@ -16,6 +16,7 @@ from .functions import (
     get_device_snapshot,
     list_device_snapshots,
     run_conex_loop,
+    set_device_telemetry_requested,
     set_device_name,
     stop_all_keepalive_monitors,
 )
@@ -301,6 +302,30 @@ class CommsRuntime:
                 http_redirect.stop()
             except Exception:
                 pass
+        telemetry_serials = [
+            str(device.get("serial_number") or "")
+            for device in list_device_snapshots(self._db_path)
+            if bool(device.get("telemetry_requested"))
+        ]
+        for serial_number in telemetry_serials:
+            if serial_number:
+                set_device_telemetry_requested(
+                    db_path=self._db_path,
+                    serial_number=serial_number,
+                    enabled=False,
+                )
+        telemetry_stop_deadline = time.monotonic() + min(
+            0.75, max(0.1, float(timeout_sec))
+        )
+        while telemetry_serials and time.monotonic() < telemetry_stop_deadline:
+            active_serials = {
+                str(device.get("serial_number") or "")
+                for device in list_device_snapshots(self._db_path)
+                if bool(device.get("telemetry_active"))
+            }
+            if not active_serials.intersection(telemetry_serials):
+                break
+            time.sleep(0.01)
         stop_all_keepalive_monitors()
         if thread and thread.is_alive():
             thread.join(max(0.1, float(timeout_sec)))
@@ -452,14 +477,22 @@ class CommsRuntime:
             from .modules import TractionModule
 
             return TractionModule(self, serial_number=serial_number, snapshot=snapshot)
+
         if module_type == "line_sensor_module":
             from .modules import LineSensorModule
 
             return LineSensorModule(self, serial_number=serial_number, snapshot=snapshot)
+
+        if module_type == "color_module":
+            from .modules import ColorSensorModule
+
+            return ColorSensorModule(self, serial_number=serial_number, snapshot=snapshot)
+
         if module_type == "distance_sensor_module":
             from .modules import DistanceSensorModule
 
             return DistanceSensorModule(self, serial_number=serial_number, snapshot=snapshot)
+
         raise UnsupportedModuleTypeError(
             f"unsupported module_type '{module_type or 'unknown'}' for {serial_number}"
         )
@@ -536,6 +569,16 @@ class CommsRuntime:
         from .modules import DistanceSensorModule
 
         return DistanceSensorModule(
+            self,
+            serial_number=serial_number,
+            snapshot=self.require_device(serial_number),
+        )
+    def color_sensor(self, serial_number: str):
+        """Return the typed SDK wrapper for a ``color_module`` device."""
+        self.ensure_running()
+        from .modules import ColorSensorModule
+
+        return ColorSensorModule(
             self,
             serial_number=serial_number,
             snapshot=self.require_device(serial_number),

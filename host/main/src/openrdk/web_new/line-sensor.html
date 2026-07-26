@@ -380,21 +380,6 @@
         if (!r.ok) { setDeviceLive(false); return; }
         const d = await r.json();
         const devices = Array.isArray(d.devices) ? d.devices : [];
-        if (!serial) {
-          const selected = devices.find(dev =>
-            String(dev.module_type || "").toLowerCase() === "line_sensor_module" &&
-            String(dev.status || "").toLowerCase().includes("online")
-          ) || devices.find(dev =>
-            String(dev.module_type || "").toLowerCase() === "line_sensor_module"
-          );
-          serial = selected?.serial_number || "";
-          if ($("hdSerial")) $("hdSerial").textContent = serial || "no line sensor";
-          if (serial && !new URLSearchParams(window.location.search).get("serial")) {
-            const url = new URL(window.location.href);
-            url.searchParams.set("serial", serial);
-            window.history.replaceState(null, "", url);
-          }
-        }
         const device = devices.find(dev => dev.serial_number === serial);
         if ($("hdSerial")) $("hdSerial").textContent = serial || "no line sensor";
         const live = !!(device && String(device.status || "").toLowerCase().includes("online"));
@@ -621,17 +606,8 @@
     setInterval(poll, 20);
     poll(); // immediate first fetch
 
-    // --- streaming: re-affirm every 3 s, only when device is live ---
-    async function startStream() {
-      if (!serial || !deviceLive) return;
-      try {
-        await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/start`, { method: "POST" });
-      } catch (_) {}
-    }
-    setTimeout(startStream, 600);
-    setInterval(startStream, 3000);
-
-    // --- device live check: runs before first stream attempt ---
+    // The runtime owns telemetry. This page only observes its cached frames.
+    // --- device live check ---
     setDeviceLive(false); // start as not live until confirmed
     checkDeviceStatus();
     setInterval(checkDeviceStatus, 3000);
@@ -713,6 +689,6 @@
       }
     });
   </script>
-      <script src="static/shell.js?v=20260518o"></script>
+      <script src="static/shell.js?v=20260729-serial-scope1"></script>
   </body>
 </html>

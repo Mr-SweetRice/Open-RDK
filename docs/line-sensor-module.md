@@ -32,6 +32,15 @@ print(info["response"])
 
 ---
 
+### `get_version(timeout_sec=1.5) â†’ str`
+Send `GET VERSION` in CMD mode and return the semantic firmware version.
+
+```python
+print(sensor.get_version())  # 1.0.0
+```
+
+---
+
 ### `get_data(timeout_sec=1.5) → dict`
 Send `GET DATA` in CMD mode. Returns a single sensor reading snapshot.
 
@@ -50,6 +59,7 @@ The host relay web UI sends these line-sensor commands in `CMD` mode:
 |---------|---------|
 | `GET CFG` | Read track type, thresholds, and calibration time |
 | `GET CAL` | Read per-sensor calibration min/max values |
+| `GET VERSION` | Read the semantic firmware version |
 | `SET CFG TRACK <0|1>` | Select line/track polarity |
 | `SET CFG DIGITAL_TH <float>` | Set digital threshold |
 | `SET CFG DETECT_TH <float>` | Set line detection threshold |

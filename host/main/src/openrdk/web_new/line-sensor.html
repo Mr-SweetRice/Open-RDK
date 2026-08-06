@@ -29,13 +29,15 @@
 
     /* notLive banner */
     #notLiveBanner {
-      margin: 0 0 14px;
+      margin: 0 22px 14px;
       padding: 12px 16px;
       border-radius: var(--r-lg);
       border: 1px solid rgba(242,139,130,0.3);
       background: var(--danger-soft);
       color: var(--danger);
       font-size: 13px;
+      text-align: center;
+      box-shadow: var(--shadow-sm);
     }
 
     .summary {
@@ -157,10 +159,6 @@
       line-height: 1.6;
     }
 
-    .row {
-      display: flex; gap: 8px; align-items: center;
-      margin: 10px 0; flex-wrap: wrap;
-    }
     .control-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -189,6 +187,19 @@
       padding: 9px 10px;
       font: inherit;
       letter-spacing: 0;
+    }
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .action-grid button {
+      width: 100%;
+      min-height: 40px;
+    }
+    .action-grid .action-wide {
+      grid-column: 1 / -1;
     }
     .cal-input {
       max-width: 96px;
@@ -236,18 +247,17 @@
             <h2 id="hdTitle">Line Sensor Monitor</h2>
             <div class="toolbar-status">
               <span class="badge" id="hdSerial">no serial</span>
-              <span class="badge nodata" id="deviceBadge">not live</span>
               <span class="badge nodata" id="statusBadge">no data</span>
               <span class="badge" id="rateBadge">0 Hz</span>
             </div>
           </div>
         </header>
-        <div class="stage-body">
-<div id="notLiveBanner" style="display:block; margin:10px 20px 0; padding:8px 14px; border-radius:8px; border:1px solid rgba(239,68,68,.3); background:rgba(239,68,68,.08); color:#ef4444; font-size:13px;">
-    Device not connected — view only. Streaming and Refresh Config are disabled until the device comes online.
-  </div>
+        <div id="notLiveBanner">
+          Device not connected — view only. Controls are disabled until the device comes online.
+        </div>
 
-  <div class="layout">
+        <div class="stage-body">
+          <div class="layout">
     <div class="panel">
       <div class="summary">
         <div class="metric"><div class="label">Position</div><div class="value" id="posVal">—</div></div>
@@ -256,7 +266,6 @@
       </div>
 
       <div class="position-wrap">
-        <span class="muted">Position  (&#8722;1 left &rarr; 0 center &rarr; +1 right)</span>
         <div class="position-track">
           <div class="position-center"></div>
           <div class="position-dot" id="posDot" style="left:50%;opacity:.25;"></div>
@@ -284,13 +293,6 @@
     </div>
 
     <div class="panel">
-      <div class="row">
-        <button id="refreshBtn" class="primary" data-live-control>Refresh Config</button>
-      </div>
-      <p class="hint">
-        Live readout runs at 50 Hz when telemetry is active.
-      </p>
-
       <div class="cfg-box">
         <div class="cfg-title">Track / Calibration</div>
         <div class="control-grid">
@@ -310,17 +312,13 @@
             <input id="detectThresholdInput" type="number" min="0.05" max="0.95" step="0.01" value="0.20" data-live-control>
           </label>
         </div>
-        <div class="row">
+        <div class="action-grid">
           <button id="darkTrackBtn" data-live-control>Dark Track</button>
           <button id="lightTrackBtn" data-live-control>Light Track</button>
-        </div>
-        <div class="row">
-          <button id="applyConfigBtn" class="primary" data-live-control>Apply Config</button>
+          <button id="applyConfigBtn" class="primary action-wide" data-live-control>Apply Config</button>
           <button id="startCalBtn" data-live-control>Start Calibration</button>
           <button id="stopCalBtn" data-live-control>Stop Calibration</button>
-        </div>
-        <div class="row">
-          <button id="saveCalBtn" data-live-control>Save Min / Max</button>
+          <button id="saveCalBtn" class="action-wide" data-live-control>Save Min / Max</button>
         </div>
         <div class="config-status" id="configActionStatus"></div>
       </div>
@@ -328,9 +326,7 @@
       <div class="cfg-box">
         <div class="cfg-title">Device</div>
         <div class="cfg-row"><span class="k">Name</span><span class="v" id="cfgName">—</span></div>
-        <div class="cfg-row"><span class="k">Status</span><span class="v" id="cfgStatus">—</span></div>
-        <div class="cfg-row"><span class="k">Link</span><span class="v" id="cfgLink">—</span></div>
-        <div class="cfg-row"><span class="k">Calibrating</span><span class="v" id="cfgCaling">—</span></div>
+        <div class="cfg-row"><span class="k">Module Version</span><span class="v" id="cfgVersion">—</span></div>
       </div>
 
       <div class="cfg-box">
@@ -355,21 +351,27 @@
     let resolvingDevice = false;
     let configBusy = false;
     let configSnapshotLoaded = false;
-    let configRefreshInFlight = false;
-    let lastConfigRefreshAt = 0;
+    let configPollInFlight = false;
+    let deviceRefreshInFlight = false;
+    let deviceRefreshNeeded = true;
+    let streamStartRequested = false;
 
     function setDeviceLive(live) {
       deviceLive = live;
       const banner = document.getElementById("notLiveBanner");
-      const badge = document.getElementById("deviceBadge");
       if (banner) banner.style.display = live ? "none" : "block";
       document.querySelectorAll("[data-live-control]").forEach((el) => {
         el.disabled = !live || configBusy;
       });
-      if (badge) {
-        badge.textContent = live ? "live" : "not live";
-        badge.className = live ? "badge live" : "badge nodata";
+      if (!live) {
+        configSnapshotLoaded = false;
+        deviceRefreshNeeded = true;
+        streamStartRequested = false;
+        updateCount = 0;
+        rateDisplay = 0;
+        if ($("rateBadge")) $("rateBadge").textContent = "0 Hz";
       }
+      updateBadge();
     }
 
     async function checkDeviceStatus() {
@@ -384,8 +386,19 @@
         if ($("hdSerial")) $("hdSerial").textContent = serial || "no line sensor";
         const live = !!(device && String(device.status || "").toLowerCase().includes("online"));
         setDeviceLive(live);
+        if (live && serial && deviceRefreshNeeded) {
+          await refreshDeviceDetails();
+        }
+        if (live && serial && !streamStartRequested) {
+          streamStartRequested = true;
+          try {
+            await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/start`, {});
+          } catch (_) {
+            streamStartRequested = false;
+          }
+        }
         if (live && serial && !configSnapshotLoaded) {
-          void refreshLineSensorConfig({ silent: true });
+          void pollConfigSnapshot();
         }
       } catch (_) {
         setDeviceLive(false);
@@ -456,11 +469,12 @@
       };
     }
 
-    async function applyConfig(overrides = {}) {
+    async function applyConfig(overrides = {}, partial = false) {
       if (!serial || !deviceLive) return;
       setConfigBusy(true, "Applying configuration...");
       try {
-        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/config`, collectConfigPayload(overrides));
+        const payload = partial ? { ...overrides, save: true } : collectConfigPayload(overrides);
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/config`, payload);
         await poll();
         configActionStatus.textContent = "Configuration saved.";
       } catch (err) {
@@ -479,9 +493,14 @@
 
     // --- status badge ---
     function updateBadge() {
-      const age = Date.now() - lastDataAt;
       const b = $("statusBadge");
       if (!b) return;
+      if (!deviceLive) {
+        b.textContent = "offline";
+        b.className = "badge nodata";
+        return;
+      }
+      const age = Date.now() - lastDataAt;
       if (lastDataAt === 0)       { b.textContent = "no data";    b.className = "badge nodata"; }
       else if (age < 2500)        { b.textContent = "live";       b.className = "badge live";   }
       else if (age < 10000)       { b.textContent = "stale";      b.className = "badge stale";  }
@@ -501,8 +520,6 @@
       const pos   = parseFloat(parts[16]);
       const str   = parseFloat(parts[17]);
       const det   = parseInt(parts[18]) === 1;
-      const cal   = parseInt(parts[19]) === 1;
-      const remMs = parseInt(parts[20]);
 
       raw.forEach((v, i)   => { raws[i].textContent = isFinite(v) ? v : "—"; });
       value.forEach((v, i) => {
@@ -526,7 +543,6 @@
       $("posDot").style.left    = `${((cp + 1) / 2) * 100}%`;
       $("posDot").style.opacity = det ? "1" : "0.25";
 
-      $("cfgCaling").textContent = cal ? `yes (${remMs} ms)` : "no";
     }
 
     function applyCFG(parts) {
@@ -559,8 +575,7 @@
       configSnapshotLoaded = true;
       const name = parts[2] || "";
       if (name) { $("hdTitle").textContent = `${name} Monitor`; $("cfgName").textContent = name; }
-      $("cfgStatus").textContent = parts[3] || "—";
-      $("cfgLink").textContent   = parts[10] || "—";
+      $("cfgVersion").textContent = parts[13] || "—";
     }
 
     function handleMessage(msg) {
@@ -571,13 +586,12 @@
     }
 
     // --- polling: primary data source ---
-    // Reads latest LS / CFG / CAL / INFO from the in-memory broker history.
-    // Works whenever robot is running (CMD mode GET DATA responses flow through).
+    // Reads only the latest LS frame from the host-side telemetry cache.
     let lastLsMsg = "";
     let pollInFlight = false;
 
     async function poll() {
-      if (!serial) return;
+      if (!serial || !deviceLive) return;
       if (pollInFlight) return;
       pollInFlight = true;
       try {
@@ -590,12 +604,6 @@
           lastLsMsg = d.ls;
           handleMessage(d.ls);
         }
-        if (d.cfg)  handleMessage(d.cfg);
-        if (d.cal)  handleMessage(d.cal);
-        if (d.info) handleMessage(d.info);
-        if (!configSnapshotLoaded && deviceLive && Date.now() - lastConfigRefreshAt > 3000) {
-          void refreshLineSensorConfig({ silent: true });
-        }
       } catch (_) {
       } finally {
         pollInFlight = false;
@@ -606,46 +614,59 @@
     setInterval(poll, 20);
     poll(); // immediate first fetch
 
-    // The runtime owns telemetry. This page only observes its cached frames.
+    // Start telemetry automatically once the selected device is online. The
+    // page then observes the runtime-owned cached frames.
     // --- device live check ---
     setDeviceLive(false); // start as not live until confirmed
     checkDeviceStatus();
-    setInterval(checkDeviceStatus, 3000);
+    setInterval(checkDeviceStatus, 500);
 
-    async function refreshLineSensorConfig(options = {}) {
-      const silent = !!options.silent;
-      if (!serial || !deviceLive || configRefreshInFlight) return;
-      configRefreshInFlight = true;
-      lastConfigRefreshAt = Date.now();
-      if (!silent) setConfigBusy(true, "Refreshing configuration...");
+    async function refreshDeviceDetails() {
+      if (!serial || !deviceLive || deviceRefreshInFlight || !deviceRefreshNeeded) return;
+      deviceRefreshInFlight = true;
       try {
         const result = await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/refresh`, {});
         (result.results || []).forEach((item) => {
           if (item && item.response) handleMessage(String(item.response));
         });
-        await poll();
+        deviceRefreshNeeded = false;
         configSnapshotLoaded = true;
-        if (!silent) configActionStatus.textContent = "Configuration refreshed.";
-      } catch (err) {
-        if (!silent) configActionStatus.textContent = `Refresh failed: ${err.message || err}`;
+      } catch (_) {
+        deviceRefreshNeeded = true;
       } finally {
-        configRefreshInFlight = false;
-        if (!silent) setConfigBusy(false, configActionStatus.textContent);
+        deviceRefreshInFlight = false;
       }
     }
 
-    // --- refresh button ---
-    $("refreshBtn").addEventListener("click", () => {
-      void refreshLineSensorConfig();
-    });
+    async function pollConfigSnapshot() {
+      if (!serial || !deviceLive || configPollInFlight) return;
+      configPollInFlight = true;
+      try {
+        const r = await fetch(`/api/devices/${encodeURIComponent(serial)}/line-sensor/snapshot`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.cfg)  handleMessage(d.cfg);
+        if (d.cal)  handleMessage(d.cal);
+        if (d.info) handleMessage(d.info);
+      } catch (_) {
+      } finally {
+        configPollInFlight = false;
+      }
+    }
+
+    // Refresh only cached configuration state. This never switches the serial
+    // protocol out of TELEMETRY mode, so the 50 Hz stream remains continuous.
+    setInterval(() => {
+      void pollConfigSnapshot();
+    }, 250);
     $("applyConfigBtn").addEventListener("click", () => void applyConfig());
     $("darkTrackBtn").addEventListener("click", () => {
       trackTypeSelect.value = "0";
-      void applyConfig({ track_type: 0 });
+      void applyConfig({ track_type: 0 }, true);
     });
     $("lightTrackBtn").addEventListener("click", () => {
       trackTypeSelect.value = "1";
-      void applyConfig({ track_type: 1 });
+      void applyConfig({ track_type: 1 }, true);
     });
     $("startCalBtn").addEventListener("click", async () => {
       if (!serial || !deviceLive) return;

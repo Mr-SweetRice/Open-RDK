@@ -290,8 +290,9 @@ static bool format_info_snapshot(char *out, size_t out_len)
     sanitize_text_field(state.name, sizeof(state.name));
     sanitize_text_field(state.module_type, sizeof(state.module_type));
     sanitize_text_field(state.firmware_module, sizeof(state.firmware_module));
+    sanitize_text_field(state.firmware_version, sizeof(state.firmware_version));
 
-    snprintf(out, out_len, "INFO,%s,%s,%s,%s,%s,%s,%lu,%s,%u,%s,%s,%s",
+    snprintf(out, out_len, "INFO,%s,%s,%s,%s,%s,%s,%lu,%s,%u,%s,%s,%s,%s",
              serial_number,
              state.name,
              status,
@@ -303,7 +304,19 @@ static bool format_info_snapshot(char *out, size_t out_len)
              s_link_active ? 1U : 0U,
              link_status,
              last_event_at,
-             last_link_check_at);
+             last_link_check_at,
+             state.firmware_version);
+    return true;
+}
+
+static bool format_version_snapshot(char *out, size_t out_len)
+{
+    ls_comm_info_state_t state = {0};
+    if (!out || out_len == 0U || !get_info_snapshot(&state)) {
+        return false;
+    }
+    sanitize_text_field(state.firmware_version, sizeof(state.firmware_version));
+    snprintf(out, out_len, "VERSION,%s", state.firmware_version);
     return true;
 }
 
@@ -330,6 +343,8 @@ static bool try_apply_line_sensor_command(const char *line, char *response_out, 
         ok = format_cal_snapshot(response_out, response_out_len);
     } else if (strcmp(line, "GET INFO") == 0) {
         ok = format_info_snapshot(response_out, response_out_len);
+    } else if (strcmp(line, "GET VERSION") == 0) {
+        ok = format_version_snapshot(response_out, response_out_len);
     } else if (strcmp(line, "START CAL") == 0) {
         if (s_cfg.start_calibration) {
             s_cfg.start_calibration(s_cfg.ctx);

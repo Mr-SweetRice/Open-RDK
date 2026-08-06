@@ -457,6 +457,7 @@ def create_webview_app(
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_new")
     broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
     color_command_locks: dict[str, asyncio.Lock] = {}
+    line_sensor_command_locks: dict[str, asyncio.Lock] = {}
     distance_command_locks: dict[str, asyncio.Lock] = {}
 
     app.state.db_path = db_path
@@ -659,6 +660,42 @@ def create_webview_app(
             commands.append("SAVE CFG")
         return commands
 
+    def _line_sensor_command_lock(serial_number: str) -> asyncio.Lock:
+        lock = line_sensor_command_locks.get(serial_number)
+        if lock is None:
+            lock = asyncio.Lock()
+            line_sensor_command_locks[serial_number] = lock
+        return lock
+
+    async def _ensure_line_sensor_stream(serial_number: str) -> None:
+        """Reassert streaming after a command without delaying the UI action."""
+        await asyncio.sleep(0.35)
+        async with _line_sensor_command_lock(serial_number):
+            device = next(
+                (
+                    item for item in _load_devices(db_path)
+                    if item.get("serial_number") == serial_number
+                ),
+                None,
+            )
+            if device is None or str(device.get("status") or "").lower() != "online connected":
+                return
+            if bool(device.get("telemetry_requested")) and bool(device.get("telemetry_active")):
+                return
+            await asyncio.to_thread(
+                set_device_message_type,
+                db_path=db_path,
+                serial_number=serial_number,
+                message_type="TELEMETRY",
+            )
+            await asyncio.sleep(0.30)
+            await asyncio.to_thread(
+                set_device_telemetry_requested,
+                db_path=db_path,
+                serial_number=serial_number,
+                enabled=True,
+            )
+
     async def _send_line_sensor_cmds(
         serial_number: str,
         commands: list[str],
@@ -667,72 +704,74 @@ def create_webview_app(
         if not commands:
             return []
 
-        device_before = next(
-            (
-                item for item in _load_devices(db_path)
-                if item.get("serial_number") == serial_number
-            ),
-            None,
-        )
-        if device_before is None:
-            raise HTTPException(status_code=404, detail="device not found")
-        if str(device_before.get("module_type") or "").lower() != "line_sensor_module":
-            raise HTTPException(status_code=400, detail="device is not a line sensor module")
-        if str(device_before.get("status") or "").lower() != "online connected":
-            raise HTTPException(status_code=409, detail="device is not online")
+        async with _line_sensor_command_lock(serial_number):
+            device_before = next(
+                (
+                    item for item in _load_devices(db_path)
+                    if item.get("serial_number") == serial_number
+                ),
+                None,
+            )
+            if device_before is None:
+                raise HTTPException(status_code=404, detail="device not found")
+            if str(device_before.get("module_type") or "").lower() != "line_sensor_module":
+                raise HTTPException(status_code=400, detail="device is not a line sensor module")
+            if str(device_before.get("status") or "").lower() != "online connected":
+                raise HTTPException(status_code=409, detail="device is not online")
 
-        previous_type = get_device_message_type(db_path=db_path, serial_number=serial_number) or "CMD"
-        if previous_type != "CMD":
-            if previous_type == "TELEMETRY":
-                await asyncio.to_thread(
-                    set_device_telemetry_requested,
-                    db_path=db_path,
-                    serial_number=serial_number,
-                    enabled=False,
-                )
-                await asyncio.sleep(0.25)
+            previous_type = get_device_message_type(db_path=db_path, serial_number=serial_number) or "CMD"
+            await asyncio.to_thread(
+                set_device_telemetry_requested,
+                db_path=db_path,
+                serial_number=serial_number,
+                enabled=False,
+            )
+            await asyncio.sleep(0.15)
             await asyncio.to_thread(
                 set_device_message_type,
                 db_path=db_path,
                 serial_number=serial_number,
                 message_type="CMD",
             )
-            await asyncio.sleep(0.08)
-
-        results: list[dict] = []
-        try:
-            for command in commands:
-                result = await asyncio.to_thread(
-                    send_device_cmd_once,
-                    db_path=db_path,
-                    serial_number=serial_number,
-                    command=command,
-                    timeout_sec=timeout_sec,
-                )
-                if result is None:
-                    raise HTTPException(status_code=404, detail="device not found")
-                results.append(result)
-                if not bool(result.get("ok")):
-                    detail = str(result.get("error_kind") or result.get("response") or "command failed")
-                    status_code = 504 if detail == "cmd_send_timeout" else 409
-                    raise HTTPException(status_code=status_code, detail=f"{command}: {detail}")
-        finally:
             if previous_type != "CMD":
+                await asyncio.sleep(0.08)
+
+            results: list[dict] = []
+            try:
+                for command in commands:
+                    result = await asyncio.to_thread(
+                        send_device_cmd_once,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        command=command,
+                        timeout_sec=timeout_sec,
+                    )
+                    if result is None:
+                        raise HTTPException(status_code=404, detail="device not found")
+                    results.append(result)
+                    if not bool(result.get("ok")):
+                        detail = str(result.get("error_kind") or result.get("response") or "command failed")
+                        status_code = 504 if detail == "cmd_send_timeout" else 409
+                        raise HTTPException(status_code=status_code, detail=f"{command}: {detail}")
+            finally:
+                # Every line-sensor web action belongs to the live monitor.
+                # Always return it to streaming even if a preceding command
+                # raced with the keepalive registry update and appeared as CMD.
                 await asyncio.to_thread(
                     set_device_message_type,
                     db_path=db_path,
                     serial_number=serial_number,
-                    message_type=previous_type,
+                    message_type="TELEMETRY",
                 )
-                if previous_type == "TELEMETRY":
-                    await asyncio.to_thread(
-                        set_device_telemetry_requested,
-                        db_path=db_path,
-                        serial_number=serial_number,
-                        enabled=True,
-                    )
+                await asyncio.to_thread(
+                    set_device_telemetry_requested,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    enabled=True,
+                )
+                asyncio.create_task(_ensure_line_sensor_stream(serial_number))
 
-        return results
+            return results
 
     def _distance_device_or_error(
         serial_number: str,
@@ -1783,23 +1822,25 @@ def create_webview_app(
     @app.post("/api/devices/{serial_number}/line-sensor/stream/start")
     async def line_sensor_stream_start(serial_number: str):
         """Switch device to TELEMETRY mode and enable streaming. Idempotent."""
-        await asyncio.to_thread(
-            set_device_message_type,
-            db_path=db_path, serial_number=serial_number, message_type="TELEMETRY",
-        )
-        await asyncio.to_thread(
-            set_device_telemetry_requested,
-            db_path=db_path, serial_number=serial_number, enabled=True,
-        )
+        async with _line_sensor_command_lock(serial_number):
+            await asyncio.to_thread(
+                set_device_message_type,
+                db_path=db_path, serial_number=serial_number, message_type="TELEMETRY",
+            )
+            await asyncio.to_thread(
+                set_device_telemetry_requested,
+                db_path=db_path, serial_number=serial_number, enabled=True,
+            )
         return {"ok": True}
 
     @app.post("/api/devices/{serial_number}/line-sensor/stream/stop")
     async def line_sensor_stream_stop(serial_number: str):
         """Disable streaming (leaves device in TELEMETRY mode, just stops the push)."""
-        await asyncio.to_thread(
-            set_device_telemetry_requested,
-            db_path=db_path, serial_number=serial_number, enabled=False,
-        )
+        async with _line_sensor_command_lock(serial_number):
+            await asyncio.to_thread(
+                set_device_telemetry_requested,
+                db_path=db_path, serial_number=serial_number, enabled=False,
+            )
         return {"ok": True}
 
     @app.post("/api/devices/{serial_number}/line-sensor/refresh")
@@ -1840,7 +1881,6 @@ def create_webview_app(
             commands.append(f"SET CFG CAL_TIME_MS {calibration_time_ms}")
         if payload.save:
             commands.append("SAVE CFG")
-        commands.append("GET CFG")
         results = await _send_line_sensor_cmds(serial_number, commands, timeout_sec=2.0)
         return {"ok": True, "results": results}
 
@@ -1879,7 +1919,7 @@ def create_webview_app(
             commands.append(f"SET CFG CAL_TIME_MS {calibration_time_ms}")
         if commands and config_payload.save:
             commands.append("SAVE CFG")
-        commands.extend(["START CAL", "GET CFG"])
+        commands.append("START CAL")
         results = await _send_line_sensor_cmds(serial_number, commands, timeout_sec=2.0)
         return {"ok": True, "results": results}
 
@@ -1907,7 +1947,6 @@ def create_webview_app(
             commands.append(f"SET CAL {idx} {min_value} {max_value}")
         if payload.save:
             commands.append("SAVE CAL")
-        commands.append("GET CAL")
         results = await _send_line_sensor_cmds(serial_number, commands, timeout_sec=2.0)
         return {"ok": True, "results": results}
 

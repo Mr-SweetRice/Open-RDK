@@ -37,6 +37,7 @@ From this point onward, every firmware addition/update must be recorded here.
   - `GET CFG`
   - `GET CAL`
   - `GET INFO`
+  - `GET VERSION`
   - `START CAL`
   - `STOP CAL`
   - `SAVE CFG`
@@ -76,3 +77,9 @@ From this point onward, every firmware addition/update must be recorded here.
 - Added configurable line sensor UI through the host relay web UI: 50 Hz reading, track type, calibration time, thresholds, and min/max calibration values.
 - Added `SET CAL <sensor> <min> <max>` for direct calibration threshold updates.
 - Removed active-module firmware tool pages; module configuration now goes through `host/main/src/openrdk/web_new`.
+
+### 2026-08-06
+- Added semantic firmware version `1.0.0` to the line-sensor module identity.
+- Extended `GET INFO` by appending the firmware version as its final field, preserving all existing field positions.
+- Added `GET VERSION`, which returns `VERSION,<semantic_version>` in a framed `CMD` response.
+- The host may send `GET VERSION`; the firmware reads its compiled version from the module info callback and returns it without changing configuration or telemetry state.

@@ -929,6 +929,15 @@ class LineSensorModule(BaseModule):
         """Device identity: serial number, name, status, module type."""
         return self.send_raw_cmd("GET INFO", timeout_sec=timeout_sec)
 
+    def get_version(self, timeout_sec: float = 1.5) -> str:
+        """Read the semantic firmware version reported by the module."""
+        result = self.send_raw_cmd("GET VERSION", timeout_sec=timeout_sec)
+        response = str(result.get("response") or "").strip()
+        parts = [part.strip() for part in response.split(",", 1)]
+        if len(parts) != 2 or parts[0] != "VERSION" or not parts[1]:
+            raise CommandFailedError(f"unexpected GET VERSION response: {response}")
+        return parts[1]
+
     # ---- Configuration ----
 
     def get_config(self, timeout_sec: float = 1.5) -> dict:

@@ -42,6 +42,7 @@ typedef struct {
     char name[LS_COMM_SENSOR_NAME_MAX_LEN];
     char module_type[LS_COMM_TEXT_MAX_LEN];
     char firmware_module[LS_COMM_TEXT_MAX_LEN];
+    char firmware_version[LS_COMM_TEXT_MAX_LEN];
     uint32_t module_id;
 } ls_comm_info_state_t;
 

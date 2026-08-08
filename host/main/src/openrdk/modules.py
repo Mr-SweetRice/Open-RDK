@@ -900,6 +900,11 @@ class LineSensorModule(BaseModule):
                 )
             time.sleep(0.002)
 
+    @property
+    def last_data_received_monotonic(self) -> float | None:
+        """Host monotonic timestamp of the last telemetry frame returned by get_data()."""
+        return self._last_data_timestamp if self._last_data_timestamp > 0 else None
+
     def get_values(self, timeout_sec: float = 1.5) -> list:
         """
         Normalized reflectance for all 5 sensors (0.0–1.0 each).

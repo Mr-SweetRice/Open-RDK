@@ -295,6 +295,11 @@
     <div class="panel">
       <div class="cfg-box">
         <div class="cfg-title">Track / Calibration</div>
+        <div class="action-grid">
+          <button id="startTelemetryBtn" class="primary" data-live-control>Start Telemetry</button>
+          <button id="stopTelemetryBtn" data-live-control disabled>Stop Telemetry</button>
+        </div>
+        <p class="hint">This page observes existing communication by default. Start telemetry only when calibration needs a live stream.</p>
         <div class="control-grid">
           <label>Track Type
             <select id="trackTypeSelect" data-live-control>
@@ -354,7 +359,8 @@
     let configPollInFlight = false;
     let deviceRefreshInFlight = false;
     let deviceRefreshNeeded = true;
-    let streamStartRequested = false;
+    let currentDevice = null;
+    let telemetryStartedHere = false;
 
     function setDeviceLive(live) {
       deviceLive = live;
@@ -363,10 +369,12 @@
       document.querySelectorAll("[data-live-control]").forEach((el) => {
         el.disabled = !live || configBusy;
       });
+      updateTelemetryControls();
       if (!live) {
         configSnapshotLoaded = false;
         deviceRefreshNeeded = true;
-        streamStartRequested = false;
+        currentDevice = null;
+        telemetryStartedHere = false;
         updateCount = 0;
         rateDisplay = 0;
         if ($("rateBadge")) $("rateBadge").textContent = "0 Hz";
@@ -383,19 +391,12 @@
         const d = await r.json();
         const devices = Array.isArray(d.devices) ? d.devices : [];
         const device = devices.find(dev => dev.serial_number === serial);
+        currentDevice = device || null;
         if ($("hdSerial")) $("hdSerial").textContent = serial || "no line sensor";
         const live = !!(device && String(device.status || "").toLowerCase().includes("online"));
         setDeviceLive(live);
         if (live && serial && deviceRefreshNeeded) {
           await refreshDeviceDetails();
-        }
-        if (live && serial && !streamStartRequested) {
-          streamStartRequested = true;
-          try {
-            await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/start`, {});
-          } catch (_) {
-            streamStartRequested = false;
-          }
         }
         if (live && serial && !configSnapshotLoaded) {
           void pollConfigSnapshot();
@@ -427,6 +428,55 @@
       configBusy = !!active;
       if (configActionStatus) configActionStatus.textContent = message;
       setDeviceLive(deviceLive);
+    }
+
+    function streamIsOwned() {
+      return Boolean(currentDevice?.telemetry_requested || currentDevice?.telemetry_active);
+    }
+
+    function updateTelemetryControls() {
+      const start = $("startTelemetryBtn");
+      const stop = $("stopTelemetryBtn");
+      if (start) start.disabled = !deviceLive || configBusy || streamIsOwned();
+      if (stop) stop.disabled = !deviceLive || configBusy || !telemetryStartedHere;
+    }
+
+    function showStreamOwnedWarning() {
+      configActionStatus.textContent = "Another program already owns this communication stream. Stop that code and run devices.py for configuration.";
+    }
+
+    async function startTelemetry() {
+      if (!serial || !deviceLive) return;
+      if (streamIsOwned()) {
+        showStreamOwnedWarning();
+        return;
+      }
+      setConfigBusy(true, "Starting telemetry...");
+      try {
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/start`, {});
+        telemetryStartedHere = true;
+        configActionStatus.textContent = "Telemetry started by this page.";
+        await checkDeviceStatus();
+      } catch (err) {
+        configActionStatus.textContent = `Telemetry start failed: ${err.message || err}`;
+      } finally {
+        setConfigBusy(false, configActionStatus.textContent);
+      }
+    }
+
+    async function stopTelemetry() {
+      if (!serial || !deviceLive || !telemetryStartedHere) return;
+      setConfigBusy(true, "Stopping telemetry...");
+      try {
+        await postJson(`/api/devices/${encodeURIComponent(serial)}/line-sensor/stream/stop`, {});
+        telemetryStartedHere = false;
+        configActionStatus.textContent = "Telemetry stopped. Returning to passive observation.";
+        await checkDeviceStatus();
+      } catch (err) {
+        configActionStatus.textContent = `Telemetry stop failed: ${err.message || err}`;
+      } finally {
+        setConfigBusy(false, configActionStatus.textContent);
+      }
     }
 
     function normalizeFloatInput(el, fallback) {
@@ -614,8 +664,7 @@
     setInterval(poll, 20);
     poll(); // immediate first fetch
 
-    // Start telemetry automatically once the selected device is online. The
-    // page then observes the runtime-owned cached frames.
+    // Passive by default: only observe runtime-owned cached frames.
     // --- device live check ---
     setDeviceLive(false); // start as not live until confirmed
     checkDeviceStatus();
@@ -659,6 +708,8 @@
     setInterval(() => {
       void pollConfigSnapshot();
     }, 250);
+    $("startTelemetryBtn").addEventListener("click", () => void startTelemetry());
+    $("stopTelemetryBtn").addEventListener("click", () => void stopTelemetry());
     $("applyConfigBtn").addEventListener("click", () => void applyConfig());
     $("darkTrackBtn").addEventListener("click", () => {
       trackTypeSelect.value = "0";

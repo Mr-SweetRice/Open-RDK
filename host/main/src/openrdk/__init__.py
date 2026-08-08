@@ -18,6 +18,7 @@ from .modules import (
     run_together,
 )
 from .ordk_runtime import CommsRuntime
+from .diagnostics import StreamLatencySample, StreamLatencyWatch
 
 __version__ = "0.2.0"
 
@@ -39,4 +40,6 @@ __all__ = [
     "ModuleTypeMismatchError",
     "CommandFailedError",
     "FlashError",
+    "StreamLatencySample",
+    "StreamLatencyWatch",
 ]

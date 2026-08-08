@@ -10,6 +10,7 @@ const state = {
   ws: null,
   telemetryLines: [],
   eventLines: [],
+  telemetryStartedHere: false,
 };
 
 const elements = {
@@ -80,6 +81,25 @@ function selectedDevice() {
     return null;
   }
   return state.devices.find((item) => item.serial_number === state.selectedSerial) || null;
+}
+
+function streamIsOwned() {
+  const device = selectedDevice();
+  return Boolean(device?.telemetry_requested || device?.telemetry_active);
+}
+
+function updateTelemetryControls() {
+  const hasDevice = Boolean(state.selectedSerial);
+  elements.startTelemetryBtn.disabled = !hasDevice || streamIsOwned();
+  elements.stopTelemetryBtn.disabled = !hasDevice || !state.telemetryStartedHere;
+}
+
+function showStreamOwnedWarning() {
+  appendFeed(
+    elements.eventFeed,
+    state.eventLines,
+    "Another program already owns this communication stream. Stop that code and run devices.py for configuration.",
+  );
 }
 
 function syncSelectedSerialInUrl() {
@@ -224,6 +244,7 @@ function renderDeviceSelect() {
   }
   elements.deviceSelect.value = state.selectedSerial || "";
   syncSelectedSerialInUrl();
+  updateTelemetryControls();
 }
 
 function renderSnapshot() {
@@ -501,8 +522,14 @@ async function startTelemetry() {
   if (!state.selectedSerial) {
     return;
   }
+  if (streamIsOwned()) {
+    showStreamOwnedWarning();
+    return;
+  }
   await setDeviceMessageType("TELEMETRY");
   await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/telemetry/start`, {});
+  state.telemetryStartedHere = true;
+  await refreshDevices();
   appendFeed(elements.eventFeed, state.eventLines, "Telemetry start requested.");
 }
 
@@ -510,8 +537,13 @@ async function stopTelemetry() {
   if (!state.selectedSerial) {
     return;
   }
+  if (!state.telemetryStartedHere) {
+    return;
+  }
   await setDeviceMessageType("TELEMETRY");
   await apiPost(`/api/devices/${encodeURIComponent(state.selectedSerial)}/telemetry/stop`, {});
+  state.telemetryStartedHere = false;
+  await refreshDevices();
   appendFeed(elements.eventFeed, state.eventLines, "Telemetry stop requested.");
 }
 
@@ -838,8 +870,10 @@ elements.deviceSelect.addEventListener("change", async (event) => {
   state.calibration = null;
   state.telemetryLines = [];
   state.eventLines = [];
+  state.telemetryStartedHere = false;
   elements.telemetryFeed.textContent = "";
   elements.eventFeed.textContent = "";
+  updateTelemetryControls();
   await refreshSnapshot();
   await refreshCalibration();
   await refreshProfile();

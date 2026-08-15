@@ -321,6 +321,10 @@ def parse_color_cfg_line(line: str) -> dict | None:
             "target_clear": int(parts[9]),
             "palette_mode": int(parts[10]),
             "patch_sample_count": int(parts[11]) if len(parts) > 11 else None,
+            "black_threshold_milli": int(parts[12]) if len(parts) > 12 else None,
+            "bright_threshold_milli": int(parts[13]) if len(parts) > 13 else None,
+            "telemetry_delivery_mode": int(parts[14]) if len(parts) > 14 else 0,
+            "display_hysteresis_milli": int(parts[15]) if len(parts) > 15 else 30,
         }
     except (TypeError, ValueError, IndexError):
         return None
@@ -344,6 +348,9 @@ def parse_color_info_line(line: str) -> dict | None:
             "sda_pin": int(parts[8]),
             "scl_pin": int(parts[9]),
             "led_pin": int(parts[10]),
+            "firmware_version": parts[11] if len(parts) > 11 else "",
+            "expected_page": parts[12] if len(parts) > 12 else "",
+            "expected_page_version": parts[13] if len(parts) > 13 else "",
         }
     except (TypeError, ValueError, IndexError):
         return None

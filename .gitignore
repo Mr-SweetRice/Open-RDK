@@ -38,3 +38,6 @@ host/main/certs/
 **/espressif_devices.json
 #hardware
 /hardware/
+#codex
+.codex-pi-fix*/
+/_*/

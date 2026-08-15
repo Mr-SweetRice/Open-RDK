@@ -656,21 +656,21 @@
               "slot": 1
             },
             {
-              "enabled": true,
+              "enabled": false,
               "hex": "#8300ff",
               "name": "violet",
               "slot": 2
             },
             {
-              "enabled": true,
+              "enabled": false,
               "hex": "#006dff",
               "name": "blue",
               "slot": 3
             },
             {
               "enabled": true,
-              "hex": "#00ffd5",
-              "name": "cyan",
+              "hex": "#80ff80",
+              "name": "lightgreen",
               "slot": 4
             },
             {
@@ -686,194 +686,574 @@
               "slot": 6
             },
             {
-              "enabled": true,
+              "enabled": false,
               "hex": "#ff0000",
               "name": "red",
               "slot": 7
             }
           ],
-          "last_calibrated_at": null,
+          "last_calibrated_at": "2026-08-15T01:39:18.095795",
           "mode": "8",
           "patches": [
             {
               "enabled": true,
               "lab": {
-                "a_centi": -52,
-                "b_centi": 230,
-                "l_centi": 9893
+                "a_centi": 118,
+                "b_centi": 71,
+                "l_centi": 3333
               },
-              "luma_milli": 953,
+              "luma_milli": 76,
               "name": "black",
               "norm_rgb_milli": {
-                "b": 934,
-                "g": 974,
-                "r": 981
+                "b": 75,
+                "g": 76,
+                "r": 82
               },
               "palette_mode": 8,
-              "sample_count": 13,
+              "sample_count": 48,
               "slot": 0,
               "valid": true
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": 0,
-                "b_centi": 0,
-                "l_centi": 10000
+                "a_centi": 1,
+                "b_centi": 2,
+                "l_centi": 9999
               },
-              "luma_milli": 1009,
+              "luma_milli": 1063,
               "name": "white",
               "norm_rgb_milli": {
-                "b": 1009,
-                "g": 1009,
-                "r": 1009
+                "b": 1063,
+                "g": 1064,
+                "r": 1064
               },
               "palette_mode": 8,
-              "sample_count": 13,
+              "sample_count": 23,
               "slot": 1,
               "valid": true
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": 450,
-                "b_centi": -1063,
-                "l_centi": 9291
+                "a_centi": 8923,
+                "b_centi": -7857,
+                "l_centi": 4967
               },
-              "luma_milli": 936,
+              "luma_milli": 181,
               "name": "violet",
               "norm_rgb_milli": {
-                "b": 1230,
-                "g": 812,
-                "r": 821
+                "b": 1000,
+                "g": 0,
+                "r": 514
               },
               "palette_mode": 8,
-              "sample_count": 13,
+              "sample_count": 0,
               "slot": 2,
-              "valid": true
+              "valid": false
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": -1387,
-                "b_centi": -804,
-                "l_centi": 9482
+                "a_centi": -890,
+                "b_centi": -4990,
+                "l_centi": 6786
               },
-              "luma_milli": 987,
+              "luma_milli": 378,
               "name": "blue",
               "norm_rgb_milli": {
-                "b": 1428,
-                "g": 945,
-                "r": 582
+                "b": 1000,
+                "g": 427,
+                "r": 0
               },
               "palette_mode": 8,
-              "sample_count": 14,
+              "sample_count": 0,
               "slot": 3,
-              "valid": true
+              "valid": false
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": -557,
-                "b_centi": -149,
-                "l_centi": 9878
+                "a_centi": -3376,
+                "b_centi": 1258,
+                "l_centi": 9393
               },
-              "luma_milli": 1399,
+              "luma_milli": 754,
               "name": "cyan",
               "norm_rgb_milli": {
-                "b": 1818,
-                "g": 1461,
-                "r": 854
+                "b": 685,
+                "g": 1038,
+                "r": 432
               },
               "palette_mode": 8,
-              "sample_count": 13,
+              "sample_count": 26,
               "slot": 4,
               "valid": true
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": -596,
-                "b_centi": 1753,
-                "l_centi": 9917
+                "a_centi": -956,
+                "b_centi": -71,
+                "l_centi": 4727
               },
-              "luma_milli": 1198,
+              "luma_milli": 152,
               "name": "green",
               "norm_rgb_milli": {
-                "b": 704,
-                "g": 1517,
-                "r": 1316
+                "b": 165,
+                "g": 178,
+                "r": 110
               },
               "palette_mode": 8,
-              "sample_count": 16,
+              "sample_count": 48,
               "slot": 5,
               "valid": true
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": -373,
-                "b_centi": 1064,
-                "l_centi": 9948
+                "a_centi": 2256,
+                "b_centi": 2534,
+                "l_centi": 5342
               },
-              "luma_milli": 1612,
-              "name": "577nm",
+              "luma_milli": 215,
+              "name": "orange",
               "norm_rgb_milli": {
-                "b": 813,
-                "g": 1830,
-                "r": 2000
+                "b": 91,
+                "g": 161,
+                "r": 435
               },
               "palette_mode": 8,
-              "sample_count": 14,
+              "sample_count": 48,
               "slot": 6,
               "valid": true
             },
             {
               "enabled": true,
               "lab": {
-                "a_centi": 195,
-                "b_centi": 485,
-                "l_centi": 9718
+                "a_centi": 8009,
+                "b_centi": 6720,
+                "l_centi": 5324
               },
-              "luma_milli": 1159,
+              "luma_milli": 213,
               "name": "red",
               "norm_rgb_milli": {
-                "b": 852,
-                "g": 915,
-                "r": 1990
+                "b": 0,
+                "g": 0,
+                "r": 1000
               },
               "palette_mode": 8,
-              "sample_count": 13,
+              "sample_count": 0,
               "slot": 7,
-              "valid": true
+              "valid": false
             }
           ],
           "summary": {
             "class_count": 8,
             "dark": {
-              "b": 0,
-              "c": 0,
-              "g": 0,
-              "r": 0
+              "b": 5,
+              "c": 27,
+              "g": 10,
+              "r": 10
             },
-            "dark_valid": false,
+            "dark_valid": true,
             "enabled_mask": 255,
             "palette_mode": 8,
-            "valid_mask": 255,
+            "valid_mask": 115,
             "white": {
-              "b": 4506,
-              "c": 14724,
-              "g": 5274,
-              "r": 3846
+              "b": 6513,
+              "c": 20990,
+              "g": 7547,
+              "r": 5466
             },
             "white_valid": true
           },
-          "updated_at": "2026-08-08T14:21:29.600835-03:00"
+          "updated_at": "2026-08-15T01:39:19.651575-03:00"
         }
       },
       "module_type": "color_module",
       "serial_number": "24:EC:4A:CB:05:90",
-      "updated_at": "2026-08-08T14:21:29.603317-03:00"
+      "updated_at": "2026-08-15T01:40:02.271908-03:00"
+    },
+    "98:3D:AE:43:02:A8": {
+      "modes": {
+        "16": {
+          "labels": [
+            {
+              "enabled": true,
+              "hex": "#050505",
+              "name": "black",
+              "slot": 0
+            },
+            {
+              "enabled": true,
+              "hex": "#ffffff",
+              "name": "white",
+              "slot": 1
+            },
+            {
+              "enabled": true,
+              "hex": "#6100ff",
+              "name": "380nm",
+              "slot": 2
+            },
+            {
+              "enabled": true,
+              "hex": "#8300ff",
+              "name": "405nm",
+              "slot": 3
+            },
+            {
+              "enabled": true,
+              "hex": "#004dff",
+              "name": "429nm",
+              "slot": 4
+            },
+            {
+              "enabled": true,
+              "hex": "#006dff",
+              "name": "454nm",
+              "slot": 5
+            },
+            {
+              "enabled": true,
+              "hex": "#00b7ff",
+              "name": "478nm",
+              "slot": 6
+            },
+            {
+              "enabled": true,
+              "hex": "#00ffd5",
+              "name": "503nm",
+              "slot": 7
+            },
+            {
+              "enabled": true,
+              "hex": "#30ff00",
+              "name": "528nm",
+              "slot": 8
+            },
+            {
+              "enabled": true,
+              "hex": "#a5ff00",
+              "name": "552nm",
+              "slot": 9
+            },
+            {
+              "enabled": true,
+              "hex": "#ffff00",
+              "name": "577nm",
+              "slot": 10
+            },
+            {
+              "enabled": true,
+              "hex": "#ff9b00",
+              "name": "602nm",
+              "slot": 11
+            },
+            {
+              "enabled": true,
+              "hex": "#ff3f00",
+              "name": "626nm",
+              "slot": 12
+            },
+            {
+              "enabled": true,
+              "hex": "#ff0000",
+              "name": "651nm",
+              "slot": 13
+            },
+            {
+              "enabled": true,
+              "hex": "#d00000",
+              "name": "675nm",
+              "slot": 14
+            },
+            {
+              "enabled": true,
+              "hex": "#7a0000",
+              "name": "700nm",
+              "slot": 15
+            }
+          ],
+          "last_calibrated_at": null,
+          "mode": "16",
+          "patches": [],
+          "summary": null,
+          "updated_at": null
+        },
+        "5": {
+          "labels": [
+            {
+              "enabled": true,
+              "hex": "#050505",
+              "name": "black",
+              "slot": 0
+            },
+            {
+              "enabled": true,
+              "hex": "#ffffff",
+              "name": "white",
+              "slot": 1
+            },
+            {
+              "enabled": true,
+              "hex": "#006dff",
+              "name": "blue",
+              "slot": 2
+            },
+            {
+              "enabled": true,
+              "hex": "#30ff00",
+              "name": "green",
+              "slot": 3
+            },
+            {
+              "enabled": true,
+              "hex": "#ff0000",
+              "name": "red",
+              "slot": 4
+            }
+          ],
+          "last_calibrated_at": null,
+          "mode": "5",
+          "patches": [],
+          "summary": null,
+          "updated_at": null
+        },
+        "8": {
+          "labels": [
+            {
+              "enabled": true,
+              "hex": "#050505",
+              "name": "black",
+              "slot": 0
+            },
+            {
+              "enabled": true,
+              "hex": "#ffffff",
+              "name": "white",
+              "slot": 1
+            },
+            {
+              "enabled": false,
+              "hex": "#8300ff",
+              "name": "violet",
+              "slot": 2
+            },
+            {
+              "enabled": false,
+              "hex": "#006dff",
+              "name": "blue",
+              "slot": 3
+            },
+            {
+              "enabled": true,
+              "hex": "#00ff00",
+              "name": "verde",
+              "slot": 4
+            },
+            {
+              "enabled": true,
+              "hex": "#a5ff00",
+              "name": "green",
+              "slot": 5
+            },
+            {
+              "enabled": false,
+              "hex": "#ff9b00",
+              "name": "orange",
+              "slot": 6
+            },
+            {
+              "enabled": false,
+              "hex": "#ff0000",
+              "name": "red",
+              "slot": 7
+            }
+          ],
+          "last_calibrated_at": "2026-08-15T01:55:29.864301",
+          "mode": "8",
+          "patches": [
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": 83,
+                "b_centi": -23,
+                "l_centi": 3546
+              },
+              "luma_milli": 128,
+              "name": "black",
+              "norm_rgb_milli": {
+                "b": 88,
+                "g": 86,
+                "r": 90
+              },
+              "palette_mode": 8,
+              "sample_count": 48,
+              "slot": 0,
+              "valid": true
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": 4,
+                "b_centi": 10,
+                "l_centi": 9994
+              },
+              "luma_milli": 1000,
+              "name": "white",
+              "norm_rgb_milli": {
+                "b": 1016,
+                "g": 1017,
+                "r": 1019
+              },
+              "palette_mode": 8,
+              "sample_count": 48,
+              "slot": 1,
+              "valid": true
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": 8923,
+                "b_centi": -7857,
+                "l_centi": 4967
+              },
+              "luma_milli": 181,
+              "name": "violet",
+              "norm_rgb_milli": {
+                "b": 1000,
+                "g": 0,
+                "r": 514
+              },
+              "palette_mode": 8,
+              "sample_count": 0,
+              "slot": 2,
+              "valid": false
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": -890,
+                "b_centi": -4990,
+                "l_centi": 6786
+              },
+              "luma_milli": 378,
+              "name": "blue",
+              "norm_rgb_milli": {
+                "b": 1000,
+                "g": 427,
+                "r": 0
+              },
+              "palette_mode": 8,
+              "sample_count": 0,
+              "slot": 3,
+              "valid": false
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": -994,
+                "b_centi": -143,
+                "l_centi": 4642
+              },
+              "luma_milli": 207,
+              "name": "cyan",
+              "norm_rgb_milli": {
+                "b": 162,
+                "g": 171,
+                "r": 101
+              },
+              "palette_mode": 8,
+              "sample_count": 48,
+              "slot": 4,
+              "valid": true
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": -2779,
+                "b_centi": 848,
+                "l_centi": 7827
+              },
+              "luma_milli": 647,
+              "name": "green",
+              "norm_rgb_milli": {
+                "b": 440,
+                "g": 628,
+                "r": 263
+              },
+              "palette_mode": 8,
+              "sample_count": 48,
+              "slot": 5,
+              "valid": true
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": 337,
+                "b_centi": 8532,
+                "l_centi": 8435
+              },
+              "luma_milli": 647,
+              "name": "orange",
+              "norm_rgb_milli": {
+                "b": 0,
+                "g": 608,
+                "r": 1000
+              },
+              "palette_mode": 8,
+              "sample_count": 0,
+              "slot": 6,
+              "valid": false
+            },
+            {
+              "enabled": true,
+              "lab": {
+                "a_centi": 8009,
+                "b_centi": 6720,
+                "l_centi": 5324
+              },
+              "luma_milli": 213,
+              "name": "red",
+              "norm_rgb_milli": {
+                "b": 0,
+                "g": 0,
+                "r": 1000
+              },
+              "palette_mode": 8,
+              "sample_count": 0,
+              "slot": 7,
+              "valid": false
+            }
+          ],
+          "summary": {
+            "class_count": 8,
+            "dark": {
+              "b": 4,
+              "c": 24,
+              "g": 5,
+              "r": 16
+            },
+            "dark_valid": true,
+            "enabled_mask": 255,
+            "palette_mode": 8,
+            "valid_mask": 51,
+            "white": {
+              "b": 8094,
+              "c": 21504,
+              "g": 11096,
+              "r": 10553
+            },
+            "white_valid": true
+          },
+          "updated_at": "2026-08-15T02:25:33.990296-03:00"
+        }
+      },
+      "module_type": "color_module",
+      "serial_number": "98:3D:AE:43:02:A8",
+      "updated_at": "2026-08-15T02:25:33.991104-03:00"
     }
   }
 }

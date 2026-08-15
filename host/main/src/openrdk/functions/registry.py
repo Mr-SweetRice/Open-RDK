@@ -364,6 +364,9 @@ def _update_registry_by_serial(
     link_status: str | None = None,
     module_type: str | None = None,
     module_id: int | None = None,
+    firmware_version: str | None = None,
+    expected_page: str | None = None,
+    expected_page_version: str | None = None,
     telemetry_requested: bool | None = None,
     telemetry_active: bool | None = None,
     error_count_delta: int = 0,
@@ -460,6 +463,14 @@ def _update_registry_by_serial(
                 item["module_id_hex"] = module_id_hex_val
                 dirty = True
 
+        for key, value in (
+            ("firmware_version", firmware_version),
+            ("expected_page", expected_page),
+            ("expected_page_version", expected_page_version),
+        ):
+            if value is not None and item.get(key) != str(value).strip():
+                item[key] = str(value).strip()
+                dirty = True
         if link_live is not None:
             value = bool(link_live)
             if item.get("link_live") != value:

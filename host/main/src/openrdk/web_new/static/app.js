@@ -19,6 +19,11 @@ const state = {
 
 const CONTROL_MESSAGE_TYPE = "CONTROL";
 const CMD_MESSAGE_TYPE = "CMD";
+const CURRENT_FIRMWARE_VERSIONS = Object.freeze({
+  color_module: "1.1",
+  traction_module: "1.1",
+  line_sensor_module: "1.0.0",
+});
 
 const elements = {
   devices: document.getElementById("devices"),
@@ -53,6 +58,14 @@ function resolveModule(device) {
 
 function resolveName(device) {
   return (device.name || "").trim() || resolveModule(device);
+}
+
+function firmwareStatus(device) {
+  const installed = String(device.firmware_version || "").trim();
+  const current = CURRENT_FIRMWARE_VERSIONS[resolveModule(device)];
+  return installed && current && installed === current
+    ? { label: "UpToDate", className: "is-current" }
+    : { label: "Outdated", className: "is-outdated" };
 }
 
 function resolvePort(device) {
@@ -326,11 +339,8 @@ function renderDevices() {
     const selected = state.selectedSerial === device.serial_number;
     const node = document.createElement("div");
     node.className = `device-item ${selected ? "selected" : ""}`;
-    const lastErrorKind = String(device.last_error_kind || "").trim() || "-";
-    const lastErrorAt = String(device.last_error_at || "").trim() || "-";
-    const isLineSensor = resolveModule(device) === "line_sensor_module";
-    const isTractionModule = resolveModule(device) === "traction_module";
     const moduleType = resolveModule(device);
+    const versionStatus = firmwareStatus(device);
     const kindClass =
       moduleType === "traction_module"    ? "kind-traction" :
       moduleType === "line_sensor_module" ? "kind-line" :
@@ -363,12 +373,9 @@ function renderDevices() {
     )}</span>
       </div>
       <div class="device-port">port: ${escapeHtml(resolvePort(device))}</div>
-      <div class="device-extra">
-        mode: ${escapeHtml(resolveDeviceMessageType(device))} |
-        out: ${escapeHtml(resolveDeviceTractionOutValue(device))}% |
-        errors(streak): ${escapeHtml(Number(device.error_count || 0))} |
-        last_error: ${escapeHtml(lastErrorKind)} @ ${escapeHtml(lastErrorAt)} |
-        telemetry: ${escapeHtml(device.telemetry_active ? "active" : "idle")}
+      <div class="device-firmware">
+        <span>firmware: ${escapeHtml(device.firmware_version || "legacy / unknown")}</span>
+        <span class="firmware-status ${versionStatus.className}">${versionStatus.label}</span>
       </div>
     `;
     node.addEventListener("click", () => {

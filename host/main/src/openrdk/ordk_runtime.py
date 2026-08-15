@@ -2,6 +2,11 @@ import os
 import socket
 import threading
 import time
+from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .modules import Motors
 
 from .constants import (
     DEFAULT_COMMS_LOG_PATH,
@@ -146,11 +151,23 @@ class CommsRuntime:
         except Exception as exc:
             self._runtime_error = exc
 
-    def _webview_worker(self, server):
+    def _webview_worker(self, server, broker=None):
         try:
+            if broker is not None:
+                broker.start()
+            print(
+                f"[webview] startup db={self._db_path} "
+                f"comms_log={self._comms_log_path} "
+                f"realtime_stream={'on' if broker is not None else 'off'}",
+                flush=True,
+            )
             server.run()
         except Exception as exc:
             self._webview_error = exc
+        finally:
+            if broker is not None:
+                broker.stop()
+            print("[webview] shutdown complete", flush=True)
 
     def _start_webview_locked(self):
         if not self._enable_webview:
@@ -196,13 +213,17 @@ class CommsRuntime:
             port=int(self._webview_port),
             log_level="warning",
             access_log=False,
+            # Uvicorn 0.32 / Starlette 0.41 can cancel the lifespan receive task
+            # during threaded shutdown on Python 3.14. The in-process runtime
+            # owns the broker lifecycle explicitly instead.
+            lifespan="off",
             ssl_certfile=ssl_certfile,
             ssl_keyfile=ssl_keyfile,
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(
             target=self._webview_worker,
-            args=(server,),
+            args=(server, app.state.broker),
             name="openrdk-webview",
             daemon=True,
         )
@@ -330,7 +351,11 @@ class CommsRuntime:
         if thread and thread.is_alive():
             thread.join(max(0.1, float(timeout_sec)))
         if webview_thread and webview_thread.is_alive():
-            webview_thread.join(max(0.1, float(timeout_sec)))
+            # The realtime broker joins two worker threads for up to two seconds
+            # each during FastAPI lifespan shutdown. Do not let the interpreter
+            # tear down Uvicorn's daemon thread while that graceful shutdown is
+            # still running, which surfaces as a misleading CancelledError.
+            webview_thread.join(max(6.0, float(timeout_sec)))
 
     def list_devices(self, verbose: str | bool | None = None) -> list[dict]:
         devices = list_device_snapshots(self._db_path)
@@ -540,7 +565,11 @@ class CommsRuntime:
 
         return TractionModule(self, serial_number=serial_number, snapshot=self.require_device(serial_number))
 
-    def motors(self, motors: dict[str, str], inverted=None):
+    def motors(
+        self,
+        motors: Mapping[str, str | None],
+        inverted: str | Iterable[str] | None = None,
+    ) -> "Motors":
         """
         Factory for a Motors group.
 
@@ -553,9 +582,28 @@ class CommsRuntime:
         self.ensure_running()
         from .modules import Motors, TractionModule
 
+        missing = [
+            name
+            for name, serial in motors.items()
+            if not isinstance(serial, str) or not serial.strip()
+        ]
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise DeviceNotFoundError(
+                f"no serial number was found for motor name(s): {names}"
+            )
+        resolved_motors: dict[str, str] = {
+            name: serial.strip()
+            for name, serial in motors.items()
+            if isinstance(serial, str)
+        }
+
         return Motors(
             inverted=inverted,
-            **{name: TractionModule(self, serial) for name, serial in motors.items()},
+            **{
+                name: TractionModule(self, serial)
+                for name, serial in resolved_motors.items()
+            },
         )
 
     def line_sensor(self, serial_number: str):

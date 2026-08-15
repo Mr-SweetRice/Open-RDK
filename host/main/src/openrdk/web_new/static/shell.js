@@ -60,6 +60,104 @@
   }
 })();
 
+// ---- Load existing module tools inside the host stage ----
+(function () {
+  if (!document.body.classList.contains("home-page")) return;
+
+  const railTools = document.getElementById("railTools");
+  const devicesEl = document.getElementById("devices");
+  const workspace = document.getElementById("workspace");
+  const container = document.getElementById("embeddedTool");
+  const viewport = document.getElementById("embeddedToolViewport");
+  const canvas = document.getElementById("embeddedToolCanvas");
+  const frame = document.getElementById("embeddedToolFrame");
+  const title = document.getElementById("embeddedToolTitle");
+  const backButton = document.getElementById("backToCommsBtn");
+  if (!railTools || !devicesEl || !workspace || !container || !viewport || !canvas || !frame || !backButton) return;
+
+  const DESKTOP_TOOL_WIDTH = 1280;
+  const MIN_TOOL_SCALE = 0.72;
+
+  function fitEmbeddedTool() {
+    if (container.hidden) return;
+    const availableWidth = Math.max(1, viewport.clientWidth);
+    const availableHeight = Math.max(1, viewport.clientHeight);
+    const layoutWidth = Math.max(DESKTOP_TOOL_WIDTH, availableWidth);
+    const scale = Math.max(MIN_TOOL_SCALE, Math.min(1, availableWidth / layoutWidth));
+    frame.style.width = `${layoutWidth}px`;
+    frame.style.height = `${Math.ceil(availableHeight / scale)}px`;
+    frame.style.transform = `scale(${scale})`;
+    canvas.style.width = `${Math.ceil(layoutWidth * scale)}px`;
+    canvas.style.height = `${availableHeight}px`;
+  }
+
+  function selectedSerial() {
+    return devicesEl.querySelector(".device-item.selected .serial")?.textContent?.trim() || "";
+  }
+
+  function closeTool() {
+    document.body.classList.remove("tool-embedded");
+    container.hidden = true;
+    workspace.hidden = !selectedSerial();
+    frame.removeAttribute("src");
+    frame.dataset.serial = "";
+  }
+
+  function openTool(anchor) {
+    const serial = selectedSerial();
+    if (!serial) return;
+    const url = new URL(anchor.href, window.location.origin);
+    url.searchParams.set("embedded", "1");
+    document.body.classList.add("tool-embedded");
+    workspace.hidden = true;
+    container.hidden = false;
+    title.textContent = anchor.textContent.trim() || "Module Tool";
+    frame.dataset.serial = serial;
+    frame.src = url.pathname + url.search + url.hash;
+    requestAnimationFrame(fitEmbeddedTool);
+  }
+
+  railTools.addEventListener("click", (event) => {
+    const anchor = event.target.closest("a.rail-nav-link");
+    if (!anchor) return;
+    event.preventDefault();
+    openTool(anchor);
+  });
+  backButton.addEventListener("click", closeTool);
+  frame.addEventListener("load", () => {
+    try {
+      const frameDocument = frame.contentDocument;
+      frameDocument?.body?.classList.add("embedded-tool-page");
+      if (frameDocument?.head && !frameDocument.getElementById("rdkEmbeddedToolStyle")) {
+        const embeddedStyle = frameDocument.createElement("style");
+        embeddedStyle.id = "rdkEmbeddedToolStyle";
+        embeddedStyle.textContent = [
+          "body.embedded-tool-page{overflow:hidden}",
+          "body.embedded-tool-page .shell{grid-template-columns:minmax(0,1fr);gap:0;padding:0;height:100vh}",
+          "body.embedded-tool-page .shell>.rail{display:none}",
+          "body.embedded-tool-page .shell>.stage{border-radius:0}",
+        ].join("");
+        frameDocument.head.appendChild(embeddedStyle);
+      }
+      fitEmbeddedTool();
+    } catch (_error) {
+      closeTool();
+    }
+  });
+
+  const selectionObserver = new MutationObserver(() => {
+    if (!container.hidden && frame.dataset.serial !== selectedSerial()) closeTool();
+  });
+  selectionObserver.observe(devicesEl, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  const sizeObserver = new ResizeObserver(fitEmbeddedTool);
+  sizeObserver.observe(viewport);
+})();
+
 // Keep the selected module identity while moving between configuration subpages.
 (function () {
   const serial = new URLSearchParams(window.location.search).get("serial");

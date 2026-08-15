@@ -3,18 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RDK · Relay Monitor</title>
+    <title>ORDK · Relay Monitor</title>
+    <meta name="rdk-page-id" content="host" /><meta name="rdk-page-version" content="2.1" />
     <link rel="stylesheet" href="static/theme.css?v=20260518o" />
-    <link rel="stylesheet" href="static/styles.css?v=20260518o" />
+    <link rel="stylesheet" href="static/styles.css?v=20260815-embedded-tools1" />
   </head>
-  <body data-rail="expanded">
+  <body class="home-page" data-rail="expanded">
     <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
     <main class="shell">
       <!-- ============ Side rail (on textured wallpaper, NO panel) ============ -->
       <aside class="rail" id="rail">
-        <button class="rail-brand" id="brandReset" type="button" title="Back to RDK home">
-          <span class="rail-brand-mark">R</span>
-          <span class="rail-brand-text">RDK</span>
+        <button class="rail-brand" id="brandReset" type="button" title="Back to ORDK home">
+          <span class="rail-brand-mark">O</span>
+          <span class="rail-brand-text">ORDK</span>
         </button>
 
         <button class="rail-toggle" id="railToggle" type="button" title="Collapse rail" aria-label="Collapse rail">
@@ -40,10 +41,10 @@
 
         <!-- Landing splash (default when no module selected) -->
         <div class="landing" id="landing">
-          <div class="landing-eyebrow">Robotics Development Kit</div>
-          <div class="landing-mark">RDK</div>
+          <div class="landing-eyebrow">Open Robotics Development Kit</div>
+          <div class="landing-mark">ORDK</div>
           <div class="landing-tagline">Select a module from the rail to inspect comms,<br/>tune controllers, or launch a studio.</div>
-          <div class="landing-version">v2.0</div>
+          <div class="landing-version">v2.1</div>
         </div>
 
         <!-- Workspace shown after selecting a module -->
@@ -98,10 +99,22 @@
           </header>
           <div id="commsTable" class="comms-table"></div>
         </div>
+
+        <div class="embedded-tool" id="embeddedTool" hidden>
+          <div class="embedded-tool-bar">
+            <button id="backToCommsBtn" class="action-btn" type="button">← Back to Comms Stream</button>
+            <span id="embeddedToolTitle">Module Tool</span>
+          </div>
+          <div class="embedded-tool-viewport" id="embeddedToolViewport">
+            <div class="embedded-tool-canvas" id="embeddedToolCanvas">
+              <iframe id="embeddedToolFrame" title="Module configuration tool"></iframe>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
 
-    <script src="static/app.js?v=20260518l"></script>
-    <script src="static/shell.js?v=20260729-serial-scope1"></script>
+    <script src="static/app.js?v=20260815-firmware-status1"></script>
+    <script src="static/shell.js?v=20260815-embedded-tools2"></script>
   </body>
 </html>

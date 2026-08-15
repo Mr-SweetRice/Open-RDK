@@ -277,9 +277,9 @@ def _query_module_type(
     db_path: str,
     serial_number: str | None = None,
     sync_bytes: bytes = FRAME_SYNC_BYTES,
-) -> tuple[str, int | None]:
+) -> tuple[str, int | None, str, str, str]:
     if not query_bytes:
-        return DEFAULT_MODULE_TYPE, None
+        return DEFAULT_MODULE_TYPE, None, "", "", ""
 
     framed_query = _frame_payload(query_bytes, sync_bytes, module_id=HOST_MODULE_ID)
     ser.reset_input_buffer()
@@ -317,16 +317,20 @@ def _query_module_type(
             name_len = rx_buffer[start + base + 2]
             if name_len <= 0 or name_len > max_payload_bytes:
                 print(f"[module] invalid length from {port}: {name_len}", flush=True)
-                return DEFAULT_MODULE_TYPE, module_id
+                return DEFAULT_MODULE_TYPE, module_id, "", "", ""
             payload_start = start + base + 3
             end = payload_start + name_len
             if len(rx_buffer) < end:
                 continue
             payload = rx_buffer[payload_start:end]
-            module_type = _normalize_module_type(payload.decode("utf-8", errors="ignore"))
-            return module_type, module_id
+            fields = payload.decode("utf-8", errors="ignore").split("|")
+            module_type = _normalize_module_type(fields[0])
+            firmware_version = fields[1].strip() if len(fields) > 1 else ""
+            expected_page = fields[2].strip() if len(fields) > 2 else ""
+            expected_page_version = fields[3].strip() if len(fields) > 3 else ""
+            return module_type, module_id, firmware_version, expected_page, expected_page_version
 
-    return DEFAULT_MODULE_TYPE, None
+    return DEFAULT_MODULE_TYPE, None, "", "", ""
 
 
 def _probe_link_via_handshake(
@@ -343,7 +347,7 @@ def _probe_link_via_handshake(
     module_timeout_sec: float = MODULE_QUERY_TIMEOUT_SEC,
     read_timeout_sec: float = HELLO_READ_TIMEOUT_SEC,
     open_delay_sec: float = HELLO_OPEN_DELAY_SEC,
-) -> tuple[bool, str, int | None]:
+) -> tuple[bool, str, int | None, str, str, str]:
     try:
         with serial.Serial(
             port,
@@ -368,10 +372,10 @@ def _probe_link_via_handshake(
                 sync_bytes=sync_bytes,
             )
             if not ack_ok:
-                return False, DEFAULT_MODULE_TYPE, ack_module_id
+                return False, DEFAULT_MODULE_TYPE, ack_module_id, "", "", ""
 
             detected_module_id = ack_module_id
-            module_type, query_module_id = _query_module_type(
+            module_type, query_module_id, firmware_version, expected_page, expected_page_version = _query_module_type(
                 ser=ser, port=port, query_bytes=module_query_message,
                 response_prefix_byte=module_info_prefix_byte,
                 timeout_sec=module_timeout_sec,
@@ -384,10 +388,10 @@ def _probe_link_via_handshake(
             if module_type == DEFAULT_MODULE_TYPE:
                 module_type = _normalize_module_type(_module_id_to_type(detected_module_id))
 
-            return True, module_type, detected_module_id
+            return True, module_type, detected_module_id, firmware_version, expected_page, expected_page_version
     except Exception as exc:
         print(f"[link] probe error on {port}: {exc}", flush=True)
-        return False, DEFAULT_MODULE_TYPE, None
+        return False, DEFAULT_MODULE_TYPE, None, "", "", ""
 
 
 def _send_line_command_and_wait(

@@ -269,6 +269,9 @@ def _update_registry(
     link_status: str | None = None,
     module_type: str | None = None,
     module_id: int | None = None,
+    firmware_version: str | None = None,
+    expected_page: str | None = None,
+    expected_page_version: str | None = None,
 ) -> dict | None:
     from .registry import (
         _ensure_device_message_type,
@@ -356,6 +359,14 @@ def _update_registry(
                 item["module_id_hex"] = module_id_hex_val
                 dirty = True
 
+        for key, value in (
+            ("firmware_version", firmware_version),
+            ("expected_page", expected_page),
+            ("expected_page_version", expected_page_version),
+        ):
+            if value is not None and item.get(key) != str(value).strip():
+                item[key] = str(value).strip()
+                dirty = True
         if node and item.get("device_node") != node:
             item["device_node"] = node
             dirty = True
@@ -432,7 +443,7 @@ def on_attach(dev: Any, db_path: str):
         or bool(known_module_type and known_module_type != DEFAULT_MODULE_TYPE)
     )
     if node and not skip_handshake_probe:
-        link_live, module_type, module_id = _probe_link_via_handshake(
+        link_live, module_type, module_id, firmware_version, expected_page, expected_page_version = _probe_link_via_handshake(
             port=node, db_path=db_path, serial_number=serial_number,
             baud=get_active_serial_baud(),
         )
@@ -444,6 +455,8 @@ def on_attach(dev: Any, db_path: str):
             dev, STATUS_ONLINE_CONNECTED, db_path,
             link_live=link_live, link_status=link_status,
             module_type=reported_module_type, module_id=module_id,
+            firmware_version=firmware_version, expected_page=expected_page,
+            expected_page_version=expected_page_version,
         )
 
     resolved_serial = serial_number or (result or {}).get("serial_number")
@@ -471,6 +484,7 @@ def bootstrap_connected_devices(context: Any, db_path: str):
             link_live = False
             module_type = DEFAULT_MODULE_TYPE
             module_id = None
+            firmware_version = expected_page = expected_page_version = ""
             node = _device_node(dev)
             serial_number = _extract_serial(dev)
             known_message_type = None
@@ -494,7 +508,7 @@ def bootstrap_connected_devices(context: Any, db_path: str):
                 )
             )
             if node and not skip_handshake_probe:
-                link_live, module_type, module_id = _probe_link_via_handshake(
+                link_live, module_type, module_id, firmware_version, expected_page, expected_page_version = _probe_link_via_handshake(
                     port=node, db_path=db_path, serial_number=serial_number,
                     baud=get_active_serial_baud(),
                 )
@@ -506,6 +520,8 @@ def bootstrap_connected_devices(context: Any, db_path: str):
                 dev, STATUS_ONLINE_CONNECTED, db_path,
                 link_live=link_live, link_status=link_status,
                 module_type=reported_module_type, module_id=module_id,
+                firmware_version=firmware_version, expected_page=expected_page,
+                expected_page_version=expected_page_version,
             ):
                 boot_count += 1
             # Start each monitor as soon as its device is bootstrapped. Waiting

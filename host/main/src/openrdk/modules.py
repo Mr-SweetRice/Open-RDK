@@ -4,7 +4,8 @@ import math
 import queue as _queue
 import threading
 import time
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, TypedDict
 
 from .color_support import (
     get_device_profile,
@@ -42,6 +43,21 @@ from .functions import (
 
 if TYPE_CHECKING:
     from .ordk_runtime import CommsRuntime
+
+
+_TRACTION_CONTROL_LOCKS_GUARD = threading.Lock()
+_TRACTION_CONTROL_LOCKS: dict[str, threading.RLock] = {}
+
+
+class EncoderState(TypedDict):
+    rpm: float | None
+    absolute_position_deg: float | None
+    relative_position_deg: float | None
+
+
+def _traction_control_lock(serial_number: str) -> threading.RLock:
+    with _TRACTION_CONTROL_LOCKS_GUARD:
+        return _TRACTION_CONTROL_LOCKS.setdefault(serial_number, threading.RLock())
 
 
 def _normalize_module_type(value: str | None) -> str:
@@ -217,6 +233,12 @@ class TractionModule(BaseModule):
         self._worker_thread = threading.Thread(target=self._worker, daemon=True)
         self._worker_thread.start()
         self._inverted: bool = False  # set by Motors group for physically reversed motors
+        self._control_io_lock = _traction_control_lock(self.serial_number)
+        self._encoder_cache_lock = threading.Lock()
+        self._encoder_cache: EncoderState | None = None
+        self._encoder_monitor_stop = threading.Event()
+        self._encoder_monitor_thread: threading.Thread | None = None
+        self._encoder_interval_sec = 0.1
 
     def _worker(self) -> None:
         while True:
@@ -224,23 +246,31 @@ class TractionModule(BaseModule):
             if item is None:
                 self._task_queue.task_done()
                 break
-            fn, done_event = item
+            fn, done_event, holder = item
             try:
-                fn()
-            except Exception:
-                pass
+                result = fn()
+                if holder is not None:
+                    holder["result"] = result
+            except Exception as exc:
+                if holder is not None:
+                    holder["error"] = exc
             finally:
                 self._task_queue.task_done()
                 if done_event is not None:
                     done_event.set()
 
-    def _submit(self, fn, blocking: bool = False) -> None:
+    def _submit(self, fn, blocking: bool = False):
         if blocking:
             done = threading.Event()
-            self._task_queue.put((fn, done))
+            holder: dict = {}
+            self._task_queue.put((fn, done, holder))
             done.wait()
+            if "error" in holder:
+                raise holder["error"]
+            return holder.get("result")
         else:
-            self._task_queue.put((fn, None))
+            self._task_queue.put((fn, None, None))
+            return None
 
     def join(self) -> None:
         """Wait for all pending motor tasks to complete."""
@@ -269,6 +299,11 @@ class TractionModule(BaseModule):
         if parsed < 0.0:
             raise ValueError("angle must be >= 0")
         return parsed
+
+    def send_raw_control(self, command: str, timeout_sec: float = 1.5) -> dict:
+        """Serialize CONTROL requests so encoder polling cannot replace a motor command."""
+        with self._control_io_lock:
+            return super().send_raw_control(command, timeout_sec=timeout_sec)
 
     @staticmethod
     def _normalize_direction(direction: str) -> tuple[int, str]:
@@ -304,6 +339,16 @@ class TractionModule(BaseModule):
         }
 
     @staticmethod
+    def _parse_rpm_telem_response(response: str) -> float:
+        parts = [part.strip() for part in str(response or "").split(",")]
+        if len(parts) < 5 or parts[0] != "T":
+            raise CommandFailedError(f"unexpected GET TELEM response: {response}")
+        try:
+            return float(parts[2])
+        except (TypeError, ValueError):
+            raise CommandFailedError(f"invalid GET TELEM numeric response: {response}")
+
+    @staticmethod
     def _parse_position_pid_response(response: str) -> dict:
         parts = [part.strip() for part in str(response or "").split(",")]
         if len(parts) < 7 or parts[0] != "PP":
@@ -331,7 +376,8 @@ class TractionModule(BaseModule):
         value: float | int,
         timeout_sec: float = 1.5,
         duration: float | None = None,
-    ) -> None:
+        return_encoder: bool = False,
+    ) -> EncoderState | None:
         """
         Signed speed control. Non-blocking — submits to this motor's worker thread.
         Positive = forward, negative = backward, zero = stop.
@@ -339,13 +385,30 @@ class TractionModule(BaseModule):
             motor.move(200)                # forward, runs until stop() is called
             motor.move(-200)               # backward
             motor.move(200, duration=2.0)  # forward for 2 s, then auto-stops
+            state = motor.move(200, return_encoder=True)
             motor.move(0)                  # stop
             motor.join()                   # wait for pending tasks
         """
         v = -float(value) if self._inverted else float(value)
         if v == 0.0:
-            return self.stop(timeout_sec)
+            self.stop(timeout_sec)
+            return self._read_encoder_fresh(timeout_sec) if return_encoder else None
+        if return_encoder:
+            return self._submit(
+                lambda: self._move_and_read_encoder(v, timeout_sec, duration),
+                blocking=True,
+            )
         self._submit(lambda: self._move_impl(v, timeout_sec, duration))
+        return None
+
+    def _move_and_read_encoder(
+        self,
+        value: float | int,
+        timeout_sec: float,
+        duration: float | None,
+    ) -> EncoderState:
+        self._move_impl(value, timeout_sec, duration)
+        return self._read_encoder_fresh(timeout_sec=timeout_sec)
 
     def _move_impl(
         self,
@@ -365,12 +428,13 @@ class TractionModule(BaseModule):
         )
         self._set_message_type(MESSAGE_TYPE_CONTROL)
         self._ensure_online()
-        result = send_device_traction_out_once(
-            db_path=self.runtime.db_path,
-            serial_number=self.serial_number,
-            value=signed_value,
-            timeout_sec=timeout_sec,
-        )
+        with self._control_io_lock:
+            result = send_device_traction_out_once(
+                db_path=self.runtime.db_path,
+                serial_number=self.serial_number,
+                value=signed_value,
+                timeout_sec=timeout_sec,
+            )
         self._expect_ok(result, "move")
         if duration is not None:
             time.sleep(max(0.0, float(duration)))
@@ -414,12 +478,13 @@ class TractionModule(BaseModule):
             serial_number=self.serial_number,
             traction_out_value=0,
         )
-        result = send_device_traction_out_once(
-            db_path=self.runtime.db_path,
-            serial_number=self.serial_number,
-            value=0,
-            timeout_sec=timeout_sec,
-        )
+        with self._control_io_lock:
+            result = send_device_traction_out_once(
+                db_path=self.runtime.db_path,
+                serial_number=self.serial_number,
+                value=0,
+                timeout_sec=timeout_sec,
+            )
         return self._expect_ok(result, "stop")
 
     def get_position_telemetry(self, timeout_sec: float = 1.5) -> dict:
@@ -427,19 +492,79 @@ class TractionModule(BaseModule):
         Read current position telemetry snapshot.
         Expects response format: `TP,<target_deg>,<position_deg>,<cmd_pwm_signed>,<cmd_raw>,<i_term>`.
         """
-        result = self.send_raw_cmd("GET TELEM POS", timeout_sec=timeout_sec)
+        result = self.send_raw_control("GET TELEM POS", timeout_sec=timeout_sec)
         response = str(result.get("response") or "").strip()
+        if not response:
+            response = str(result.get("ack") or "").strip()
         parsed = self._parse_position_telem_response(response)
         parsed["raw"] = result
         return parsed
+
+    def _read_encoder_fresh(self, timeout_sec: float = 1.5) -> EncoderState:
+        position = self.get_position_telemetry(timeout_sec=timeout_sec)
+        rpm_result = self.send_raw_control("GET TELEM", timeout_sec=timeout_sec)
+        rpm_response = str(rpm_result.get("response") or rpm_result.get("ack") or "").strip()
+        absolute_position_deg = float(position["position_deg"])
+        snapshot: EncoderState = {
+            "rpm": self._parse_rpm_telem_response(rpm_response),
+            "absolute_position_deg": absolute_position_deg,
+            "relative_position_deg": absolute_position_deg % 360.0,
+        }
+        with self._encoder_cache_lock:
+            self._encoder_cache = snapshot.copy()
+        return snapshot
+
+    def start_encoder_updates(self, interval_sec: float = 0.1) -> EncoderState:
+        """Start the background encoder cache without creating another serial reader."""
+        interval = max(0.05, float(interval_sec))
+        self._encoder_interval_sec = interval
+        thread = self._encoder_monitor_thread
+        if thread is None or not thread.is_alive():
+            self._encoder_monitor_stop.clear()
+
+            def monitor() -> None:
+                while not self._encoder_monitor_stop.is_set():
+                    try:
+                        self._read_encoder_fresh(timeout_sec=max(0.5, interval * 4.0))
+                    except Exception:
+                        # Keep the last complete sample. Public encoder state is
+                        # deliberately limited to the three measurement fields.
+                        pass
+                    self._encoder_monitor_stop.wait(self._encoder_interval_sec)
+
+            thread = threading.Thread(
+                target=monitor,
+                name=f"ordk-encoder-{self.serial_number}",
+                daemon=True,
+            )
+            self._encoder_monitor_thread = thread
+            thread.start()
+        return self.get_encoder(start_updates=False)
+
+    def stop_encoder_updates(self) -> None:
+        self._encoder_monitor_stop.set()
+
+    def get_encoder(self, start_updates: bool = True, interval_sec: float = 0.1) -> EncoderState:
+        """Return the latest cached encoder state immediately (never waits for serial I/O)."""
+        if start_updates:
+            self.start_encoder_updates(interval_sec=interval_sec)
+        with self._encoder_cache_lock:
+            cached = self._encoder_cache.copy() if self._encoder_cache is not None else None
+        if cached is None:
+            return {
+                "rpm": None,
+                "absolute_position_deg": None,
+                "relative_position_deg": None,
+            }
+        return cached
 
     def get_position_pid(self, timeout_sec: float = 1.5) -> dict:
         """
         Read current position PID config snapshot.
         Expects response format: `PP,<kp>,<ki>,<kd>,<target_deg>,<enabled>,<iwin>`.
         """
-        result = self.send_raw_cmd("GET PID POS", timeout_sec=timeout_sec)
-        response = str(result.get("response") or "").strip()
+        result = self.send_raw_control("GET PID POS", timeout_sec=timeout_sec)
+        response = str(result.get("response") or result.get("ack") or "").strip()
         parsed = self._parse_position_pid_response(response)
         parsed["raw"] = result
         return parsed
@@ -448,17 +573,35 @@ class TractionModule(BaseModule):
         self,
         angle_deg: float | int,
         timeout_sec: float = 1.5,
-    ) -> None:
+        return_encoder: bool = False,
+    ) -> EncoderState | None:
         """
         Signed relative position move. Non-blocking.
         Positive = forward, negative = backward.
+
+        With return_encoder=True, wait for command submission and return a
+        fresh encoder snapshot. This does not wait for the physical PID target.
 
             motor.move_angle(90)   # forward 90°
             motor.move_angle(-90)  # backward 90°
             motor.join()           # wait for completion
         """
         a = -float(angle_deg) if self._inverted else float(angle_deg)
+        if return_encoder:
+            return self._submit(
+                lambda: self._move_angle_and_read_encoder(a, timeout_sec),
+                blocking=True,
+            )
         self._submit(lambda: self._move_angle_impl(a, timeout_sec))
+        return None
+
+    def _move_angle_and_read_encoder(
+        self,
+        angle_deg: float | int,
+        timeout_sec: float,
+    ) -> EncoderState:
+        self._move_angle_impl(angle_deg, timeout_sec)
+        return self._read_encoder_fresh(timeout_sec=timeout_sec)
 
     def _move_angle_impl(
         self,
@@ -476,7 +619,10 @@ class TractionModule(BaseModule):
         normalized_direction = "forward" if sign > 0 else "backward"
         timeout_val = max(2.0, float(timeout_sec))
         telem = self.get_position_telemetry(timeout_sec=timeout_val)
-        pid = self.get_position_pid(timeout_sec=timeout_val)
+        pid_result = self.send_raw_control("GET PID POS", timeout_sec=timeout_val)
+        pid_response = str(pid_result.get("response") or pid_result.get("ack") or "").strip()
+        pid = self._parse_position_pid_response(pid_response)
+        pid["raw"] = pid_result
         current_position_deg = float(telem["position_deg"])
         current_target_deg = float(pid["target_deg"])
         pid_enabled = bool(pid["enabled"])
@@ -484,8 +630,8 @@ class TractionModule(BaseModule):
         base_source = "target" if pid_enabled else "position"
         target_position_deg = base_deg + (float(sign) * delta_deg)
 
-        start_result = self.send_raw_cmd("START PID POS", timeout_sec=timeout_val)
-        set_target_result = self.send_raw_cmd(
+        start_result = self.send_raw_control("START PID POS", timeout_sec=timeout_val)
+        set_target_result = self.send_raw_control(
             f"SET PID POS ANGLE {target_position_deg:.4f}",
             timeout_sec=timeout_val,
         )
@@ -1565,7 +1711,11 @@ class Motors:
         )
     """
 
-    def __init__(self, inverted=None, **motors: TractionModule):
+    def __init__(
+        self,
+        inverted: str | Iterable[str] | None = None,
+        **motors: TractionModule,
+    ) -> None:
         if not motors:
             raise ValueError("at least one motor is required")
         if isinstance(inverted, str):
@@ -1606,32 +1756,70 @@ class Motors:
         timeout_sec: float = 1.5,
         duration: float | None = None,
         join: bool = True,
-    ) -> None:
+        return_encoder: bool = False,
+    ) -> dict[str, EncoderState] | None:
         """
         Submit signed speed to all motors concurrently.
         Blocks until done by default; pass join=False to return immediately.
+        Pass return_encoder=True to force completion and return fresh encoder
+        snapshots keyed by motor name.
         Inversion is applied automatically per-motor.
         """
         for motor in self._motors.values():
             motor.move(float(value), timeout_sec, duration=duration)
-        if join:
+        if join or return_encoder:
             self.join()
+        if return_encoder:
+            return self._read_all_encoders_fresh(timeout_sec=timeout_sec)
+        return None
 
     def move_angle(
         self,
         angle_deg: float | int,
         timeout_sec: float = 1.5,
         join: bool = True,
-    ) -> None:
+        return_encoder: bool = False,
+    ) -> dict[str, EncoderState] | None:
         """
         Submit signed position move to all motors concurrently.
         Blocks until done by default; pass join=False to return immediately.
+        Pass return_encoder=True to force command completion and return fresh
+        encoder snapshots keyed by motor name. It does not wait for the physical
+        position PID target to settle.
         Inversion is applied automatically per-motor.
         """
         for motor in self._motors.values():
             motor.move_angle(float(angle_deg), timeout_sec)
-        if join:
+        if join or return_encoder:
             self.join()
+        if return_encoder:
+            return self._read_all_encoders_fresh(timeout_sec=timeout_sec)
+        return None
+
+    def _read_all_encoders_fresh(self, timeout_sec: float = 1.5) -> dict[str, EncoderState]:
+        names = list(self._motors)
+        snapshots = run_together(*[
+            lambda motor=motor: motor._read_encoder_fresh(timeout_sec=timeout_sec)
+            for motor in self._motors.values()
+        ])
+        return dict(zip(names, snapshots))
+
+    def get_encoders(self, interval_sec: float = 0.1) -> dict[str, EncoderState]:
+        """
+        Return all latest encoder states immediately.
+
+        The first call starts one background cache updater per motor. Repeated
+        calls never wait for serial I/O and can run while move commands are sent.
+        """
+        return {
+            name: motor.get_encoder(start_updates=True, interval_sec=interval_sec)
+            for name, motor in self._motors.items()
+        }
+
+    def stop_encoder_updates(self) -> None:
+        """Stop background encoder cache updates for every motor."""
+        for motor in self._motors.values():
+            motor.stop_encoder_updates()
 
     def stop(self, timeout_sec: float = 1.5) -> None:
         """Drain and stop all motors concurrently. Blocking."""

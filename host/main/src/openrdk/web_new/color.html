@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Color Module Studio</title>
+    <meta name="rdk-page-id" content="color-studio" /><meta name="rdk-page-version" content="legacy_1.0" />
     <link rel="stylesheet" href="static/theme.css?v=20260518o" />
   <link rel="stylesheet" href="static/styles.css?v=20260518o" />
     <link rel="stylesheet" href="static/color.css?v=20260518o" />
   </head>
-  <body data-rail="expanded">
+  <body data-rail="expanded" data-page-id="color-studio" data-page-version="legacy_1.0">
     <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
     <main class="shell">
       <aside class="rail" id="rail">
@@ -33,6 +34,7 @@
           <div class="stage-titleblock">
             <div class="stage-eyebrow">Color Module</div>
             <h2>Color Studio</h2>
+            <div>Page v1.0 · Firmware <span id="firmwareVersionValue">unknown</span></div>
           </div>
           <div class="studio-actions">
             <label class="field compact">
@@ -45,6 +47,7 @@
           </div>
           <p class="hint">Passive observation is the default. Start telemetry only when configuration needs a live stream.</p>
         </header>
+        <div id="pageCompatibilityWarning" class="calibration-status" hidden></div>
         <div class="stage-body">
 <main class="studio-shell">
 <section class="hero-grid">

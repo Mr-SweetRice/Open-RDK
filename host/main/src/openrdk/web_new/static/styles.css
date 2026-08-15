@@ -148,6 +148,16 @@ body[data-rail="collapsed"] .rail-section-title > span { display: none; }
   scrollbar-width: thin;
 }
 
+/* The home rail reserves most of its height for modules; tools only use what they need. */
+.home-page #devices {
+  flex: 1 1 auto;
+}
+
+.home-page #railTools {
+  flex: 0 1 auto;
+  max-height: 190px;
+}
+
 .rail-footer {
   display: flex;
   flex-direction: column;
@@ -299,6 +309,38 @@ body[data-rail="collapsed"] .rail-action span { display: none; }
   color: var(--text-dim);
   font-family: var(--font-mono);
 }
+.device-firmware {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.device-item.selected .device-firmware { display: flex; }
+.firmware-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid;
+  border-radius: var(--r-pill);
+  padding: 2px 7px;
+  font-family: var(--font-disp);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.firmware-status.is-current {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: rgba(129, 201, 149, 0.35);
+}
+.firmware-status.is-outdated {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: rgba(242, 139, 130, 0.35);
+}
 .device-extra {
   font-size: 11px;
   color: var(--text-dim);
@@ -434,6 +476,69 @@ body[data-rail="collapsed"] .device-item .device-avatar { width: 36px; height: 3
 
 body.has-selection #landing { display: none; }
 body:not(.has-selection) #workspace { display: none; }
+body.tool-embedded #workspace { display: none; }
+
+.embedded-tool {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.embedded-tool[hidden] { display: none; }
+.embedded-tool-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.embedded-tool-bar span {
+  color: var(--text-dim);
+  font-family: var(--font-disp);
+  font-size: 12px;
+  font-weight: 600;
+}
+.embedded-tool-viewport {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  background: var(--surface);
+}
+.embedded-tool-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+.embedded-tool iframe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: block;
+  border: 0;
+  background: var(--surface);
+  transform-origin: top left;
+}
+
+/* Same existing tool page, fitted into the host stage without its duplicate rail. */
+body.embedded-tool-page {
+  overflow: hidden;
+}
+body.embedded-tool-page .shell {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  height: 100vh;
+}
+body.embedded-tool-page .shell > .rail {
+  display: none;
+}
+body.embedded-tool-page .shell > .stage {
+  border-radius: 0;
+}
 
 /* ---------- Stage header / workspace ---------- */
 .workspace {

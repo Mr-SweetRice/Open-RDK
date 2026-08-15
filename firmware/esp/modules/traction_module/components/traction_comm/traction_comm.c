@@ -207,7 +207,10 @@ static int64_t s_pending_baud_apply_us = 0;
 #define FRAME_HELLO_ACK_BYTE             0x06U
 #define FRAME_MODULE_QUERY_BYTE          0x04U
 #define FRAME_MODULE_INFO_PREFIX_BYTE    0x05U
-#define FRAME_MODULE_NAME                "traction_module"
+#define TRACTION_MODULE_VERSION          "1.1"
+#define TRACTION_EXPECTED_PAGE           "traction-tools"
+#define TRACTION_EXPECTED_PAGE_VERSION   "1.1"
+#define FRAME_MODULE_INFO_TEXT            "traction_module|" TRACTION_MODULE_VERSION "|" TRACTION_EXPECTED_PAGE "|" TRACTION_EXPECTED_PAGE_VERSION
 
 #define FRAME_MSG_TYPE_CMD               0x01U
 #define FRAME_MSG_TYPE_TEST              0x02U
@@ -1214,7 +1217,7 @@ static void send_control_frame_payload(const uint8_t *payload, size_t payload_le
 
 static void send_module_info_frame(void)
 {
-    const char *name = FRAME_MODULE_NAME;
+    const char *name = FRAME_MODULE_INFO_TEXT;
     size_t name_len = strlen(name);
     if (name_len > 64U) {
         name_len = 64U;
@@ -1428,13 +1431,34 @@ static void handle_stream_frame(const uint8_t *frame_payload, size_t payload_len
     }
 
     if (msg_type == FRAME_MSG_TYPE_CONTROL) {
+        char control_response[FRAME_RX_MAX_LEN + 1U];
         bool traction_cmd_ok = false;
         bool handled = try_apply_traction_out_command(msg_text, &traction_cmd_ok);
-        if (handled && traction_cmd_ok) {
-            send_stream_frame_text(msg_type, seq, "OK");
-        } else {
-            send_stream_frame_text(msg_type, seq, "ERR");
+        if (handled) {
+            send_stream_frame_text(msg_type, seq, traction_cmd_ok ? "OK" : "ERR");
+            return;
         }
+        if (strcmp(msg_text, "GET TELEM") == 0) {
+            handled = try_apply_rpm_pid_command(
+                msg_text,
+                control_response,
+                sizeof(control_response),
+                &traction_cmd_ok
+            );
+        }
+        if (!handled) {
+            handled = try_apply_pos_pid_command(
+                msg_text,
+                control_response,
+                sizeof(control_response),
+                &traction_cmd_ok
+            );
+        }
+        send_stream_frame_text(
+            msg_type,
+            seq,
+            handled ? control_response : "ERR"
+        );
         return;
     }
 

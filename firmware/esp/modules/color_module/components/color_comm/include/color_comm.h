@@ -98,6 +98,9 @@ typedef struct {
     char name[COLOR_COMM_SENSOR_NAME_MAX_LEN];
     char module_type[COLOR_COMM_TEXT_MAX_LEN];
     char firmware_module[COLOR_COMM_TEXT_MAX_LEN];
+    char firmware_version[COLOR_COMM_TEXT_MAX_LEN];
+    char expected_page[COLOR_COMM_TEXT_MAX_LEN];
+    char expected_page_version[COLOR_COMM_TEXT_MAX_LEN];
     uint32_t module_id;
     uint8_t sensor_id;
     uint8_t health_flags;

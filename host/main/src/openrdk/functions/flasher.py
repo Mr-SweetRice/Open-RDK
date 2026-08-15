@@ -113,7 +113,7 @@ def _post_flash_detect(
     port_exists = os.path.exists(device_node)
     print(f"[flash] post-flash probe on {device_node} (exists={port_exists})", flush=True)
 
-    link_live, module_type, module_id = _probe_link_via_handshake(
+    link_live, module_type, module_id, firmware_version, expected_page, expected_page_version = _probe_link_via_handshake(
         port=device_node,
         db_path=db_path,
         serial_number=serial_number,
@@ -129,6 +129,9 @@ def _post_flash_detect(
             db_path=db_path,
             module_type=resolved,
             module_id=module_id,
+            firmware_version=firmware_version,
+            expected_page=expected_page,
+            expected_page_version=expected_page_version,
             device_node=device_node,
         )
 

@@ -33,6 +33,7 @@ static int64_t s_stream_telem_last_tx_us = 0;
 #define FRAME_SYNC_2                  0xAAU
 #define FRAME_SYNC_3                  0x55U
 #define FRAME_SYNC_LEN                4U
+#define FRAME_MODULE_INFO_TEXT        "color_module|legacy_1.0|color-studio|legacy_1.0"
 #define FRAME_RX_MAX_LEN              200U
 #define FRAME_SEQ_BYTES               3U
 #define FRAME_SEQ_MASK                0x00FFFFFFUL
@@ -377,9 +378,12 @@ static bool format_info_snapshot(char *out, size_t out_len)
     sanitize_text_field(st.name, sizeof(st.name));
     sanitize_text_field(st.module_type, sizeof(st.module_type));
     sanitize_text_field(st.firmware_module, sizeof(st.firmware_module));
+    sanitize_text_field(st.firmware_version, sizeof(st.firmware_version));
+    sanitize_text_field(st.expected_page, sizeof(st.expected_page));
+    sanitize_text_field(st.expected_page_version, sizeof(st.expected_page_version));
     snprintf(out,
              out_len,
-             "INFO,%s,%s,%s,%lu,%u,%u,%u,%u,%u,%u",
+             "INFO,%s,%s,%s,%lu,%u,%u,%u,%u,%u,%u,%s,%s,%s",
              st.name,
              st.module_type,
              st.firmware_module,
@@ -389,7 +393,10 @@ static bool format_info_snapshot(char *out, size_t out_len)
              (unsigned)st.i2c_address,
              (unsigned)st.sda_pin,
              (unsigned)st.scl_pin,
-             (unsigned)st.led_pin);
+             (unsigned)st.led_pin,
+             st.firmware_version,
+             st.expected_page,
+             st.expected_page_version);
     return true;
 }
 
@@ -843,7 +850,7 @@ static void send_control_frame_payload(const uint8_t *payload, size_t payload_le
 
 static void send_module_info_frame(void)
 {
-    const char *name = FRAME_MODULE_NAME;
+    const char *name = FRAME_MODULE_INFO_TEXT;
     size_t name_len = strlen(name);
     if (name_len > 64U) {
         name_len = 64U;

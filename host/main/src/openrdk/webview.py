@@ -50,6 +50,16 @@ from .functions import (
     supported_serial_baud_rates,
 )
 
+PAGE_VERSIONS = {
+    "host": {"2.1": "index.html"},
+    "color-studio": {"legacy_1.0": "color.html", "1.1a": "color-v1.1a.html", "1.1": "color-v1.1b.html"},
+    "line-sensor": {"1.0": "line-sensor.html"},
+    "distance-sensor": {"1.0": "distance-sensor.html"},
+    "traction-motor-config": {"1.1": "traction-motor-config.html"},
+    "traction-pid-tuner": {"1.1": "traction-pid-tuner.html"},
+    "traction-position-tuner": {"1.1": "traction-position-tuner.html"},
+}
+
 
 def _ensure_file(path: str):
     folder = os.path.dirname(path) or "."
@@ -176,6 +186,9 @@ def _load_devices(db_path: str) -> list[dict]:
                 "name": name,
                 "status": item.get("status", ""),
                 "module_type": module_type,
+                "firmware_version": str(item.get("firmware_version", "") or ""),
+                "expected_page": str(item.get("expected_page", "") or ""),
+                "expected_page_version": str(item.get("expected_page_version", "") or ""),
                 "message_type": message_type,
                 "traction_out_value": int(item.get("traction_out_value", 0) or 0),
                 "link_status": item.get("link_status", ""),
@@ -431,6 +444,10 @@ class ColorConfigPayload(BaseModel):
     confidence_milli: int | None = None
     target_clear: int | None = None
     patch_sample_count: int | None = None
+    black_threshold_milli: int | None = None
+    bright_threshold_milli: int | None = None
+    telemetry_delivery_mode: int | None = None
+    display_hysteresis_milli: int | None = None
     save: bool = False
 
 
@@ -499,6 +516,11 @@ def create_webview_app(
         async with _color_command_lock(serial_number):
             _color_device_or_error(serial_number)
             previous_type = get_device_message_type(db_path=db_path, serial_number=serial_number) or "CMD"
+            previous_device = next(
+                (item for item in _load_devices(db_path) if item.get("serial_number") == serial_number),
+                {},
+            )
+            previous_telemetry_requested = bool(previous_device.get("telemetry_requested", False))
             if previous_type != "CMD":
                 if previous_type == "TELEMETRY":
                     await asyncio.to_thread(
@@ -541,7 +563,7 @@ def create_webview_app(
                         serial_number=serial_number,
                         message_type=previous_type,
                     )
-                    if previous_type == "TELEMETRY":
+                    if previous_type == "TELEMETRY" and previous_telemetry_requested:
                         await asyncio.to_thread(
                             set_device_telemetry_requested,
                             db_path=db_path,
@@ -577,6 +599,27 @@ def create_webview_app(
             "cfg": cfg,
             "cal": cal,
             "data": data,
+            "profile": get_device_profile(serial_number),
+            "results": results,
+        }
+
+    async def _color_setup(serial_number: str) -> dict:
+        results = await _send_color_cmds(
+            serial_number,
+            ["GET INFO", "GET CFG", "GET CAL"],
+            timeout_sec=2.0,
+        )
+        info = parse_color_info_line(_response_for(results, "INFO,"))
+        cfg = parse_color_cfg_line(_response_for(results, "CFG,"))
+        cal = parse_color_cal_line(_response_for(results, "CAL,"))
+        if info is None or cfg is None or cal is None:
+            raise HTTPException(status_code=502, detail="invalid color module setup response")
+        return {
+            "serial": serial_number,
+            "info": info,
+            "cfg": cfg,
+            "cal": cal,
+            "data": None,
             "profile": get_device_profile(serial_number),
             "results": results,
         }
@@ -656,6 +699,16 @@ def create_webview_app(
             commands.append(f"SET CFG PALETTE_MODE {mode}")
         if payload.patch_sample_count is not None:
             commands.append(f"SET CFG PATCH_SAMPLES {max(1, int(payload.patch_sample_count))}")
+        if payload.black_threshold_milli is not None:
+            value = max(0.0, min(0.95, float(payload.black_threshold_milli) / 1000.0))
+            commands.append(f"SET CFG BLACK_TH {value:.4f}")
+        if payload.bright_threshold_milli is not None:
+            value = max(0.05, min(2.0, float(payload.bright_threshold_milli) / 1000.0))
+            commands.append(f"SET CFG BRIGHT_TH {value:.4f}")
+        if payload.telemetry_delivery_mode is not None:
+            commands.append(f"SET CFG TELEMETRY_MODE {max(0, min(1, int(payload.telemetry_delivery_mode)))}")
+        if payload.display_hysteresis_milli is not None:
+            commands.append(f"SET CFG DISPLAY_HYSTERESIS {max(0, min(500, int(payload.display_hysteresis_milli)))}")
         if payload.save:
             commands.append("SAVE CFG")
         return commands
@@ -1245,20 +1298,30 @@ def create_webview_app(
     async def color_snapshot(serial_number: str):
         return await _color_snapshot(serial_number)
 
+    @app.get("/api/devices/{serial_number}/color/setup")
+    async def color_setup(serial_number: str):
+        return await _color_setup(serial_number)
+
     @app.get("/api/devices/{serial_number}/color/calibration")
     async def color_calibration(serial_number: str):
         return await _color_calibration(serial_number)
 
     @app.post("/api/devices/{serial_number}/color/config")
-    async def color_config(serial_number: str, payload: ColorConfigPayload):
+    async def color_config(serial_number: str, payload: ColorConfigPayload, lean: bool = Query(False)):
         commands = _commands_from_color_config(payload)
         if commands:
             commands.append("GET CFG")
             await _send_color_cmds(serial_number, commands, timeout_sec=2.0)
+        if lean:
+            cfg_results = await _send_color_cmds(serial_number, ["GET CFG"], timeout_sec=2.0)
+            cfg = parse_color_cfg_line(_response_for(cfg_results, "CFG,"))
+            if cfg is None:
+                raise HTTPException(status_code=502, detail="invalid color module config response")
+            return {"serial": serial_number, "cfg": cfg, "results": cfg_results}
         return await _color_snapshot(serial_number)
 
     @app.post("/api/devices/{serial_number}/color/save")
-    async def color_save(serial_number: str, payload: ColorSavePayload):
+    async def color_save(serial_number: str, payload: ColorSavePayload, lean: bool = Query(False)):
         commands: list[str] = []
         if payload.persist_cfg:
             commands.append("SAVE CFG")
@@ -1268,18 +1331,18 @@ def create_webview_app(
         return {
             "ok": True,
             "results": results,
-            "snapshot": await _color_snapshot(serial_number),
+            "snapshot": None if lean else await _color_snapshot(serial_number),
         }
 
     @app.post("/api/devices/{serial_number}/color/selftest")
-    async def color_selftest(serial_number: str):
+    async def color_selftest(serial_number: str, lean: bool = Query(False)):
         results = await _send_color_cmds(serial_number, ["RUN SELFTEST"], timeout_sec=2.0)
         result = parse_color_selftest_line(_response_for(results, "SELFTEST,"))
         return {
             "ok": bool(result.get("ok")) if result else False,
             "result": result,
             "results": results,
-            "snapshot": await _color_snapshot(serial_number),
+            "snapshot": None if lean else await _color_snapshot(serial_number),
         }
 
     @app.post("/api/devices/{serial_number}/color/restore-defaults")
@@ -1298,38 +1361,51 @@ def create_webview_app(
         }
 
     @app.post("/api/devices/{serial_number}/color/calibration/start")
-    async def color_calibration_start(serial_number: str):
-        results = await _send_color_cmds(serial_number, ["START CAL", "GET DATA"], timeout_sec=2.0)
+    async def color_calibration_start(serial_number: str, lean: bool = Query(False)):
+        commands = ["START CAL"] if lean else ["START CAL", "GET DATA"]
+        results = await _send_color_cmds(serial_number, commands, timeout_sec=2.0)
         return {
             "ok": True,
             "results": results,
-            "snapshot": await _color_snapshot(serial_number),
+            "snapshot": None if lean else await _color_snapshot(serial_number),
         }
 
     @app.post("/api/devices/{serial_number}/color/calibration/stop")
-    async def color_calibration_stop(serial_number: str):
+    async def color_calibration_stop(serial_number: str, lean: bool = Query(False)):
         results = await _send_color_cmds(serial_number, ["STOP CAL", "GET CAL"], timeout_sec=2.0)
         return {
             "ok": True,
             "results": results,
-            "calibration": await _color_calibration(serial_number),
+            "calibration": None if lean else await _color_calibration(serial_number),
         }
 
     @app.post("/api/devices/{serial_number}/color/calibration/select")
-    async def color_calibration_select(serial_number: str, payload: ColorCalibrationTargetPayload):
+    async def color_calibration_select(serial_number: str, payload: ColorCalibrationTargetPayload, lean: bool = Query(False)):
         target = _target_token(payload.target)
-        results = await _send_color_cmds(serial_number, [f"SET CAL PATCH {target}", "GET DATA"], timeout_sec=2.0)
+        commands = [f"SET CAL PATCH {target}"] if lean else [f"SET CAL PATCH {target}", "GET DATA"]
+        results = await _send_color_cmds(serial_number, commands, timeout_sec=2.0)
         return {
             "ok": True,
             "target": target,
             "results": results,
-            "snapshot": await _color_snapshot(serial_number),
+            "snapshot": None if lean else await _color_snapshot(serial_number),
         }
 
     @app.post("/api/devices/{serial_number}/color/calibration/commit")
-    async def color_calibration_commit(serial_number: str, payload: ColorCalibrationTargetPayload):
+    async def color_calibration_commit(serial_number: str, payload: ColorCalibrationTargetPayload, lean: bool = Query(False)):
         target = _target_token(payload.target)
         results = await _send_color_cmds(serial_number, [f"COMMIT CAL PATCH {target}"], timeout_sec=2.0)
+
+        if lean:
+            cal_results = await _send_color_cmds(serial_number, ["GET CAL"], timeout_sec=2.0)
+            cal = parse_color_cal_line(_response_for(cal_results, "CAL,"))
+            return {
+                "ok": True,
+                "target": target,
+                "results": results + cal_results,
+                "cal": cal,
+                "profile": get_device_profile(serial_number),
+            }
 
         snapshot = await _color_snapshot(serial_number)
         profile = snapshot.get("profile") or get_device_profile(serial_number)
@@ -1986,10 +2062,21 @@ def create_webview_app(
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/pages")
+    async def page_versions():
+        return {"pages": {page: list(versions) for page, versions in PAGE_VERSIONS.items()}}
+
     @app.get("/color", include_in_schema=False)
-    async def color_page():
+    async def color_page(serial: str = "", page_version: str = ""):
+        selected_version = str(page_version or "").strip()
+        if not selected_version and serial:
+            device = next((item for item in _load_devices(db_path) if item["serial_number"] == serial), None)
+            if device and device.get("expected_page") == "color-studio":
+                selected_version = str(device.get("expected_page_version") or "").strip()
+        if selected_version not in PAGE_VERSIONS["color-studio"]:
+            selected_version = "legacy_1.0"
         return FileResponse(
-            os.path.join(static_dir, "color.html"),
+            os.path.join(static_dir, PAGE_VERSIONS["color-studio"][selected_version]),
             headers={"Cache-Control": "no-store"},
         )
 

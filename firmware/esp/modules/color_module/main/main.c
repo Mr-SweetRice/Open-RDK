@@ -21,6 +21,9 @@
 #define COLOR_MODULE_DEFAULT_NAME            "color-sensor-esp"
 #define COLOR_MODULE_TYPE                    "color_module"
 #define COLOR_MODULE_FIRMWARE_MODULE         "color_module"
+#define COLOR_MODULE_VERSION                 "legacy_1.0"
+#define COLOR_MODULE_EXPECTED_PAGE           "color-studio"
+#define COLOR_MODULE_EXPECTED_PAGE_VERSION   "legacy_1.0"
 #define COLOR_MODULE_ID_VALUE                0x13U
 
 #define COLOR_MODULE_I2C_PORT                I2C_NUM_0
@@ -710,6 +713,9 @@ static bool comm_get_info_state(void *ctx, color_comm_info_state_t *out_state)
     portEXIT_CRITICAL(&s_app.mux);
     snprintf(out_state->module_type, sizeof(out_state->module_type), COLOR_MODULE_TYPE);
     snprintf(out_state->firmware_module, sizeof(out_state->firmware_module), COLOR_MODULE_FIRMWARE_MODULE);
+    snprintf(out_state->firmware_version, sizeof(out_state->firmware_version), COLOR_MODULE_VERSION);
+    snprintf(out_state->expected_page, sizeof(out_state->expected_page), COLOR_MODULE_EXPECTED_PAGE);
+    snprintf(out_state->expected_page_version, sizeof(out_state->expected_page_version), COLOR_MODULE_EXPECTED_PAGE_VERSION);
     out_state->module_id = COLOR_MODULE_ID_VALUE;
     out_state->i2c_address = COLOR_MODULE_I2C_ADDRESS;
     out_state->sda_pin = COLOR_MODULE_SDA_PIN;

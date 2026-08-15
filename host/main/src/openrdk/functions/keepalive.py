@@ -632,7 +632,7 @@ def _keepalive_loop(
                     if not ack_ok:
                         raise RuntimeError("hello handshake timeout")
 
-                    module_type, query_module_id = _query_module_type(
+                    module_type, query_module_id, firmware_version, expected_page, expected_page_version = _query_module_type(
                         ser=keepalive_serial, port=device_node,
                         query_bytes=MODULE_QUERY_MESSAGE_BYTES,
                         response_prefix_byte=MODULE_INFO_PREFIX_BYTE,
@@ -649,6 +649,8 @@ def _keepalive_loop(
                     _update_registry_by_serial(
                         serial_number=serial_number, db_path=db_path, device_node=device_node,
                         module_type=module_type, module_id=rx_module_id,
+                        firmware_version=firmware_version, expected_page=expected_page,
+                        expected_page_version=expected_page_version,
                         telemetry_active=False,
                         telemetry_requested=False if traction_out_mode else None,
                     )
@@ -756,7 +758,13 @@ def _keepalive_loop(
                         if frame_ok:
                             stream_seq = _next_sequence_value(stream_seq)
                             stream_seq_abs += 1
-                        if frame_ok and ack_text == "OK":
+                        generic_command_ok = (
+                            request_value is None
+                            and bool(request_command)
+                            and bool(ack_text)
+                            and not ack_text.startswith("ERR")
+                        )
+                        if frame_ok and (ack_text == "OK" or generic_command_ok):
                             link_live = True
                             rx_frame = frame_ack
                             _complete_traction_out_request(

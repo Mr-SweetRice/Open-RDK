@@ -1,4 +1,6 @@
 const requestedSerial = new URLSearchParams(window.location.search).get("serial") || "";
+const COLOR_STUDIO_PAGE_ID = document.body.dataset.pageId || "color-studio";
+const COLOR_STUDIO_PAGE_VERSION = document.body.dataset.pageVersion || "legacy_1.0";
 
 const state = {
   devices: [],
@@ -15,6 +17,8 @@ const state = {
 
 const elements = {
   deviceSelect: document.getElementById("deviceSelect"),
+  firmwareVersionValue: document.getElementById("firmwareVersionValue"),
+  pageCompatibilityWarning: document.getElementById("pageCompatibilityWarning"),
   refreshSnapshotBtn: document.getElementById("refreshSnapshotBtn"),
   startTelemetryBtn: document.getElementById("startTelemetryBtn"),
   stopTelemetryBtn: document.getElementById("stopTelemetryBtn"),
@@ -83,6 +87,22 @@ function selectedDevice() {
   return state.devices.find((item) => item.serial_number === state.selectedSerial) || null;
 }
 
+function renderPageCompatibility() {
+  const device = selectedDevice();
+  if (elements.firmwareVersionValue) {
+    elements.firmwareVersionValue.textContent = device?.firmware_version || "legacy / unknown";
+  }
+  if (!elements.pageCompatibilityWarning) return;
+  const expectedPage = String(device?.expected_page || "");
+  const expectedVersion = String(device?.expected_page_version || "");
+  const mismatch = Boolean(device && expectedPage && expectedVersion &&
+    (expectedPage !== COLOR_STUDIO_PAGE_ID || expectedVersion !== COLOR_STUDIO_PAGE_VERSION));
+  elements.pageCompatibilityWarning.hidden = !mismatch;
+  elements.pageCompatibilityWarning.textContent = mismatch
+    ? `WARNING: Firmware ${device.firmware_version || "unknown"} expects ${expectedPage} page v${expectedVersion}, but page v${COLOR_STUDIO_PAGE_VERSION} is open.`
+    : "";
+}
+
 function streamIsOwned() {
   const device = selectedDevice();
   return Boolean(device?.telemetry_requested || device?.telemetry_active);
@@ -136,7 +156,7 @@ function modeProfile(modeKey) {
 function labelForSlot(modeKey, slot) {
   if (!Number.isInteger(slot) || slot < 0) {
     if (slot === -2) return "dark";
-    if (slot === -1) return "white";
+    if (slot === -1) return "bright";
     return "unknown";
   }
   const mode = modeProfile(modeKey);
@@ -245,6 +265,7 @@ function renderDeviceSelect() {
   elements.deviceSelect.value = state.selectedSerial || "";
   syncSelectedSerialInUrl();
   updateTelemetryControls();
+  renderPageCompatibility();
 }
 
 function renderSnapshot() {
@@ -755,7 +776,7 @@ async function captureSelectedTarget() {
   const modeKey = String(elements.calibrationModeSelect.value || selectedModeKey());
   const isSpecialTarget = target === "DARK" || target === "WHITE";
   const titleLabel = isSpecialTarget
-    ? target.toLowerCase()
+    ? (target === "WHITE" ? "bright" : "dark")
     : labelForSlot(modeKey, Number(target));
   const confirmed = window.confirm(
     `Confirm that the sensor is positioned over ${titleLabel} before capturing.`,
@@ -766,6 +787,15 @@ async function captureSelectedTarget() {
   }
   try {
     await startCalibrationSession(modeKey);
+    if (!isSpecialTarget) {
+      await refreshSnapshot();
+      const darkValid = Boolean(state.snapshot?.cal?.dark_valid);
+      const whiteValid = Boolean(state.snapshot?.cal?.white_valid);
+      if (!darkValid || !whiteValid) {
+        setCalibrationStatus("ERROR: BEFORE CAPTURE OF COLOR IT'S NECESSARY TO CAPTURE BRIGHT AND DARK REFERENCES!");
+        return;
+      }
+    }
     await captureTarget(target, titleLabel);
     setCalibrationStatus(`Captured ${titleLabel}.`);
   } catch (err) {
@@ -780,7 +810,7 @@ function renderSingleTargetOptions() {
   const modeKey = String(elements.calibrationModeSelect.value || selectedModeKey());
   const items = [
     { value: "DARK", label: "dark" },
-    { value: "WHITE", label: "white" },
+    { value: "WHITE", label: "bright" },
     ...((modeProfile(modeKey)?.labels || paletteEntries(modeKey)).map((item) => ({
       value: String(item.slot),
       label: item.name,

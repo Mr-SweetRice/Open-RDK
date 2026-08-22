@@ -54,10 +54,14 @@ typedef struct {
     uint16_t target_clear;
     uint16_t patch_sample_count;
     float confidence_threshold;
+    float black_threshold;
+    float bright_threshold;
     uint8_t led_mode;
     uint8_t gain_mode;
     uint8_t classifier;
     uint8_t palette_mode;
+    uint8_t telemetry_delivery_mode;
+    uint16_t display_hysteresis_milli;
 } color_comm_cfg_state_t;
 
 typedef struct {

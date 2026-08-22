@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="static/styles.css?v=20260518o" />
     <link rel="stylesheet" href="static/distance-sensor.css?v=20260723a" />
   </head>
-  <body data-rail="expanded">
+  <body data-rail="expanded" data-page-id="distance-sensor" data-page-version="1.0">
     <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
     <main class="shell">
       <aside class="rail" id="rail">
@@ -179,6 +179,8 @@
                   <div><span>Trigger</span><strong id="triggerGpioValue">GPIO 3</strong></div>
                   <div><span>Echo</span><strong id="echoGpioValue">GPIO 10</strong></div>
                   <div><span>Module ID</span><strong id="moduleIdValue">0x14</strong></div>
+                  <div><span>Firmware</span><strong id="firmwareVersionValue">—</strong></div>
+                  <div><span>Version status</span><strong id="firmwareStatusValue">—</strong></div>
                 </div>
                 <p class="voltage-note">
                   HC-SR04 ECHO is 5 V. Use the specified resistor divider before the ESP32-C3 GPIO input.

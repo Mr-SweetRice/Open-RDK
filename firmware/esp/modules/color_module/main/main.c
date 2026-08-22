@@ -13,17 +13,19 @@
 #include "color_sensor.h"
 #include "color_storage.h"
 
-#define COLOR_MODULE_DEFAULT_SAMPLE_MS       80U
+#define COLOR_MODULE_DEFAULT_SAMPLE_MS       60U
 #define COLOR_MODULE_DEFAULT_GAIN            4U
-#define COLOR_MODULE_DEFAULT_INTEGRATION_MS  50U
+#define COLOR_MODULE_DEFAULT_INTEGRATION_MS  150U
 #define COLOR_MODULE_DEFAULT_TARGET_CLEAR    18000U
 #define COLOR_MODULE_DEFAULT_PATCH_SAMPLES   12U
 #define COLOR_MODULE_DEFAULT_NAME            "color-sensor-esp"
 #define COLOR_MODULE_TYPE                    "color_module"
 #define COLOR_MODULE_FIRMWARE_MODULE         "color_module"
-#define COLOR_MODULE_VERSION                 "legacy_1.0"
+#define COLOR_MODULE_VERSION                 "1.1"
 #define COLOR_MODULE_EXPECTED_PAGE           "color-studio"
-#define COLOR_MODULE_EXPECTED_PAGE_VERSION   "legacy_1.0"
+#define COLOR_MODULE_EXPECTED_PAGE_VERSION   "1.1"
+#define COLOR_MODULE_DEFAULT_BLACK_THRESHOLD 0.12f
+#define COLOR_MODULE_DEFAULT_BRIGHT_THRESHOLD 0.88f
 #define COLOR_MODULE_ID_VALUE                0x13U
 
 #define COLOR_MODULE_I2C_PORT                I2C_NUM_0
@@ -109,7 +111,11 @@ static void apply_default_cfg(color_storage_cfg_t *cfg)
     cfg->target_clear = COLOR_MODULE_DEFAULT_TARGET_CLEAR;
     cfg->patch_sample_count = COLOR_MODULE_DEFAULT_PATCH_SAMPLES;
     cfg->sample_period_ms = COLOR_MODULE_DEFAULT_SAMPLE_MS;
+    cfg->telemetry_delivery_mode = 0U;
+    cfg->display_hysteresis_milli = 30U;
     cfg->confidence_threshold = 0.30f;
+    cfg->black_threshold = COLOR_MODULE_DEFAULT_BLACK_THRESHOLD;
+    cfg->bright_threshold = COLOR_MODULE_DEFAULT_BRIGHT_THRESHOLD;
     snprintf(cfg->sensor_name, sizeof(cfg->sensor_name), COLOR_MODULE_DEFAULT_NAME);
 }
 
@@ -123,6 +129,18 @@ static void apply_default_cal(color_storage_cal_t *cal)
     color_proc_get_default_profile(COLOR_PALETTE_MODE_5, &cal->profile5);
     color_proc_get_default_profile(COLOR_PALETTE_MODE_8, &cal->profile8);
     color_proc_get_default_profile(COLOR_PALETTE_MODE_16, &cal->profile16);
+    color_proc_calibration_profile_t *profiles[] = {
+        &cal->profile5, &cal->profile8, &cal->profile16,
+    };
+    for (size_t i = 0; i < (sizeof(profiles) / sizeof(profiles[0])); ++i) {
+        profiles[i]->valid_mask = 0U;
+        profiles[i]->dark_valid = false;
+        profiles[i]->white_valid = false;
+        for (uint8_t slot = 0U; slot < profiles[i]->class_count; ++slot) {
+            profiles[i]->patches[slot].valid = false;
+            profiles[i]->patches[slot].sample_count = 0U;
+        }
+    }
 }
 
 static void sanitize_cfg(color_storage_cfg_t *cfg)
@@ -162,6 +180,22 @@ static void sanitize_cfg(color_storage_cfg_t *cfg)
         cfg->confidence_threshold = 0.05f;
     } else if (cfg->confidence_threshold > 1.0f) {
         cfg->confidence_threshold = 1.0f;
+    }
+    if (cfg->telemetry_delivery_mode > 1U) {
+        cfg->telemetry_delivery_mode = 0U;
+    }
+    if (cfg->display_hysteresis_milli > 500U) {
+        cfg->display_hysteresis_milli = 500U;
+    }
+    if (cfg->black_threshold < 0.0f || cfg->black_threshold > 0.95f) {
+        cfg->black_threshold = COLOR_MODULE_DEFAULT_BLACK_THRESHOLD;
+    }
+    if (cfg->bright_threshold < 0.05f || cfg->bright_threshold > 2.0f) {
+        cfg->bright_threshold = COLOR_MODULE_DEFAULT_BRIGHT_THRESHOLD;
+    }
+    if (cfg->black_threshold >= cfg->bright_threshold) {
+        cfg->black_threshold = COLOR_MODULE_DEFAULT_BLACK_THRESHOLD;
+        cfg->bright_threshold = COLOR_MODULE_DEFAULT_BRIGHT_THRESHOLD;
     }
     if (cfg->gain == 0U) {
         cfg->gain = COLOR_MODULE_DEFAULT_GAIN;
@@ -290,7 +324,11 @@ static void refresh_indicator_led(void)
     bool enabled = false;
 
     portENTER_CRITICAL(&s_app.mux);
-    enabled = s_app.link_active && (s_app.cfg.led_mode != COLOR_LED_MODE_OFF);
+    if (s_app.cfg.led_mode == COLOR_LED_MODE_ON) {
+        enabled = true;
+    } else if (s_app.cfg.led_mode == COLOR_LED_MODE_AUTO) {
+        enabled = s_app.link_active;
+    }
     portEXIT_CRITICAL(&s_app.mux);
 
     if (!s_app.sensor) {
@@ -380,10 +418,14 @@ static bool comm_get_cfg_state(void *ctx, color_comm_cfg_state_t *out_state)
     out_state->target_clear = s_app.cfg.target_clear;
     out_state->patch_sample_count = s_app.cfg.patch_sample_count;
     out_state->confidence_threshold = s_app.cfg.confidence_threshold;
+    out_state->black_threshold = s_app.cfg.black_threshold;
+    out_state->bright_threshold = s_app.cfg.bright_threshold;
     out_state->led_mode = s_app.cfg.led_mode;
     out_state->gain_mode = s_app.cfg.gain_mode;
     out_state->classifier = s_app.cfg.classifier;
     out_state->palette_mode = s_app.cfg.palette_mode;
+    out_state->telemetry_delivery_mode = s_app.cfg.telemetry_delivery_mode;
+    out_state->display_hysteresis_milli = s_app.cfg.display_hysteresis_milli;
     portEXIT_CRITICAL(&s_app.mux);
     out_state->sensor_name[sizeof(out_state->sensor_name) - 1U] = '\0';
     return true;
@@ -407,10 +449,14 @@ static bool comm_set_cfg_state(void *ctx, const color_comm_cfg_state_t *state)
     next_cfg.target_clear = state->target_clear;
     next_cfg.patch_sample_count = state->patch_sample_count;
     next_cfg.confidence_threshold = state->confidence_threshold;
+    next_cfg.black_threshold = state->black_threshold;
+    next_cfg.bright_threshold = state->bright_threshold;
     next_cfg.led_mode = state->led_mode;
     next_cfg.gain_mode = state->gain_mode;
     next_cfg.classifier = state->classifier;
     next_cfg.palette_mode = state->palette_mode;
+    next_cfg.telemetry_delivery_mode = state->telemetry_delivery_mode;
+    next_cfg.display_hysteresis_milli = state->display_hysteresis_milli;
     memcpy(next_cfg.sensor_name, state->sensor_name, sizeof(next_cfg.sensor_name));
     sanitize_cfg(&next_cfg);
 
@@ -544,6 +590,13 @@ static bool comm_reset_cal(void *ctx, uint8_t palette_mode)
             return false;
         }
         color_proc_get_default_profile((color_palette_mode_t)palette_mode, profile);
+        profile->valid_mask = 0U;
+        profile->dark_valid = false;
+        profile->white_valid = false;
+        for (uint8_t slot = 0U; slot < profile->class_count; ++slot) {
+            profile->patches[slot].valid = false;
+            profile->patches[slot].sample_count = 0U;
+        }
     }
     portEXIT_CRITICAL(&s_app.mux);
     return true;
@@ -773,6 +826,8 @@ static void color_sampling_task(void *arg)
                 .mode = (color_palette_mode_t)cfg_snapshot.palette_mode,
                 .classifier = (color_classifier_t)cfg_snapshot.classifier,
                 .confidence_threshold = cfg_snapshot.confidence_threshold,
+                .black_threshold = cfg_snapshot.black_threshold,
+                .bright_threshold = cfg_snapshot.bright_threshold,
             };
             color_proc_raw_ref_t raw = {
                 .r = sample.r,
@@ -783,12 +838,24 @@ static void color_sampling_task(void *arg)
             color_proc_process(&raw, sample.saturated, &profile_snapshot, &proc_cfg, &result);
 
             portENTER_CRITICAL(&s_app.mux);
+            const bool capture_active = s_app.capture.active;
             if (s_app.capture.active && s_app.capture.target_slot != COLOR_CAL_TARGET_NONE) {
                 color_proc_capture_add(&s_app.capture, &raw, &result);
             }
             portEXIT_CRITICAL(&s_app.mux);
 
-            if (cfg_snapshot.gain_mode == COLOR_GAIN_MODE_AUTO) {
+            if (capture_active) {
+                result.detected_slot = -1;
+                result.confidence = 0.0f;
+                result.best_distance = 1.0f;
+                result.second_distance = 1.0f;
+                for (size_t i = 0; i < COLOR_PROC_TOP_CANDIDATES; ++i) {
+                    result.top[i].slot = -1;
+                    result.top[i].confidence = 0.0f;
+                }
+            }
+
+            if (cfg_snapshot.gain_mode == COLOR_GAIN_MODE_AUTO && !capture_active) {
                 const int next_index = choose_auto_exposure_step(&sample, cfg_snapshot.target_clear);
                 const exposure_step_t next_step = s_auto_exposure_steps[next_index];
                 if (next_step.gain != sample.gain || next_step.integration_ms != sample.integration_ms) {
@@ -812,8 +879,11 @@ static void color_sampling_task(void *arg)
 
         const int64_t sample_ready_us = esp_timer_get_time();
         portENTER_CRITICAL(&s_app.mux);
-        s_app.cfg.gain = cfg_snapshot.gain;
-        s_app.cfg.integration_ms = cfg_snapshot.integration_ms;
+        if (s_app.cfg.gain_mode == COLOR_GAIN_MODE_AUTO &&
+            cfg_snapshot.gain_mode == COLOR_GAIN_MODE_AUTO) {
+            s_app.cfg.gain = cfg_snapshot.gain;
+            s_app.cfg.integration_ms = cfg_snapshot.integration_ms;
+        }
         s_app.sensor_sample = sample;
         s_app.sensor_status = sensor_status;
         s_app.result = result;

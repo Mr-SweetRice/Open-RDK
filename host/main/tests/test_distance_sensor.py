@@ -83,7 +83,7 @@ class DistanceSensorParsingTests(unittest.TestCase):
         )
         info = DistanceSensorModule._parse_info_response(
             "INFO,front,distance_sensor_module,distance_sensor_module,"
-            "20,HC-SR04,3,10,65"
+            "20,HC-SR04,3,10,65,1.0,distance-sensor,1.0"
         )
         selftest = DistanceSensorModule._parse_selftest_response(
             "SELFTEST,0,66,-1"
@@ -103,6 +103,9 @@ class DistanceSensorParsingTests(unittest.TestCase):
         self.assertEqual(info["sensor_model"], "HC-SR04")
         self.assertEqual(info["trigger_pin"], 3)
         self.assertEqual(info["echo_pin"], 10)
+        self.assertEqual(info["firmware_version"], "1.0")
+        self.assertEqual(info["expected_page"], "distance-sensor")
+        self.assertEqual(info["expected_page_version"], "1.0")
         self.assertFalse(selftest["ok"])
         self.assertEqual(selftest["status"], "NO_ECHO")
         self.assertEqual(selftest["distance_mm"], -1)

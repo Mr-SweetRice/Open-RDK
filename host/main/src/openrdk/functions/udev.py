@@ -17,7 +17,6 @@ from ..constants import (
     LINK_STATUS_LIVE,
     LINK_STATUS_NOT_LIVE,
     MANUFACTURER_ESP32,
-    MESSAGE_TYPE_CONTROL,
     SERIAL_NUMBER_ESP32_SHORT,
     STATUS_OFFLINE_DISCONNECTED,
     STATUS_ONLINE_CONNECTED,
@@ -419,30 +418,14 @@ def on_attach(dev: Any, db_path: str):
         if node and node in _state._FLASH_LOCKED_NODES:
             return
 
-    known_message_type = None
-    known_module_type = None
-    if serial_number:
-        with _state._DB_LOCK:
-            _data = _load_db(db_path)
-            _item = _find_device_by_serial(_data["devices"], serial_number)
-            if _item:
-                known_message_type = _normalize_message_type_name(_item.get("message_type"))
-                known_module_type = _normalize_module_type(
-                    _item.get("module_type") or _item.get("firmware_module")
-                )
-
     result = _update_registry(dev, STATUS_ONLINE_CONNECTED, db_path, link_live=False, link_status=LINK_STATUS_NOT_LIVE)
     if serial_number:
         _update_registry_by_serial(serial_number=serial_number, db_path=db_path, telemetry_active=False)
 
-    # Skip the blocking probe when the device is already known with a valid module type.
-    # The keepalive does its own HELLO + module query on connect — the probe is only
-    # needed the very first time a device is seen.
-    skip_handshake_probe = bool(node) and (
-        known_message_type == MESSAGE_TYPE_CONTROL
-        or bool(known_module_type and known_module_type != DEFAULT_MODULE_TYPE)
-    )
-    if node and not skip_handshake_probe:
+    # A board keeps the same USB serial number when it is reflashed with firmware for
+    # another module. Always identify it on attachment instead of trusting the type
+    # stored for that serial number.
+    if node:
         link_live, module_type, module_id, firmware_version, expected_page, expected_page_version = _probe_link_via_handshake(
             port=node, db_path=db_path, serial_number=serial_number,
             baud=get_active_serial_baud(),
@@ -487,27 +470,8 @@ def bootstrap_connected_devices(context: Any, db_path: str):
             firmware_version = expected_page = expected_page_version = ""
             node = _device_node(dev)
             serial_number = _extract_serial(dev)
-            known_message_type = None
-            known_module_type = None
-            if serial_number:
-                with _state._DB_LOCK:
-                    data = _load_db(db_path)
-                    known = _find_device_by_serial(data["devices"], serial_number)
-                    if known:
-                        known_message_type = _normalize_message_type_name(
-                            known.get("message_type")
-                        )
-                        known_module_type = _normalize_module_type(
-                            known.get("module_type") or known.get("firmware_module")
-                        )
-            skip_handshake_probe = bool(node) and (
-                known_message_type == MESSAGE_TYPE_CONTROL
-                or bool(
-                    known_module_type
-                    and known_module_type != DEFAULT_MODULE_TYPE
-                )
-            )
-            if node and not skip_handshake_probe:
+            # Do not reuse the stored type: reflashing does not change the USB serial.
+            if node:
                 link_live, module_type, module_id, firmware_version, expected_page, expected_page_version = _probe_link_via_handshake(
                     port=node, db_path=db_path, serial_number=serial_number,
                     baud=get_active_serial_baud(),

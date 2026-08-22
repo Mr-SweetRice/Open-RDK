@@ -221,7 +221,7 @@
     }
   </style>
 </head>
-<body data-rail="expanded">
+<body data-rail="expanded" data-page-id="line-sensor" data-page-version="1.0">
     <script>try{if(localStorage.getItem("rdk.rail.collapsed")==="collapsed")document.body.dataset.rail="collapsed";}catch(_e){}</script>
     <main class="shell">
       <aside class="rail" id="rail">
@@ -333,6 +333,7 @@
         <div class="cfg-title">Device</div>
         <div class="cfg-row"><span class="k">Name</span><span class="v" id="cfgName">—</span></div>
         <div class="cfg-row"><span class="k">Module Version</span><span class="v" id="cfgVersion">—</span></div>
+        <div class="cfg-row"><span class="k">Version Status</span><span class="v" id="cfgVersionStatus">—</span></div>
       </div>
 
       <div class="cfg-box">
@@ -627,6 +628,11 @@
       const name = parts[2] || "";
       if (name) { $("hdTitle").textContent = `${name} Monitor`; $("cfgName").textContent = name; }
       $("cfgVersion").textContent = parts[13] || "—";
+      const pageId = document.body.dataset.pageId || "line-sensor";
+      const pageVersion = document.body.dataset.pageVersion || "1.0";
+      $("cfgVersionStatus").textContent = parts[14] === pageId && parts[15] === pageVersion
+        ? "UpToDate"
+        : "Outdated";
     }
 
     function handleMessage(msg) {

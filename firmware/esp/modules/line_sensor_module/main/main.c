@@ -15,7 +15,9 @@
 #define LINE_SENSOR_DEFAULT_NAME "line-sensor-esp"
 #define LINE_SENSOR_MODULE_TYPE "line_sensor_module"
 #define LINE_SENSOR_FIRMWARE_MODULE "line_sensor_module"
-#define LINE_SENSOR_FIRMWARE_VERSION "1.0.0"
+#define LINE_SENSOR_FIRMWARE_VERSION "1.0"
+#define LINE_SENSOR_EXPECTED_PAGE "line-sensor"
+#define LINE_SENSOR_EXPECTED_PAGE_VERSION "1.0"
 #define LINE_SENSOR_MODULE_ID 0x12U
 
 static const char *TAG = "line_sensor_main";
@@ -217,6 +219,8 @@ static bool comm_get_info_state(void *ctx, ls_comm_info_state_t *out_state)
     snprintf(out_state->module_type, sizeof(out_state->module_type), LINE_SENSOR_MODULE_TYPE);
     snprintf(out_state->firmware_module, sizeof(out_state->firmware_module), LINE_SENSOR_FIRMWARE_MODULE);
     snprintf(out_state->firmware_version, sizeof(out_state->firmware_version), LINE_SENSOR_FIRMWARE_VERSION);
+    snprintf(out_state->expected_page, sizeof(out_state->expected_page), LINE_SENSOR_EXPECTED_PAGE);
+    snprintf(out_state->expected_page_version, sizeof(out_state->expected_page_version), LINE_SENSOR_EXPECTED_PAGE_VERSION);
     out_state->module_id = LINE_SENSOR_MODULE_ID;
     return true;
 }

@@ -30,7 +30,7 @@ static const char *TAG = "ds_comm";
 #define FRAME_HELLO_ACK_BYTE          0x06U
 #define FRAME_MODULE_QUERY_BYTE       0x04U
 #define FRAME_MODULE_INFO_PREFIX_BYTE 0x05U
-#define FRAME_MODULE_NAME             "distance_sensor_module"
+#define FRAME_MODULE_INFO_TEXT        "distance_sensor_module|1.0|distance-sensor|1.0"
 
 #define FRAME_MSG_TYPE_CMD            0x01U
 #define FRAME_MSG_TYPE_TEST           0x02U
@@ -181,7 +181,7 @@ static bool format_info_snapshot(char *out, size_t out_len)
     snprintf(
         out,
         out_len,
-        "INFO,%s,distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,%u",
+        "INFO,%s,distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,%u,1.0,distance-sensor,1.0",
         cfg.sensor_name,
         (unsigned)sensor.health_flags);
     return true;
@@ -313,7 +313,7 @@ static void send_control_frame_payload(const uint8_t *payload, size_t payload_le
 
 static void send_module_info_frame(void)
 {
-    const char *name = FRAME_MODULE_NAME;
+    const char *name = FRAME_MODULE_INFO_TEXT;
     size_t name_len = strlen(name);
     if (name_len > 64U) {
         name_len = 64U;

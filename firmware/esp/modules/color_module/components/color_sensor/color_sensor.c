@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 
 #define TCS3472_COMMAND_BIT 0x80U
+#define TCS3472_AUTO_INCREMENT_BIT 0x20U
 #define TCS3472_ENABLE_REG  0x00U
 #define TCS3472_ATIME_REG   0x01U
 #define TCS3472_ID_REG      0x12U
@@ -111,6 +112,9 @@ static esp_err_t write_reg8(color_sensor_handle_t handle, uint8_t reg, uint8_t v
 static esp_err_t read_reg(color_sensor_handle_t handle, uint8_t reg, uint8_t *out_data, size_t len)
 {
     uint8_t reg_addr = TCS3472_COMMAND_BIT | reg;
+    if (len > 1U) {
+        reg_addr |= TCS3472_AUTO_INCREMENT_BIT;
+    }
     return i2c_master_write_read_device(handle->cfg.i2c_port,
                                         handle->cfg.i2c_address,
                                         &reg_addr,

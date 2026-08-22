@@ -84,6 +84,9 @@ typedef struct {
     float distance;
 } class_distance_t;
 
+#define COLOR_PROC_NEUTRAL_AXIS_TOLERANCE_LAB 8.0f
+#define COLOR_PROC_NEUTRAL_AXIS_PENALTY_MAX   0.12f
+
 static float clampf(float value, float min_value, float max_value)
 {
     if (value < min_value) {
@@ -174,6 +177,8 @@ void color_proc_get_default_cfg(color_proc_cfg_t *out_cfg)
     out_cfg->mode = COLOR_PALETTE_MODE_8;
     out_cfg->classifier = COLOR_CLASSIFIER_LAB;
     out_cfg->confidence_threshold = 0.30f;
+    out_cfg->black_threshold = 0.12f;
+    out_cfg->bright_threshold = 0.88f;
 }
 
 void color_proc_get_default_profile(color_palette_mode_t mode, color_proc_calibration_profile_t *out_profile)
@@ -211,9 +216,10 @@ void color_proc_get_default_profile(color_palette_mode_t mode, color_proc_calibr
 
 static void rgb_to_lab(const float rgb[3], float lab[3])
 {
-    const float r = clampf(rgb[0], 0.0f, 1.0f);
-    const float g = clampf(rgb[1], 0.0f, 1.0f);
-    const float b = clampf(rgb[2], 0.0f, 1.0f);
+    const float peak = fmaxf(1.0f, fmaxf(rgb[0], fmaxf(rgb[1], rgb[2])));
+    const float r = clampf(rgb[0] / peak, 0.0f, 1.0f);
+    const float g = clampf(rgb[1] / peak, 0.0f, 1.0f);
+    const float b = clampf(rgb[2] / peak, 0.0f, 1.0f);
 
     const float x = (0.4124564f * r) + (0.3575761f * g) + (0.1804375f * b);
     const float y = (0.2126729f * r) + (0.7151522f * g) + (0.0721750f * b);
@@ -259,6 +265,38 @@ static float calc_norm_rgb_distance(const color_proc_result_t *result, const col
                                (rb - pb) * (rb - pb));
     const float luminance = fabsf(result->luma - patch->luma);
     return (0.75f * (chroma / 1.7321f)) + (0.25f * luminance);
+}
+
+static bool classify_neutral_axis(const color_proc_result_t *result,
+                                  const color_proc_calibration_profile_t *profile,
+                                  float *out_position,
+                                  float *out_distance)
+{
+    const color_proc_patch_t *black = &profile->patches[0];
+    const color_proc_patch_t *bright = &profile->patches[1];
+    if (!black->valid || !bright->valid ||
+        ((profile->valid_mask & 0x0003U) != 0x0003U)) {
+        return false;
+    }
+
+    const float l_span = bright->lab[0] - black->lab[0];
+    if (fabsf(l_span) < 1.0f) {
+        return false;
+    }
+    const float position = clampf((result->lab[0] - black->lab[0]) / l_span, 0.0f, 1.0f);
+    const float neutral_a = black->lab[1] + position * (bright->lab[1] - black->lab[1]);
+    const float neutral_b = black->lab[2] + position * (bright->lab[2] - black->lab[2]);
+    const float da = result->lab[1] - neutral_a;
+    const float db = result->lab[2] - neutral_b;
+    const float distance = sqrtf(da * da + db * db);
+
+    if (out_position) {
+        *out_position = position;
+    }
+    if (out_distance) {
+        *out_distance = distance;
+    }
+    return distance <= COLOR_PROC_NEUTRAL_AXIS_TOLERANCE_LAB;
 }
 
 static void sort_distances(class_distance_t *items, size_t count)
@@ -327,7 +365,7 @@ esp_err_t color_proc_process(const color_proc_raw_ref_t *raw,
     }
 
     for (size_t i = 0; i < 3U; ++i) {
-        out_result->norm_rgb[i] = clampf(corrected[i] / fmaxf(1.0f, white_range[i]), 0.0f, 2.0f);
+        out_result->norm_rgb[i] = clampf(corrected[i] / fmaxf(1.0f, white_range[i]), 0.0f, 32.0f);
     }
     rgb_to_lab(out_result->norm_rgb, out_result->lab);
 
@@ -338,6 +376,12 @@ esp_err_t color_proc_process(const color_proc_raw_ref_t *raw,
 
     class_distance_t distances[COLOR_PROC_MAX_CLASSES];
     size_t dist_count = 0U;
+    float neutral_position = 0.0f;
+    float neutral_distance = 0.0f;
+    const bool neutral_axis_available = profile->patches[0].valid && profile->patches[1].valid &&
+                                        ((profile->valid_mask & 0x0003U) == 0x0003U);
+    (void)classify_neutral_axis(out_result, profile, &neutral_position, &neutral_distance);
+    (void)neutral_position;
     for (uint8_t slot = 0U; slot < class_count; ++slot) {
         if (((profile->enabled_mask >> slot) & 0x1U) == 0U) {
             continue;
@@ -357,6 +401,19 @@ esp_err_t color_proc_process(const color_proc_raw_ref_t *raw,
         } else {
             distance = calc_norm_rgb_distance(out_result, patch);
         }
+        if (neutral_axis_available && slot < 2U) {
+            const float axis_ratio = clampf(
+                neutral_distance / COLOR_PROC_NEUTRAL_AXIS_TOLERANCE_LAB,
+                0.0f,
+                1.0f);
+            distance += COLOR_PROC_NEUTRAL_AXIS_PENALTY_MAX * axis_ratio;
+            if (slot == 1U && out_result->luma <= cfg->black_threshold) {
+                distance += COLOR_PROC_NEUTRAL_AXIS_PENALTY_MAX;
+            }
+            if (slot == 0U && out_result->luma >= cfg->bright_threshold) {
+                distance += COLOR_PROC_NEUTRAL_AXIS_PENALTY_MAX;
+            }
+        }
         distances[dist_count].slot = (int)slot;
         distances[dist_count].distance = distance;
         ++dist_count;
@@ -372,13 +429,7 @@ esp_err_t color_proc_process(const color_proc_raw_ref_t *raw,
 
     const float conf_threshold = fmaxf(cfg->confidence_threshold, 0.05f);
     const float threshold_score = clampf(1.0f - (out_result->best_distance / conf_threshold), 0.0f, 1.0f);
-    const float separation = (out_result->second_distance > 1e-6f)
-                                 ? clampf((out_result->second_distance - out_result->best_distance) /
-                                              out_result->second_distance,
-                                          0.0f,
-                                          1.0f)
-                                 : 1.0f;
-    out_result->confidence = clampf(threshold_score * (0.50f + (0.50f * separation)), 0.0f, 1.0f);
+    out_result->confidence = threshold_score;
 
     for (size_t i = 0; i < COLOR_PROC_TOP_CANDIDATES && i < dist_count; ++i) {
         const float distance = distances[i].distance;

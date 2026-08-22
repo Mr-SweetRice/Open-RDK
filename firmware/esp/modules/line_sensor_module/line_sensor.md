@@ -79,7 +79,7 @@ From this point onward, every firmware addition/update must be recorded here.
 - Removed active-module firmware tool pages; module configuration now goes through `host/main/src/openrdk/web_new`.
 
 ### 2026-08-06
-- Added semantic firmware version `1.0.0` to the line-sensor module identity.
+- Added firmware/page version `1.0` to the line-sensor module identity.
 - Extended `GET INFO` by appending the firmware version as its final field, preserving all existing field positions.
 - Added `GET VERSION`, which returns `VERSION,<semantic_version>` in a framed `CMD` response.
 - The host may send `GET VERSION`; the firmware reads its compiled version from the module info callback and returns it without changing configuration or telemetry state.

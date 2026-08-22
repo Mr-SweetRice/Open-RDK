@@ -27,13 +27,14 @@ static int64_t s_last_link_check_us = 0;
 static bool s_stream_telem_enabled = false;
 static uint32_t s_stream_telem_seq = 0U;
 static int64_t s_stream_telem_last_tx_us = 0;
+static uint32_t s_stream_telem_last_sample_timestamp_ms = UINT32_MAX;
 
 #define FRAME_SYNC_0                  0xAAU
 #define FRAME_SYNC_1                  0x55U
 #define FRAME_SYNC_2                  0xAAU
 #define FRAME_SYNC_3                  0x55U
 #define FRAME_SYNC_LEN                4U
-#define FRAME_MODULE_INFO_TEXT        "color_module|legacy_1.0|color-studio|legacy_1.0"
+#define FRAME_MODULE_INFO_TEXT        "color_module|1.1|color-studio|1.1"
 #define FRAME_RX_MAX_LEN              200U
 #define FRAME_SEQ_BYTES               3U
 #define FRAME_SEQ_MASK                0x00FFFFFFUL
@@ -284,7 +285,7 @@ static bool format_cfg_snapshot(char *out, size_t out_len)
     sanitize_text_field(st.sensor_name, sizeof(st.sensor_name));
     snprintf(out,
              out_len,
-             "CFG,%s,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u",
+             "CFG,%s,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
              st.sensor_name,
              (unsigned long)st.sample_period_ms,
              (unsigned)st.led_mode,
@@ -295,7 +296,11 @@ static bool format_cfg_snapshot(char *out, size_t out_len)
              (unsigned)scale_milli(st.confidence_threshold, 0.0f, 2.0f),
              (unsigned)st.target_clear,
              (unsigned)st.palette_mode,
-             (unsigned)st.patch_sample_count);
+             (unsigned)st.patch_sample_count,
+             (unsigned)scale_milli(st.black_threshold, 0.0f, 2.0f),
+             (unsigned)scale_milli(st.bright_threshold, 0.0f, 2.0f),
+             (unsigned)st.telemetry_delivery_mode,
+             (unsigned)st.display_hysteresis_milli);
     return true;
 }
 
@@ -705,6 +710,12 @@ static bool try_apply_color_command(const char *line, char *response_out, size_t
         } else if (sscanf(cfg_line, "CONF_TH %f", &fvalue) == 1) {
             cfg.confidence_threshold = fvalue;
             ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
+        } else if (sscanf(cfg_line, "BLACK_TH %f", &fvalue) == 1) {
+            cfg.black_threshold = fvalue;
+            ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
+        } else if (sscanf(cfg_line, "BRIGHT_TH %f", &fvalue) == 1) {
+            cfg.bright_threshold = fvalue;
+            ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
         } else if (sscanf(cfg_line, "TARGET_CLEAR %d", &ivalue) == 1) {
             cfg.target_clear = (uint16_t)ivalue;
             ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
@@ -713,6 +724,12 @@ static bool try_apply_color_command(const char *line, char *response_out, size_t
             ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
         } else if (sscanf(cfg_line, "PATCH_SAMPLES %d", &ivalue) == 1) {
             cfg.patch_sample_count = (uint16_t)ivalue;
+            ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
+        } else if (sscanf(cfg_line, "TELEMETRY_MODE %d", &ivalue) == 1) {
+            cfg.telemetry_delivery_mode = (uint8_t)ivalue;
+            ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
+        } else if (sscanf(cfg_line, "DISPLAY_HYSTERESIS %d", &ivalue) == 1) {
+            cfg.display_hysteresis_milli = (uint16_t)ivalue;
             ok = s_cfg.set_cfg_state(s_cfg.ctx, &cfg);
         } else if (sscanf(cfg_line, "LED %31s", token) == 1) {
             ok = parse_led_mode_token(token, &cfg.led_mode) &&
@@ -1015,8 +1032,19 @@ static void maybe_send_stream_telemetry(void)
         return;
     }
 
+    color_comm_cfg_state_t cfg = {0};
+    color_comm_sensor_state_t sensor = {0};
+    if (get_cfg_snapshot(&cfg) && cfg.telemetry_delivery_mode == 1U) {
+        if (!get_sensor_snapshot(&sensor) ||
+            sensor.sample_timestamp_ms == s_stream_telem_last_sample_timestamp_ms) {
+            return;
+        }
+        s_stream_telem_last_sample_timestamp_ms = sensor.sample_timestamp_ms;
+    }
+
     const int64_t now_us = esp_timer_get_time();
-    if ((now_us - s_stream_telem_last_tx_us) < FRAME_TELEMETRY_TX_PERIOD_US) {
+    if (cfg.telemetry_delivery_mode == 0U &&
+        (now_us - s_stream_telem_last_tx_us) < FRAME_TELEMETRY_TX_PERIOD_US) {
         return;
     }
     s_stream_telem_last_tx_us = now_us;

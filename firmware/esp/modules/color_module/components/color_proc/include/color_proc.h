@@ -72,6 +72,8 @@ typedef struct {
     color_palette_mode_t mode;
     color_classifier_t classifier;
     float confidence_threshold;
+    float black_threshold;
+    float bright_threshold;
 } color_proc_cfg_t;
 
 typedef struct {

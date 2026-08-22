@@ -43,6 +43,8 @@ typedef struct {
     char module_type[LS_COMM_TEXT_MAX_LEN];
     char firmware_module[LS_COMM_TEXT_MAX_LEN];
     char firmware_version[LS_COMM_TEXT_MAX_LEN];
+    char expected_page[LS_COMM_TEXT_MAX_LEN];
+    char expected_page_version[LS_COMM_TEXT_MAX_LEN];
     uint32_t module_id;
 } ls_comm_info_state_t;
 

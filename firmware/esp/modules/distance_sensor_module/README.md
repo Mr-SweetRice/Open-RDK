@@ -4,7 +4,7 @@ ESP-IDF firmware for a dedicated ESP32-C3 Open-RDK distance sensor module.
 
 ## Identity and pins
 
-- Module query name: `distance_sensor_module`
+- Module query identity: `distance_sensor_module|1.0|distance-sensor|1.0`
 - Module ID: `0x14`
 - HC-SR04 `TRIG`: `GPIO3`
 - HC-SR04 `ECHO`: `GPIO10`
@@ -119,7 +119,7 @@ CFG,<sensor_name>,<sample_period_ms>,<max_distance_mm>,<filter_window>
 Information response:
 
 ```text
-INFO,<sensor_name>,distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,<health_flags>
+INFO,<sensor_name>,distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,<health_flags>,1.0,distance-sensor,1.0
 ```
 
 Self-test response:

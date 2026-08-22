@@ -3,7 +3,7 @@
 ## Compatibility boundary
 
 - Keep `color_module` v1.0.0 paired with Color Studio v1.0 and do not add new behavior there.
-- Pair `color_module` v1.0.1a with Color Studio v1.1a.
+- Pair `color_module` v1.1 with Color Studio v1.1.
 - Report firmware version, expected page ID, and expected page version during the framed connection handshake and in `GET INFO`.
 - Let the host select the matching page from its page registry. The page must independently warn when its ID/version differs from the selected module's expectation.
 
@@ -47,7 +47,7 @@
 4. Measure confusion matrices separately for neutral colors and chromatic colors.
 5. Accept the algorithm only when green patches remain green across their useful luma range and neutral patches no longer inherit the sensor's green bias.
 
-## v1.0.1a scope
+## v1.1 scope
 
 This experimental release establishes version negotiation, freezes automatic exposure during calibration capture, and implements chroma-aware neutral-axis evidence. The calibrated black and white color patches define a line in Lab space. Every calibrated prototype always remains in the same competition. Black and white receive only a proportional distance penalty for departure from the neutral axis; there is no fixed neutral penalty that could exceed the measured black/dark-green separation. Editable black/bright values add endpoint penalties but never remove chromatic candidates. All displayed candidate and selected-color confidence values use the same monotonic distance score. Variance-aware prototypes, stored exposure metadata/compensation, adaptive neutral tolerance, and replay validation remain staged work for captured-data verification.
 

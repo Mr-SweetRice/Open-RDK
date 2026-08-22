@@ -22,7 +22,8 @@ const CMD_MESSAGE_TYPE = "CMD";
 const CURRENT_FIRMWARE_VERSIONS = Object.freeze({
   color_module: "1.1",
   traction_module: "1.1",
-  line_sensor_module: "1.0.0",
+  line_sensor_module: "1.0",
+  distance_sensor_module: "1.0",
 });
 
 const elements = {

@@ -21,6 +21,7 @@
       serial_number: "TR-001-B2C8",
       name: "Front Traction",
       module_type: "traction_module",
+      firmware_version: "1.1",
       device_node: "/dev/ttyUSB0",
       status: "online connected",
       link_status: "live",
@@ -35,6 +36,9 @@
       serial_number: "LS-001-A3F7",
       name: "Front Line Array",
       module_type: "line_sensor_module",
+      firmware_version: "1.0",
+      expected_page: "line-sensor",
+      expected_page_version: "1.0",
       device_node: "/dev/ttyUSB1",
       status: "online connected",
       link_status: "live",
@@ -49,6 +53,9 @@
       serial_number: "CL-001-D4E9",
       name: "Color Studio Head",
       module_type: "color_module",
+      firmware_version: "1.1",
+      expected_page: "color-studio",
+      expected_page_version: "1.1",
       device_node: "/dev/ttyUSB2",
       status: "online connected",
       link_status: "live",
@@ -63,6 +70,9 @@
       serial_number: "DS-001-C3A5",
       name: "Front Distance",
       module_type: "distance_sensor_module",
+      firmware_version: "1.0",
+      expected_page: "distance-sensor",
+      expected_page_version: "1.0",
       device_node: "/dev/ttyUSB3",
       status: "online connected",
       link_status: "live",
@@ -132,7 +142,7 @@
     pushEvent({ sender: "host", direction: "tx", phase: "hello", message_type: "TEST", device_serial: DS_SERIAL, message: "HELLO" });
     pushEvent({ sender: DS_SERIAL, direction: "rx", phase: "hello", message_type: "TEST", device_serial: DS_SERIAL, message: "HELLO ACK distance_sensor_module" });
     pushEvent({ sender: "host", direction: "tx", phase: "module", message_type: "CMD", device_serial: DS_SERIAL, message: "GET MODULE" });
-    pushEvent({ sender: DS_SERIAL, direction: "rx", phase: "module", message_type: "CMD", device_serial: DS_SERIAL, message: "MODULE,distance_sensor_module,1.0.0" });
+    pushEvent({ sender: DS_SERIAL, direction: "rx", phase: "module", message_type: "CMD", device_serial: DS_SERIAL, message: "MODULE,distance_sensor_module,1.0" });
 
     // a few CMD round-trips
     for (let i = 0; i < 6; i += 1) {
@@ -425,7 +435,10 @@
       echo_gpio: distanceState.info.echoGpio,
       health_flags: distanceState.healthFlags,
       health,
-      raw: `INFO,${distanceState.cfg.name},distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,${distanceState.healthFlags}`,
+      firmware_version: "1.0",
+      expected_page: "distance-sensor",
+      expected_page_version: "1.0",
+      raw: `INFO,${distanceState.cfg.name},distance_sensor_module,distance_sensor_module,20,HC-SR04,3,10,${distanceState.healthFlags},1.0,distance-sensor,1.0`,
     };
     return {
       serial: DS_SERIAL,

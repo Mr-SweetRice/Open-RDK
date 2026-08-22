@@ -2,6 +2,8 @@
   "use strict";
 
   const MODULE_TYPE = "distance_sensor_module";
+  const PAGE_ID = document.body.dataset.pageId || "distance-sensor";
+  const PAGE_VERSION = document.body.dataset.pageVersion || "1.0";
   const SELECTED_KEY = "rdk.selectedDistanceSerial";
   const HISTORY_WINDOW_MS = 30_000;
 
@@ -77,6 +79,8 @@
     triggerGpioValue: $("triggerGpioValue"),
     echoGpioValue: $("echoGpioValue"),
     moduleIdValue: $("moduleIdValue"),
+    firmwareVersionValue: $("firmwareVersionValue"),
+    firmwareStatusValue: $("firmwareStatusValue"),
   };
 
   function selectedDevice() {
@@ -479,6 +483,8 @@
       elements.triggerGpioValue.textContent = "GPIO 3";
       elements.echoGpioValue.textContent = "GPIO 10";
       elements.moduleIdValue.textContent = "0x14";
+      elements.firmwareVersionValue.textContent = "—";
+      elements.firmwareStatusValue.textContent = "—";
       return;
     }
     elements.sensorModelValue.textContent = info.sensor_model || "HC-SR04";
@@ -490,6 +496,9 @@
       Number.isFinite(Number(info.module_id))
         ? `0x${Number(info.module_id).toString(16).toUpperCase().padStart(2, "0")}`
         : "0x14";
+    elements.firmwareVersionValue.textContent = info.firmware_version || "legacy / unknown";
+    const compatible = info.expected_page === PAGE_ID && info.expected_page_version === PAGE_VERSION;
+    elements.firmwareStatusValue.textContent = compatible ? "UpToDate" : "Outdated";
   }
 
   function renderSelftest() {

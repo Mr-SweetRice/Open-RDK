@@ -47,6 +47,8 @@ class DistanceSensorWebviewTests(unittest.TestCase):
         *,
         message_type: str = "CMD",
         telemetry_requested: bool = False,
+        expected_page: str = "distance-sensor",
+        expected_page_version: str = "1.0",
     ):
         self.db_path.write_text(
             json.dumps(
@@ -61,6 +63,9 @@ class DistanceSensorWebviewTests(unittest.TestCase):
                             "telemetry_requested": telemetry_requested,
                             "link_status": "live" if status == "online connected" else "not live",
                             "device_node": "/dev/ttyUSB9",
+                            "firmware_version": "1.0",
+                            "expected_page": expected_page,
+                            "expected_page_version": expected_page_version,
                         }
                     ]
                 }
@@ -96,6 +101,26 @@ class DistanceSensorWebviewTests(unittest.TestCase):
         self.assertTrue(payload["data"]["health"]["above_max"])
         self.assertTrue(payload["data"]["health"]["config_loaded"])
         self.assertGreaterEqual(payload["data"]["age_ms"], 0)
+
+    def test_distance_page_uses_firmware_requested_version(self):
+        endpoint = self._endpoint("/distance-sensor", "GET")
+        response = asyncio.run(endpoint(serial="DS-TEST-01", page_version=""))
+        self.assertTrue(str(response.path).endswith("distance-sensor.html"))
+
+    def test_unknown_distance_page_version_is_blocked(self):
+        self._write_device(status="online connected", expected_page_version="9.9")
+        endpoint = self._endpoint("/distance-sensor", "GET")
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(endpoint(serial="DS-TEST-01", page_version=""))
+        self.assertEqual(caught.exception.status_code, 409)
+
+    def test_color_page_routes_legacy_and_blocks_unknown_versions(self):
+        endpoint = self._endpoint("/color", "GET")
+        response = asyncio.run(endpoint(serial="", page_version="legacy_1.0"))
+        self.assertTrue(str(response.path).endswith("color.html"))
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(endpoint(serial="", page_version="9.9"))
+        self.assertEqual(caught.exception.status_code, 409)
 
     def test_snapshot_rejects_valid_frame_with_negative_distance(self):
         endpoint = self._endpoint(

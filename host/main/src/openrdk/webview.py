@@ -1000,6 +1000,9 @@ def create_webview_app(
             "echo_gpio": echo_gpio,
             "health_flags": health_flags,
             "health": _distance_health(health_flags),
+            "firmware_version": parts[9] if len(parts) > 9 else "",
+            "expected_page": parts[10] if len(parts) > 10 else "",
+            "expected_page_version": parts[11] if len(parts) > 11 else "",
             "raw": str(line or "").strip(),
         }
 
@@ -2027,17 +2030,45 @@ def create_webview_app(
     async def index():
         return FileResponse(os.path.join(static_dir, "index.html"))
 
+    def _select_page_version(page_id: str, serial: str, page_version: str, default_version: str) -> str:
+        selected_version = str(page_version or "").strip()
+        if serial:
+            device = next(
+                (item for item in _load_devices(db_path) if item["serial_number"] == serial),
+                None,
+            )
+            if device:
+                expected_page = str(device.get("expected_page") or "").strip()
+                expected_version = str(device.get("expected_page_version") or "").strip()
+                if expected_page and expected_page != page_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"module expects page '{expected_page}', not '{page_id}'",
+                    )
+                if not selected_version and expected_page == page_id:
+                    selected_version = expected_version
+        if not selected_version:
+            selected_version = default_version
+        if selected_version not in PAGE_VERSIONS[page_id]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"no compatible {page_id} page for version '{selected_version}'",
+            )
+        return selected_version
+
     @app.get("/distance-sensor", include_in_schema=False)
-    async def distance_sensor_page():
+    async def distance_sensor_page(serial: str = "", page_version: str = ""):
+        selected_version = _select_page_version("distance-sensor", serial, page_version, "1.0")
         return FileResponse(
-            os.path.join(static_dir, "distance-sensor.html"),
+            os.path.join(static_dir, PAGE_VERSIONS["distance-sensor"][selected_version]),
             headers={"Cache-Control": "no-store"},
         )
 
     @app.get("/line-sensor", include_in_schema=False)
-    async def line_sensor_page():
+    async def line_sensor_page(serial: str = "", page_version: str = ""):
+        selected_version = _select_page_version("line-sensor", serial, page_version, "1.0")
         return FileResponse(
-            os.path.join(static_dir, "line-sensor.html"),
+            os.path.join(static_dir, PAGE_VERSIONS["line-sensor"][selected_version]),
             headers={"Cache-Control": "no-store"},
         )
 
@@ -2068,13 +2099,7 @@ def create_webview_app(
 
     @app.get("/color", include_in_schema=False)
     async def color_page(serial: str = "", page_version: str = ""):
-        selected_version = str(page_version or "").strip()
-        if not selected_version and serial:
-            device = next((item for item in _load_devices(db_path) if item["serial_number"] == serial), None)
-            if device and device.get("expected_page") == "color-studio":
-                selected_version = str(device.get("expected_page_version") or "").strip()
-        if selected_version not in PAGE_VERSIONS["color-studio"]:
-            selected_version = "legacy_1.0"
+        selected_version = _select_page_version("color-studio", serial, page_version, "1.1")
         return FileResponse(
             os.path.join(static_dir, PAGE_VERSIONS["color-studio"][selected_version]),
             headers={"Cache-Control": "no-store"},

@@ -1403,7 +1403,8 @@ class DistanceSensorModule(BaseModule):
     @classmethod
     def _parse_info_response(cls, response: str) -> dict:
         # INFO,<name>,<module_type>,<firmware_module>,<module_id>,
-        #      <sensor_model>,<trigger_pin>,<echo_pin>,<health_flags>
+        #      <sensor_model>,<trigger_pin>,<echo_pin>,<health_flags>,
+        #      <firmware_version>,<expected_page>,<expected_page_version>
         parts = [part.strip() for part in str(response or "").split(",")]
         if len(parts) < 9 or parts[0] != "INFO":
             raise CommandFailedError(f"unexpected GET INFO response: {response}")
@@ -1425,6 +1426,9 @@ class DistanceSensorModule(BaseModule):
             "echo_pin": echo_pin,
             "health_flags": health_flags,
             "health": cls.decode_health_flags(health_flags),
+            "firmware_version": parts[9] if len(parts) > 9 else "",
+            "expected_page": parts[10] if len(parts) > 10 else "",
+            "expected_page_version": parts[11] if len(parts) > 11 else "",
         }
 
     @classmethod

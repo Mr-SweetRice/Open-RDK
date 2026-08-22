@@ -41,7 +41,7 @@ static int64_t s_stream_telem_last_tx_us = 0;
 #define FRAME_HELLO_ACK_BYTE             0x06U
 #define FRAME_MODULE_QUERY_BYTE          0x04U
 #define FRAME_MODULE_INFO_PREFIX_BYTE    0x05U
-#define FRAME_MODULE_NAME                "line_sensor_module"
+#define FRAME_MODULE_INFO_TEXT           "line_sensor_module|1.0|line-sensor|1.0"
 
 #define FRAME_MSG_TYPE_CMD               0x01U
 #define FRAME_MSG_TYPE_TEST              0x02U
@@ -291,8 +291,10 @@ static bool format_info_snapshot(char *out, size_t out_len)
     sanitize_text_field(state.module_type, sizeof(state.module_type));
     sanitize_text_field(state.firmware_module, sizeof(state.firmware_module));
     sanitize_text_field(state.firmware_version, sizeof(state.firmware_version));
+    sanitize_text_field(state.expected_page, sizeof(state.expected_page));
+    sanitize_text_field(state.expected_page_version, sizeof(state.expected_page_version));
 
-    snprintf(out, out_len, "INFO,%s,%s,%s,%s,%s,%s,%lu,%s,%u,%s,%s,%s,%s",
+    snprintf(out, out_len, "INFO,%s,%s,%s,%s,%s,%s,%lu,%s,%u,%s,%s,%s,%s,%s,%s",
              serial_number,
              state.name,
              status,
@@ -305,7 +307,9 @@ static bool format_info_snapshot(char *out, size_t out_len)
              link_status,
              last_event_at,
              last_link_check_at,
-             state.firmware_version);
+             state.firmware_version,
+             state.expected_page,
+             state.expected_page_version);
     return true;
 }
 
@@ -508,7 +512,7 @@ static void send_control_frame_payload(const uint8_t *payload, size_t payload_le
 
 static void send_module_info_frame(void)
 {
-    const char *name = FRAME_MODULE_NAME;
+    const char *name = FRAME_MODULE_INFO_TEXT;
     size_t name_len = strlen(name);
     if (name_len > 64U) {
         name_len = 64U;

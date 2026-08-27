@@ -22,6 +22,7 @@ from ..constants import (
     STATUS_OFFLINE_DISCONNECTED,
     STATUS_ONLINE_CONNECTED,
     DEFAULT_USB_DENY_PATH_PREFIXES,
+    ESP32_USB_SERIAL_ADAPTER_IDS,
     USB_DENY_PATH_PREFIXES_ENV,
 )
 from . import _state
@@ -391,6 +392,8 @@ def matches(dev: Any) -> bool:
         return True
     vendor_id = _device_property_with_fallback(dev, "ID_VENDOR_ID")
     model_id = _device_property_with_fallback(dev, "ID_MODEL_ID")
+    if (str(vendor_id or "").lower(), str(model_id or "").lower()) in ESP32_USB_SERIAL_ADAPTER_IDS:
+        return True
     if ID_VENDOR_ESP32 and vendor_id == ID_VENDOR_ESP32:
         return True
     if ID_VENDOR_ESP32 and ID_MODEL_ESP32:

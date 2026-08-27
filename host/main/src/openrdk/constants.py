@@ -14,6 +14,7 @@ TRACTION_MODULE_ID = 0x11
 LINE_SENSOR_MODULE_ID = 0x12
 COLOR_MODULE_ID = 0x13
 DISTANCE_SENSOR_MODULE_ID = 0x14
+CONTROL_HUB_MODULE_ID = 0x15
 HELLO_MESSAGE_BYTES = b"\x01"
 HELLO_ACK_BYTES = b"\x06"
 MODULE_QUERY_MESSAGE_BYTES = b"\x04"
@@ -158,6 +159,7 @@ MODULE_ID_TO_TYPE = {
     LINE_SENSOR_MODULE_ID: "line_sensor_module",
     COLOR_MODULE_ID: "color_module",
     DISTANCE_SENSOR_MODULE_ID: "distance_sensor_module",
+    CONTROL_HUB_MODULE_ID: "control_hub_module",
 }
 
 WEBVIEW_HOST = "0.0.0.0"
@@ -178,6 +180,17 @@ SERIAL_NUMBER_ESP32_SHORT = "98:3D:AE:41:97:C4"
 ID_VENDOR_ESP32 = "303a"
 ID_MODEL_ESP32 = "1001"
 MANUFACTURER_ESP32 = "Espressif"
+
+# USB/UART bridges commonly fitted to ESP32 DevKit boards. Windows exposes the
+# bridge VID/PID instead of the ESP32 identity, so discovery must explicitly
+# allow these IDs while continuing to ignore Bluetooth serial ports.
+ESP32_USB_SERIAL_ADAPTER_IDS = frozenset({
+    ("1a86", "55d4"),  # WCH CH9102
+    ("1a86", "55d3"),  # WCH CH9102/CH343 variant
+    ("1a86", "7523"),  # WCH CH340/CH341
+    ("10c4", "ea60"),  # Silicon Labs CP210x
+    ("0403", "6001"),  # FTDI FT232
+})
 
 # Linux USB topology branches that Open-RDK must not probe for RDK modules.
 # Camera branch reported on the Raspberry Pi top-right USB port:

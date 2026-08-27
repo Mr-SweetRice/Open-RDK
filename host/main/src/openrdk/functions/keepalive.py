@@ -436,12 +436,17 @@ def _stop_keepalive_monitor(serial_number: str | None):
         return
     with _state._MONITOR_LOCK:
         stop_event = _state._KEEPALIVE_STOPS.pop(serial_number, None)
-        _state._KEEPALIVE_THREADS.pop(serial_number, None)
+        monitor_thread = _state._KEEPALIVE_THREADS.pop(serial_number, None)
         wake_event = _state._KEEPALIVE_WAKES.pop(serial_number, None)
     if stop_event:
         stop_event.set()
     if wake_event:
         wake_event.set()
+    if (monitor_thread and monitor_thread.is_alive()
+            and monitor_thread is not threading.current_thread()):
+        # A replacement worker must not open the same Windows COM port until
+        # the old worker has left its handshake/read loop and closed pyserial.
+        monitor_thread.join(timeout=6.0)
     _cancel_traction_out_request(serial_number, "keepalive_stopped")
     _cancel_cmd_request(serial_number, "keepalive_stopped")
 
@@ -602,7 +607,7 @@ def _keepalive_loop(
 
                 try:
                     keepalive_serial = serial.Serial(
-                        device_node,
+                        port=None,
                         baudrate=active_baud,
                         timeout=0.05 if traction_out_mode else STREAM_READ_TIMEOUT_SEC,
                         write_timeout=STREAM_WRITE_TIMEOUT_SEC,
@@ -610,10 +615,15 @@ def _keepalive_loop(
                         rtscts=False,
                     )
                     try:
-                        keepalive_serial.dtr = True
+                        # Apply inactive modem-control levels before opening the
+                        # CH9102. Opening first can pulse EN/BOOT and leave an
+                        # ESP32 in the ROM downloader during mode transitions.
+                        keepalive_serial.dtr = False
                         keepalive_serial.rts = False
                     except Exception:
                         pass
+                    keepalive_serial.port = device_node
+                    keepalive_serial.open()
                     if HELLO_OPEN_DELAY_SEC > 0:
                         time.sleep(HELLO_OPEN_DELAY_SEC)
                     keepalive_port = device_node
@@ -971,7 +981,13 @@ def _keepalive_loop(
                     if stream_reader is None:
                         error_kind = "stream_reader_unavailable"
                         raise RuntimeError("stream reader unavailable")
-                    stream_reader.clear_frames()
+                    # The encoder can emit EXEC/STOP while the keepalive worker is
+                    # sleeping.  Log queued unsolicited frames before preparing the
+                    # next request; clearing the queue here used to discard them.
+                    _drain_stream_reader_frames(
+                        stream_reader=stream_reader, port=device_node,
+                        db_path=db_path, serial_number=serial_number,
+                    )
                     active_payload = None
                     if active_type == MESSAGE_TYPE_CONTROL:
                         active_payload = _build_traction_out_payload(device_traction_out_value)

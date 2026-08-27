@@ -49,6 +49,17 @@ _FIRMWARE_MANIFEST: dict[str, dict] = {
             "0x10000": "distance_sensor_module/distance_sensor_module.bin",
         },
     },
+    "control_hub_module": {
+        "chip": "esp32",
+        "flash-mode": "dio",
+        "flash-size": "2MB",
+        "flash-freq": "40m",
+        "files": {
+            "0x1000":  "control_hub_module/bootloader.bin",
+            "0x8000":  "control_hub_module/partition-table.bin",
+            "0x10000": "control_hub_module/control_hub_module.bin",
+        },
+    },
 }
 
 SUPPORTED_FIRMWARE_TYPES: list[str] = list(_FIRMWARE_MANIFEST.keys())

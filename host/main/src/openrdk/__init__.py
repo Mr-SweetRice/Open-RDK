@@ -11,6 +11,7 @@ from .errors import (
 from .modules import (
     BaseModule,
     ColorSensorModule,
+    ControlHubModule,
     DistanceSensorModule,
     LineSensorModule,
     Motors,
@@ -31,6 +32,7 @@ __all__ = [
     "run_together",
     "LineSensorModule",
     "ColorSensorModule",
+    "ControlHubModule",
     "DistanceSensorModule",
     "RelayError",
     "RuntimeNotStartedError",

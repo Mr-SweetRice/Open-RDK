@@ -1,0 +1,56 @@
+(function(){
+  "use strict";
+  const GPIO=[0,21,16,17,18,19,4,22,25,34,35,39];
+  const SERVO_GPIO=[13,12,23,5,2,15];
+  const MAX_SCRIPT_BYTES=50*1024*1024;
+  const state={serial:new URLSearchParams(location.search).get("serial")||"",devices:[],scripts:[],busy:false,activeTab:"config"};
+  const $=id=>document.getElementById(id);
+  const el={deviceSelect:$("deviceSelect"),status:$("status"),refresh:$("refreshBtn"),save:$("saveBtn"),name:$("deviceName"),menu:$("menuRows"),servos:$("servoRows"),gpios:$("gpioRows"),file:$("scriptFile"),upload:$("uploadBtn"),scriptList:$("scriptList"),execState:$("execState"),execName:$("execName"),execKind:$("execKind"),execCode:$("execCode"),execOutput:$("execOutput"),configTab:$("configTab"),imuTab:$("imuTab"),calibrateImu:$("calibrateImuBtn"),imuRoll:$("imuRoll"),imuPitch:$("imuPitch"),imuYaw:$("imuYaw"),imuGyroX:$("imuGyroX"),imuGyroY:$("imuGyroY"),imuGyroZ:$("imuGyroZ"),imuCalibrationState:$("imuCalibrationState"),imuCalibrationHint:$("imuCalibrationHint"),imuProgressBar:$("imuProgressBar"),imuProgressText:$("imuProgressText")};
+
+  function setStatus(text,kind=""){el.status.textContent=text;el.status.className=`hub-status ${kind}`.trim()}
+  async function request(url,method="GET",body){const response=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),cache:"no-store"});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload.detail||`HTTP ${response.status}`);return payload}
+  function endpoint(path){return `/api/devices/${encodeURIComponent(state.serial)}/control-hub/${path}`}
+  function scriptOptions(selected=""){const values=state.scripts.map(x=>x.name);if(selected&&!values.includes(selected))values.unshift(selected);return `<option value="">Selecione um .py</option>`+values.map(name=>`<option value="${escapeHtml(name)}"${name===selected?" selected":""}>${escapeHtml(name)}</option>`).join("")}
+  function escapeHtml(value){return String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+  function syncRow(row){const python=row.querySelector('[data-role="kind"]').value==="python";const commandBox=row.querySelector('[data-role="command-box"]'),shell=row.querySelector('[data-role="shell"]'),command=row.querySelector('[data-role="command"]'),script=row.querySelector('[data-role="script"]');commandBox.hidden=python;shell.disabled=python;command.disabled=python;script.hidden=!python;script.disabled=!python}
+
+  function build(){
+    for(let i=0;i<8;i++){const row=document.createElement("div");row.className="menu-row";row.innerHTML=`<input data-role="enabled" type="checkbox" aria-label="Ativar item ${i+1}"><input data-role="name" type="text" maxlength="30" placeholder="Item ${i+1}"><select data-role="kind" aria-label="Tipo do item ${i+1}"><option value="command">Comando</option><option value="python">Código Python</option></select><div class="execution-input"><div data-role="command-box" class="command-box"><select data-role="shell" aria-label="Terminal do item ${i+1}"><option value="auto">Automático</option><option value="cmd">CMD</option><option value="powershell">PowerShell</option><option value="sh">sh</option></select><input data-role="command" type="text" maxlength="90" placeholder="ex.: echo Olá"></div><select data-role="script" aria-label="Código Python do item ${i+1}" hidden></select></div>`;row.querySelector('[data-role="kind"]').addEventListener("change",()=>syncRow(row));el.menu.appendChild(row)}
+    for(let i=0;i<6;i++){const row=document.createElement("div");row.className="servo-row";row.innerHTML=`<span>Servo ${i+1}<small>GPIO ${SERVO_GPIO[i]}</small></span><input type="range" min="0" max="180" value="90"><output>90°</output>`;const input=row.querySelector("input"),output=row.querySelector("output");input.addEventListener("input",()=>output.textContent=`${input.value}°`);input.addEventListener("change",()=>act(async()=>request(endpoint("servo"),"POST",{channel:i,angle:Number(input.value)}),`Servo ${i+1} atualizado.`));el.servos.appendChild(row)}
+    GPIO.forEach((gpio,i)=>{const button=document.createElement("button");button.className="action-btn gpio-button";button.dataset.value="0";if(i>=9){button.textContent=`GPIO ${gpio}: INPUT`;button.disabled=true}else{button.textContent=`GPIO ${gpio}: LOW`;button.addEventListener("click",()=>{const value=button.dataset.value==="1"?0:1;act(async()=>{await request(endpoint("gpio"),"POST",{pin:i,value});button.dataset.value=String(value);button.textContent=`GPIO ${gpio}: ${value?"HIGH":"LOW"}`},`GPIO ${gpio} atualizado.`)})}el.gpios.appendChild(button)})
+  }
+
+  async function loadScripts(){const payload=await request("/api/control-hub/scripts");state.scripts=payload.scripts||[];el.scriptList.innerHTML=state.scripts.length?state.scripts.map(x=>`<span><strong>${escapeHtml(x.name)}</strong> · ${x.size>=1024*1024?(x.size/(1024*1024)).toFixed(1)+" MB":Math.ceil(x.size/1024)+" KiB"}</span>`).join(""):"Nenhum código carregado.";[...el.menu.children].forEach(row=>{const select=row.querySelector('[data-role="script"]'),selected=select.value;select.innerHTML=scriptOptions(selected)})}
+  async function loadDevices(){const payload=await request("/api/devices");state.devices=(payload.devices||[]).filter(d=>String(d.module_type||"").toLowerCase()==="control_hub_module");if(!state.devices.some(d=>d.serial_number===state.serial))state.serial=state.devices[0]?.serial_number||"";el.deviceSelect.innerHTML="";if(!state.devices.length){const o=document.createElement("option");o.textContent="Nenhum Control Hub";el.deviceSelect.appendChild(o);setStatus("Nenhum control_hub_module detectado.","error");return false}state.devices.forEach(d=>{const o=document.createElement("option");o.value=d.serial_number;o.textContent=`${d.name||d.module_type} · ${d.serial_number}`;o.selected=o.value===state.serial;el.deviceSelect.appendChild(o)});return true}
+  function render(payload){const profile=payload.profile||{};el.name.value=profile.device_name||"Modulo de Controle";const menu=Array.isArray(profile.menu)?profile.menu:[];[...el.menu.children].forEach((row,i)=>{const item=menu[i]||{};row.querySelector('[data-role="enabled"]').checked=Boolean(item.enabled);row.querySelector('[data-role="name"]').value=item.name||"";row.querySelector('[data-role="kind"]').value=item.kind||"command";row.querySelector('[data-role="shell"]').value=item.shell||"auto";row.querySelector('[data-role="command"]').value=item.command||"";row.querySelector('[data-role="script"]').innerHTML=scriptOptions(item.script||"");syncRow(row)});renderExecution(payload.execution)}
+  function renderExecution(execution){const x=execution||{};el.execState.textContent=x.state||"—";el.execName.textContent=x.name||((Number.isInteger(x.slot))?`Item ${x.slot+1}`:"—");el.execKind.textContent=x.kind==="python"?"Python":(x.kind==="command"?"Comando":"—");el.execCode.textContent=x.returncode===undefined?"—":String(x.returncode);el.execOutput.value=[x.stdout,x.stderr,x.error].filter(Boolean).join("\n")}
+  function fixed(value,digits=2){const number=Number(value);return Number.isFinite(number)?number.toFixed(digits):"—"}
+  function renderImu(imu){
+    el.imuRoll.textContent=fixed(imu.roll_deg);
+    el.imuPitch.textContent=fixed(imu.pitch_deg);
+    el.imuYaw.textContent=fixed(imu.yaw_deg);
+    el.imuGyroX.textContent=`${fixed(imu.gyro_x_dps,3)} °/s`;
+    el.imuGyroY.textContent=`${fixed(imu.gyro_y_dps,3)} °/s`;
+    el.imuGyroZ.textContent=`${fixed(imu.gyro_z_dps,3)} °/s`;
+    const progress=Math.max(0,Math.min(100,Number(imu.calibration_progress)||0));
+    el.imuProgressBar.style.width=`${progress}%`;
+    el.imuProgressText.textContent=`${progress}%`;
+    el.calibrateImu.disabled=Boolean(imu.calibrating);
+    if(imu.calibrating){el.imuCalibrationState.textContent="Calibrando…";el.imuCalibrationHint.textContent="Não mova o módulo durante a medição do drift de yaw."}
+    else if(imu.calibrated){el.imuCalibrationState.textContent="Calibrado";el.imuCalibrationHint.textContent="Bias do giroscópio salvo no módulo. O yaw atual é relativo à calibração."}
+    else{el.imuCalibrationState.textContent="Não calibrado";el.imuCalibrationHint.textContent="Deixe o módulo completamente parado e pressione Calibrar IMU."}
+  }
+  async function loadImu(){if(!state.serial)return;renderImu(await request(endpoint("imu")))}
+  function selectTab(name){state.activeTab=name==="imu"?"imu":"config";document.querySelectorAll(".hub-tab").forEach(button=>button.classList.toggle("active",button.dataset.tab===state.activeTab));el.configTab.hidden=state.activeTab!=="config";el.imuTab.hidden=state.activeTab!=="imu";if(state.activeTab==="imu"&&state.serial)loadImu().catch(error=>setStatus(error.message,"error"))}
+  async function refresh(full=true){await loadScripts();if(!await loadDevices()||!state.serial)return;const payload=await request(endpoint(full?"refresh":"snapshot"),full?"POST":"GET",full?{}:undefined);render(payload);setStatus("Módulo sincronizado.","ok")}
+  async function act(fn,success){if(state.busy)return;state.busy=true;try{await fn();setStatus(success,"ok")}catch(error){setStatus(error.message,"error")}finally{state.busy=false}}
+  function collectMenu(){return [...el.menu.children].map(row=>({enabled:row.querySelector('[data-role="enabled"]').checked,name:row.querySelector('[data-role="name"]').value.trim(),kind:row.querySelector('[data-role="kind"]').value,shell:row.querySelector('[data-role="shell"]').value,command:row.querySelector('[data-role="command"]').value.trim(),script:row.querySelector('[data-role="script"]').value}))}
+
+  el.deviceSelect.addEventListener("change",()=>{state.serial=el.deviceSelect.value;const url=new URL(location.href);url.searchParams.set("serial",state.serial);history.replaceState(null,"",url);act(()=>refresh(true),"Módulo carregado.")});
+  el.refresh.addEventListener("click",()=>act(()=>refresh(true),"Módulo sincronizado."));
+  document.querySelectorAll(".hub-tab").forEach(button=>button.addEventListener("click",()=>selectTab(button.dataset.tab)));
+  el.calibrateImu.addEventListener("click",()=>act(async()=>{renderImu(await request(endpoint("imu/calibrate"),"POST",{}))},"Calibração iniciada. Mantenha o módulo parado por 5 segundos."));
+  el.save.addEventListener("click",()=>act(async()=>{const payload=await request(endpoint("config"),"POST",{device_name:el.name.value.trim(),menu:collectMenu(),save:true});render(payload)},"Configuração salva no ESP32 e no host."));
+  el.upload.addEventListener("click",()=>act(async()=>{const file=el.file.files[0];if(!file)throw new Error("Selecione um arquivo .py.");if(!file.name.toLowerCase().endsWith(".py"))throw new Error("O arquivo precisa ter extensão .py.");if(file.size>MAX_SCRIPT_BYTES)throw new Error("O arquivo excede o limite de 50 MB.");await request("/api/control-hub/scripts/upload","POST",{filename:file.name,content:await file.text()});el.file.value="";await loadScripts()},"Código Python carregado."));
+  build();selectTab("config");act(()=>refresh(true),"Módulo sincronizado.");setInterval(()=>{if(!state.serial||state.busy)return;if(state.activeTab==="imu")loadImu().catch(()=>{});else request(endpoint("snapshot")).then(p=>renderExecution(p.execution)).catch(()=>{})},500);
+})();

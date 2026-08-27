@@ -8,6 +8,7 @@
 !host/main/src/openrdk/firmware/distance_sensor_module/*.bin
 !host/main/src/openrdk/firmware/traction_module/*.bin
 !host/main/src/openrdk/firmware/line_sensor_module/*.bin
+!host/main/src/openrdk/firmware/control_hub_module/*.bin
 **/core.*
 **/build.bad*/
 
@@ -36,5 +37,7 @@ Thumbs.db
 host/main/certs/
 **/.runpy-access.state
 **/espressif_devices.json
+**/control_hub_commands.json
+**/control_hub_scripts/
 #hardware
 /hardware/

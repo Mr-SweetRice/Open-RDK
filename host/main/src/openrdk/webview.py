@@ -1,9 +1,17 @@
 import asyncio
+import base64
 import json
+import math
 import os
 import queue
+import re
+import signal
+import shutil
+import subprocess
+import sys
 import threading
 import time
+import unicodedata
 from collections import deque
 
 import uvicorn
@@ -38,6 +46,7 @@ from .functions import (
     get_latest_ls_frame,
     resume_keepalive_monitors,
     send_device_cmd_once,
+    send_device_traction_command_once,
     set_active_message_type,
     set_device_message_type,
     send_device_traction_out_once,
@@ -194,7 +203,7 @@ def _load_devices(db_path: str) -> list[dict]:
 
 
 class CommsStreamBroker:
-    def __init__(self, comms_log_path: str, history_size: int = 5000):
+    def __init__(self, comms_log_path: str, history_size: int = 5000, event_callback=None):
         self._comms_log_path = os.path.abspath(comms_log_path)
         self._history = deque(maxlen=max(100, history_size))
         self._history_lock = threading.Lock()
@@ -207,6 +216,7 @@ class CommsStreamBroker:
         self._log_thread: threading.Thread | None = None
         self._stream_thread: threading.Thread | None = None
         self._next_subscriber_id = 1
+        self._event_callback = event_callback
 
     def start(self):
         _ensure_file(self._comms_log_path)
@@ -313,6 +323,12 @@ class CommsStreamBroker:
             with self._history_lock:
                 self._history.append(event)
 
+            if self._event_callback is not None:
+                try:
+                    self._event_callback(event)
+                except Exception as exc:
+                    print(f"[control-hub] event callback failed: {exc}", flush=True)
+
             dead: list[int] = []
             with self._subscribers_lock:
                 subscribers = list(self._subscribers.items())
@@ -363,6 +379,691 @@ class CommsStreamBroker:
         if len(events) > keep:
             events = events[-keep:]
         return events
+
+
+class ControlHubScriptStore:
+    """Stores user-uploaded Python files in one controlled host directory."""
+
+    MAX_BYTES = 50 * 1024 * 1024
+    _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. -]{0,99}\.py$", re.IGNORECASE)
+
+    def __init__(self, folder: str):
+        self.folder = os.path.abspath(folder)
+        self._lock = threading.Lock()
+        os.makedirs(self.folder, exist_ok=True)
+
+    def resolve(self, filename: str, *, require_exists: bool = True) -> str:
+        name = str(filename or "").strip()
+        if not self._SAFE_NAME.fullmatch(name) or os.path.basename(name) != name:
+            raise ValueError("invalid Python filename")
+        path = os.path.abspath(os.path.join(self.folder, name))
+        if os.path.dirname(path) != self.folder:
+            raise ValueError("invalid Python filename")
+        if require_exists and not os.path.isfile(path):
+            raise FileNotFoundError(name)
+        return path
+
+    def save(self, filename: str, content: str) -> dict:
+        path = self.resolve(filename, require_exists=False)
+        try:
+            encoded = str(content).encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("script must be valid UTF-8") from exc
+        if len(encoded) > self.MAX_BYTES:
+            raise ValueError("script exceeds the 50 MB limit")
+        with self._lock:
+            temp_path = path + ".upload"
+            with open(temp_path, "wb") as fp:
+                fp.write(encoded)
+            os.replace(temp_path, path)
+        return self.describe(path)
+
+    @staticmethod
+    def describe(path: str) -> dict:
+        stat = os.stat(path)
+        return {
+            "name": os.path.basename(path),
+            "size": stat.st_size,
+            "updated_at": stat.st_mtime,
+        }
+
+    def list(self) -> list[dict]:
+        with self._lock:
+            paths = [
+                os.path.join(self.folder, name)
+                for name in os.listdir(self.folder)
+                if name.lower().endswith(".py")
+                and os.path.isfile(os.path.join(self.folder, name))
+            ]
+        return [self.describe(path) for path in sorted(paths, key=lambda value: os.path.basename(value).lower())]
+
+
+class ControlHubExecutor:
+    """Validates firmware EXEC events against host-owned menu profiles."""
+
+    EVENT_DEDUP_TTL_SEC = 2.0
+    MODULE_SYNC_REFRESH_SEC = 30.0
+    MODULE_SYNC_TRACTION_QUIET_SEC = 3.0
+
+    def __init__(
+        self, db_path: str, profiles_path: str, scripts_path: str | None = None,
+        enable_module_sync: bool = True,
+    ):
+        self.db_path = os.path.abspath(db_path)
+        self.profiles_path = os.path.abspath(profiles_path)
+        self.script_store = ControlHubScriptStore(
+            scripts_path or os.path.join(os.path.dirname(self.profiles_path), "control_hub_scripts")
+        )
+        self._lock = threading.Lock()
+        self._seen_lock = threading.Lock()
+        self._seen: deque[tuple[tuple[str, int, str], float]] = deque(maxlen=256)
+        self._status: dict[str, dict] = {}
+        self._active: dict[str, dict] = {}
+        self._module_sync_lock = threading.Lock()
+        self._module_sync_running = False
+        self._module_sync_last_check = 0.0
+        self._module_sync_suspended_until = 0.0
+        self._module_sync_signatures: dict[str, tuple[str, ...]] = {}
+        self._module_sync_last_success: dict[str, float] = {}
+        self._module_sync_targets: dict[str, tuple[tuple[str, str], ...]] = {}
+        self._traction_locks: dict[str, threading.Lock] = {}
+        self._traction_pending: dict[str, tuple[str, int, str, int]] = {}
+        self._traction_workers: set[str] = set()
+        self._module_sync_enabled = bool(enable_module_sync)
+
+    @staticmethod
+    def _decode(value: str) -> str:
+        text = str(value or "").strip()
+        padding = "=" * ((4 - len(text) % 4) % 4)
+        return base64.urlsafe_b64decode((text + padding).encode("ascii")).decode("utf-8")
+
+    def _load(self) -> dict:
+        try:
+            with open(self.profiles_path, "r", encoding="utf-8") as fp:
+                value = json.load(fp)
+            return value if isinstance(value, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def set_profile(self, serial: str, profile: dict) -> None:
+        with self._lock:
+            data = self._load()
+            data[str(serial)] = profile
+            os.makedirs(os.path.dirname(self.profiles_path) or ".", exist_ok=True)
+            temp_path = self.profiles_path + ".tmp"
+            with open(temp_path, "w", encoding="utf-8") as fp:
+                json.dump(data, fp, ensure_ascii=False, indent=2)
+            os.replace(temp_path, self.profiles_path)
+
+    def get_profile(self, serial: str) -> dict:
+        with self._lock:
+            value = self._load().get(str(serial), {})
+            return dict(value) if isinstance(value, dict) else {}
+
+    def status(self, serial: str) -> dict | None:
+        with self._lock:
+            value = self._status.get(str(serial))
+            return dict(value) if isinstance(value, dict) else None
+
+    @staticmethod
+    def _oled_label(value: str) -> str:
+        ascii_text = unicodedata.normalize("NFKD", str(value or ""))
+        ascii_text = ascii_text.encode("ascii", errors="ignore").decode("ascii")
+        cleaned = " ".join(ascii_text.replace(",", " ").split()).strip()
+        encoded = cleaned.encode("utf-8")[:30]
+        return encoded.decode("utf-8", errors="ignore") or "Modulo RDK"
+
+    def _schedule_module_sync(self) -> None:
+        if not self._module_sync_enabled:
+            return
+        now = time.monotonic()
+        with self._module_sync_lock:
+            if (self._module_sync_running or now < self._module_sync_suspended_until
+                    or now - self._module_sync_last_check < 2.0):
+                return
+            self._module_sync_running = True
+            self._module_sync_last_check = now
+        threading.Thread(
+            target=self._sync_connected_modules,
+            name="control-hub-module-sync", daemon=True,
+        ).start()
+
+    def _is_duplicate_event(self, serial: str, sequence: int, message: str) -> bool:
+        """Deduplicate retransmissions without merging distinct encoder values."""
+        key = (str(serial), int(sequence), str(message))
+        now = time.monotonic()
+        with self._seen_lock:
+            while (self._seen
+                   and now - self._seen[0][1] > self.EVENT_DEDUP_TTL_SEC):
+                self._seen.popleft()
+            if any(seen_key == key for seen_key, _seen_at in self._seen):
+                return True
+            self._seen.append((key, now))
+        return False
+
+    def _sync_connected_modules(self) -> None:
+        try:
+            devices = _load_devices(self.db_path)
+            connected = [
+                item for item in devices
+                if str(item.get("status") or "").lower() == "online connected"
+            ]
+            connected.sort(key=lambda item: str(item.get("serial_number") or ""))
+            visible_connected = [
+                item for item in connected
+                if str(item.get("module_type") or "").lower() != "control_hub_module"
+            ][:8]
+            labels = tuple(
+                self._oled_label(item.get("name") or item.get("module_type") or "Modulo RDK")
+                for item in visible_connected
+            )
+            kinds = tuple(
+                1 if str(item.get("module_type") or "").lower() == "traction_module" else 0
+                for item in visible_connected
+            )
+            targets = tuple(
+                (str(item.get("serial_number") or ""), str(item.get("module_type") or "").lower())
+                for item in visible_connected
+            )
+            signature = tuple(f"{kind}:{label}" for kind, label in zip(kinds, labels))
+            hubs = [
+                item for item in connected
+                if str(item.get("module_type") or "").lower() == "control_hub_module"
+            ]
+            for hub in hubs:
+                serial = str(hub.get("serial_number") or "").strip()
+                if not serial:
+                    continue
+                self._module_sync_targets[serial] = targets
+                if (self._module_sync_signatures.get(serial) == signature
+                        and time.monotonic() - self._module_sync_last_success.get(serial, 0.0)
+                        < self.MODULE_SYNC_REFRESH_SEC):
+                    continue
+                if get_device_message_type(db_path=self.db_path, serial_number=serial) != "CMD":
+                    continue
+                commands = [
+                    f"SET MODULE {index} {kinds[index]} {base64.urlsafe_b64encode(label.encode('utf-8')).decode('ascii').rstrip('=')}"
+                    for index, label in enumerate(labels)
+                ] + [f"SET MODULE COUNT {len(labels)}"]
+                complete = True
+                for command in commands:
+                    result = send_device_cmd_once(
+                        db_path=self.db_path, serial_number=serial,
+                        command=command, timeout_sec=1.5,
+                    )
+                    if not result or not bool(result.get("ok")):
+                        complete = False
+                        break
+                if complete:
+                    self._module_sync_signatures[serial] = signature
+                    self._module_sync_last_success[serial] = time.monotonic()
+        except Exception as exc:
+            print(f"[control-hub] module sync failed: {exc}", flush=True)
+        finally:
+            with self._module_sync_lock:
+                self._module_sync_running = False
+
+    def handle_event(self, event: dict) -> None:
+        if str(event.get("direction") or "").lower() != "rx":
+            return
+        serial = str(event.get("device_serial") or event.get("sender") or "").strip()
+        if str(event.get("message_type") or "").upper() != "CONTROL":
+            device = next(
+                (item for item in _load_devices(self.db_path)
+                 if str(item.get("serial_number") or "") == serial),
+                None,
+            )
+            if str((device or {}).get("module_type") or "").lower() == "control_hub_module":
+                self._schedule_module_sync()
+            return
+        message = str(event.get("message") or "").strip()
+        if message.startswith("TRACT,"):
+            self._handle_traction_event(serial, event, message)
+            return
+        if message.startswith("STOP,"):
+            try:
+                slot = int(message.split(",", 1)[1])
+            except (TypeError, ValueError):
+                return
+            self._request_stop(serial, slot)
+            return
+        if not message.startswith("EXEC,"):
+            return
+        parts = message.split(",", 3)
+        if len(parts) != 4:
+            return
+        try:
+            slot = int(parts[1])
+            mode = int(parts[2])
+            sequence = int(event.get("seq", -1))
+            requested_value = self._decode(parts[3])
+        except (TypeError, ValueError, UnicodeError):
+            return
+        if not serial or slot < 0 or slot >= 8 or mode not in (0, 1) or not requested_value:
+            return
+        device = next(
+            (item for item in _load_devices(self.db_path)
+             if item.get("serial_number") == serial),
+            None,
+        )
+        if str((device or {}).get("module_type") or "").lower() != "control_hub_module":
+            return
+        profile = self.get_profile(serial)
+        menu = profile.get("menu") if isinstance(profile.get("menu"), list) else []
+        configured = menu[slot] if slot < len(menu) and isinstance(menu[slot], dict) else {}
+        kind = str(configured.get("kind") or "command").strip().lower()
+        expected_mode = 1 if kind == "python" else 0
+        expected_value = str(
+            (configured.get("script") if mode == 1 else configured.get("command")) or ""
+        ).strip()
+        if (not configured.get("enabled") or mode != expected_mode
+                or expected_value != requested_value):
+            with self._lock:
+                self._status[serial] = {
+                    "state": "rejected", "slot": slot,
+                    "error": "execution request does not match the host profile",
+                    "finished_at": time.time(),
+                }
+            self._notify_firmware(serial, slot, "FAILED")
+            return
+        script_path = None
+        if mode == 1:
+            try:
+                script_path = self.script_store.resolve(requested_value)
+            except (ValueError, FileNotFoundError) as exc:
+                with self._lock:
+                    self._status[serial] = {
+                        "state": "rejected", "slot": slot, "name": configured.get("name", ""),
+                        "error": f"Python script is unavailable: {exc}", "finished_at": time.time(),
+                    }
+                self._notify_firmware(serial, slot, "FAILED")
+                return
+        if self._is_duplicate_event(serial, sequence, message):
+            return
+        with self._lock:
+            if serial in self._active:
+                self._status[serial] = {
+                    "state": "rejected", "slot": slot,
+                    "error": "another slot is already running", "finished_at": time.time(),
+                }
+                threading.Thread(
+                    target=self._notify_firmware, args=(serial, slot, "FAILED"), daemon=True,
+                ).start()
+                return
+            terminal = str(configured.get("shell") or "auto").strip().lower()
+            self._status[serial] = {
+                "state": "running", "slot": slot,
+                "name": configured.get("name", ""), "kind": kind,
+                "shell": "python" if mode == 1 else terminal,
+                "started_at": time.time(),
+            }
+            self._active[serial] = {"slot": slot, "process": None, "stop_requested": False}
+        threading.Thread(
+            target=self._run,
+            args=(serial, slot, str(configured.get("name") or ""), kind,
+                  requested_value, terminal, script_path),
+            name=f"control-hub-execution-{slot}",
+            daemon=True,
+        ).start()
+
+    def _handle_traction_event(self, hub_serial: str, event: dict, message: str) -> None:
+        parts = message.split(",")
+        if len(parts) != 4:
+            return
+        try:
+            module_index = int(parts[1])
+            action = parts[2].strip().upper()
+            value = int(parts[3])
+            sequence = int(event.get("seq", -1))
+        except (TypeError, ValueError):
+            return
+        limits = {"POS": (-3600, 3600), "RPM": (-150, 150), "OUT": (-100, 100), "CLEAR": (0, 0)}
+        if action not in limits or not (limits[action][0] <= value <= limits[action][1]):
+            return
+        with self._module_sync_lock:
+            self._module_sync_suspended_until = max(
+                self._module_sync_suspended_until,
+                time.monotonic() + self.MODULE_SYNC_TRACTION_QUIET_SEC,
+            )
+        devices = _load_devices(self.db_path)
+        hub = next((item for item in devices if str(item.get("serial_number")) == hub_serial), None)
+        if str((hub or {}).get("module_type") or "").lower() != "control_hub_module":
+            return
+        targets = self._module_sync_targets.get(hub_serial, ())
+        if module_index < 0 or module_index >= len(targets):
+            self._notify_traction_firmware(hub_serial, module_index, action, "FAILED")
+            return
+        target_serial, target_type = targets[module_index]
+        target = next((item for item in devices if str(item.get("serial_number")) == target_serial), None)
+        if (target_type != "traction_module" or
+                str((target or {}).get("status") or "").lower() != "online connected"):
+            self._notify_traction_firmware(hub_serial, module_index, action, "FAILED")
+            return
+        if self._is_duplicate_event(hub_serial, sequence, message):
+            return
+        with self._lock:
+            self._traction_locks.setdefault(target_serial, threading.Lock())
+            self._traction_pending[target_serial] = (
+                hub_serial, module_index, action, value,
+            )
+            self._status[hub_serial] = {
+                "state": "traction_running", "module_index": module_index,
+                "target_serial": target_serial, "action": action, "value": value,
+                "started_at": time.time(),
+            }
+            if target_serial in self._traction_workers:
+                return
+            self._traction_workers.add(target_serial)
+        threading.Thread(
+            target=self._traction_worker,
+            args=(target_serial,),
+            name=f"control-hub-traction-{target_serial}", daemon=True,
+        ).start()
+
+    def _traction_worker(self, target_serial: str) -> None:
+        while True:
+            with self._lock:
+                pending = self._traction_pending.pop(target_serial, None)
+                if pending is None:
+                    self._traction_workers.discard(target_serial)
+                    return
+            hub_serial, module_index, action, value = pending
+            self._run_traction_control(
+                hub_serial, module_index, target_serial, action, value,
+            )
+
+    def _run_traction_control(
+        self, hub_serial: str, module_index: int, target_serial: str,
+        action: str, value: int,
+    ) -> None:
+        ok = False
+        error = ""
+        lock = self._traction_locks[target_serial]
+        try:
+            with lock:
+                current_type = get_device_message_type(self.db_path, target_serial)
+                if action in ("POS", "RPM") and current_type == "CONTROL":
+                    clear_result = send_device_traction_command_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        command="CLR OUT", timeout_sec=1.5,
+                    )
+                    if not clear_result or not clear_result.get("ok"):
+                        raise RuntimeError(
+                            str((clear_result or {}).get("error_kind") or "force_output_clear_failed")
+                        )
+                message_type = "CONTROL" if action in ("OUT", "CLEAR") else "CMD"
+                if current_type != message_type:
+                    set_device_message_type(self.db_path, target_serial, message_type)
+                    time.sleep(0.05)
+                if action == "POS":
+                    commands = [f"SET PID POS ANGLE {value}", "START PID POS"]
+                    results = [send_device_cmd_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        command=command, timeout_sec=1.5,
+                    ) for command in commands]
+                    ok = all(result and bool(result.get("ok")) for result in results)
+                    if not ok:
+                        failed = next(
+                            (result for result in results if not result or not result.get("ok")), None,
+                        )
+                        error = str((failed or {}).get("error_kind") or "position_command_failed")
+                elif action == "RPM":
+                    result = send_device_cmd_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        command=f"SET PID RPM SP {value}", timeout_sec=1.5,
+                    )
+                    ok = bool(result and result.get("ok"))
+                    error = "" if ok else str((result or {}).get("error_kind") or "speed_command_failed")
+                elif action == "OUT":
+                    result = send_device_traction_out_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        value=value, timeout_sec=1.5,
+                    )
+                    ok = bool(result and result.get("ok"))
+                    error = "" if ok else str((result or {}).get("error_kind") or "force_output_failed")
+                else:
+                    result = send_device_traction_command_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        command="CLR OUT", timeout_sec=1.5,
+                    )
+                    ok = bool(result and result.get("ok"))
+                    error = "" if ok else str((result or {}).get("error_kind") or "force_output_clear_failed")
+                    if ok:
+                        set_device_traction_out_value(self.db_path, target_serial, 0)
+                        set_device_message_type(self.db_path, target_serial, "CMD")
+        except Exception as exc:
+            error = str(exc)
+        with self._lock:
+            has_newer_value = target_serial in self._traction_pending
+            if not has_newer_value:
+                self._status[hub_serial] = {
+                    "state": "traction_completed" if ok else "traction_failed",
+                    "module_index": module_index, "target_serial": target_serial,
+                    "action": action, "value": value, "error": error,
+                    "finished_at": time.time(),
+                }
+        if not has_newer_value:
+            self._notify_traction_firmware(
+                hub_serial, module_index, action, "DONE" if ok else "FAILED",
+            )
+
+    def _notify_traction_firmware(
+        self, hub_serial: str, module_index: int, action: str, state: str,
+    ) -> None:
+        try:
+            if get_device_message_type(self.db_path, hub_serial) != "CMD":
+                set_device_message_type(self.db_path, hub_serial, "CMD")
+                time.sleep(0.05)
+            send_device_cmd_once(
+                db_path=self.db_path, serial_number=hub_serial,
+                command=f"TRACT STATE {module_index} {action} {state}", timeout_sec=1.5,
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _command_argv(command: str, terminal: str) -> tuple[list[str], str]:
+        selected = str(terminal or "auto").strip().lower()
+        if selected == "auto":
+            selected = "cmd" if os.name == "nt" else "sh"
+        if selected == "cmd":
+            if os.name != "nt":
+                raise RuntimeError("CMD is only available on Windows")
+            executable = os.environ.get("COMSPEC") or "cmd.exe"
+            return [executable, "/d", "/s", "/c", command], "cmd"
+        if selected == "powershell":
+            executable = shutil.which("pwsh") or shutil.which("powershell")
+            if not executable:
+                raise RuntimeError("PowerShell was not found on this host")
+            return [executable, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], "powershell"
+        if selected == "sh":
+            executable = shutil.which("sh")
+            if not executable:
+                raise RuntimeError("sh was not found on this host")
+            return [executable, "-lc", command], "sh"
+        raise RuntimeError(f"unsupported terminal: {terminal}")
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5, check=False,
+            )
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    def _request_stop(self, serial: str, slot: int) -> None:
+        process = None
+        notify_without_active = False
+        with self._lock:
+            active = self._active.get(serial)
+            if not active or active.get("slot") != slot:
+                self._status[serial] = {
+                    "state": "stopped", "slot": slot,
+                    "error": "stop acknowledged without an active host process",
+                    "finished_at": time.time(),
+                }
+                notify_without_active = True
+            else:
+                active["stop_requested"] = True
+                process = active.get("process")
+                current = dict(self._status.get(serial) or {})
+                current["state"] = "stopping"
+                self._status[serial] = current
+        if notify_without_active:
+            threading.Thread(
+                target=self._notify_firmware, args=(serial, slot, "STOPPED"), daemon=True,
+            ).start()
+            return
+        if process is not None:
+            try:
+                self._terminate_process(process)
+            except Exception:
+                pass
+
+    def _notify_firmware(self, serial: str, slot: int, state: str) -> None:
+        try:
+            if get_device_message_type(db_path=self.db_path, serial_number=serial) != "CMD":
+                set_device_message_type(
+                    db_path=self.db_path, serial_number=serial, message_type="CMD",
+                )
+                time.sleep(0.05)
+            send_device_cmd_once(
+                db_path=self.db_path, serial_number=serial,
+                command=f"RUN STATE {slot} {state}", timeout_sec=1.5,
+            )
+        except Exception:
+            pass
+
+    def _stop_all_traction_motors(self) -> dict:
+        """Neutralize every connected traction mode once after a menu execution exits."""
+        targets = [
+            str(device.get("serial_number") or "").strip()
+            for device in _load_devices(self.db_path)
+            if str(device.get("module_type") or "").lower() == "traction_module"
+            and str(device.get("status") or "").lower() == "online connected"
+            and str(device.get("serial_number") or "").strip()
+        ]
+        stopped: list[str] = []
+        failed: list[str] = []
+        for target_serial in targets:
+            with self._lock:
+                motor_lock = self._traction_locks.setdefault(target_serial, threading.Lock())
+                self._traction_pending.pop(target_serial, None)
+            try:
+                with motor_lock:
+                    set_device_message_type(self.db_path, target_serial, "CONTROL")
+                    time.sleep(0.05)
+                    immediate = send_device_traction_out_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        value=0, timeout_sec=1.5,
+                    )
+                    set_device_message_type(self.db_path, target_serial, "CMD")
+                    time.sleep(0.05)
+                    pid_results = [send_device_cmd_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        command=command, timeout_sec=1.5,
+                    ) for command in (
+                        "STOP PID POS", "STOP PID POS SINE", "SET PID RPM SP 0",
+                    )]
+                    set_device_message_type(self.db_path, target_serial, "CONTROL")
+                    time.sleep(0.05)
+                    released = send_device_traction_command_once(
+                        db_path=self.db_path, serial_number=target_serial,
+                        command="CLR OUT", timeout_sec=1.5,
+                    )
+                    set_device_traction_out_value(self.db_path, target_serial, 0)
+                    set_device_message_type(self.db_path, target_serial, "CMD")
+                if (immediate and immediate.get("ok") and released and released.get("ok")
+                        and all(result and result.get("ok") for result in pid_results)):
+                    stopped.append(target_serial)
+                else:
+                    failed.append(target_serial)
+            except Exception:
+                failed.append(target_serial)
+                try:
+                    set_device_traction_out_value(self.db_path, target_serial, 0)
+                    set_device_message_type(self.db_path, target_serial, "CMD")
+                except Exception:
+                    pass
+        return {"stopped": stopped, "failed": failed}
+
+    def _run(
+        self, serial: str, slot: int, name: str, kind: str,
+        value: str, terminal: str, script_path: str | None = None,
+    ) -> None:
+        process = None
+        stop_requested = False
+        resolved_terminal = "python" if kind == "python" else terminal
+        try:
+            if kind == "python":
+                if not script_path:
+                    script_path = self.script_store.resolve(value)
+                argv = [sys.executable, "-u", script_path]
+            else:
+                argv, resolved_terminal = self._command_argv(value, terminal)
+            popen_options = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+                             "text": True, "shell": False}
+            if os.name == "nt":
+                popen_options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            else:
+                popen_options["start_new_session"] = True
+            process = subprocess.Popen(argv, **popen_options)
+            with self._lock:
+                active = self._active.get(serial)
+                if active is None or active.get("slot") != slot:
+                    self._terminate_process(process)
+                else:
+                    active["process"] = process
+                    stop_requested = bool(active.get("stop_requested"))
+            if stop_requested:
+                self._terminate_process(process)
+            self._notify_firmware(serial, slot, "RUNNING")
+            stdout, stderr = process.communicate(timeout=30)
+            with self._lock:
+                stopped = bool((self._active.get(serial) or {}).get("stop_requested"))
+            status = {
+                "state": "stopped" if stopped else ("completed" if process.returncode == 0 else "failed"),
+                "slot": slot, "name": name, "kind": kind, "shell": resolved_terminal,
+                "returncode": process.returncode,
+                "stdout": (stdout or "")[-4000:],
+                "stderr": (stderr or "")[-4000:],
+                "finished_at": time.time(),
+            }
+        except subprocess.TimeoutExpired as exc:
+            if process is not None:
+                self._terminate_process(process)
+                try:
+                    stdout, stderr = process.communicate(timeout=5)
+                except Exception:
+                    stdout, stderr = exc.stdout, exc.stderr
+            status = {
+                "state": "timeout", "slot": slot, "name": name, "kind": kind,
+                "shell": resolved_terminal, "stdout": str(stdout or "")[-4000:],
+                "stderr": str(stderr or "")[-4000:],
+                "finished_at": time.time(),
+            }
+        except Exception as exc:
+            status = {
+                "state": "failed", "slot": slot, "name": name, "kind": kind,
+                "shell": resolved_terminal,
+                "error": str(exc), "finished_at": time.time(),
+            }
+        status["motor_stop"] = self._stop_all_traction_motors()
+        with self._lock:
+            self._status[serial] = status
+            self._active.pop(serial, None)
+        firmware_state = "STOPPED" if status["state"] == "stopped" else (
+            "DONE" if status["state"] == "completed" else "FAILED"
+        )
+        self._notify_firmware(serial, slot, firmware_state)
 
 
 class DeviceNameUpdatePayload(BaseModel):
@@ -419,6 +1120,48 @@ class DistanceSensorConfigPayload(BaseModel):
     save: bool = True
 
 
+class ControlHubConfigPayload(BaseModel):
+    device_name: str | None = None
+    menu: list[dict] | None = None
+    save: bool = True
+
+
+class ControlHubScriptUploadPayload(BaseModel):
+    filename: str
+    content: str
+
+
+class ControlHubServoPayload(BaseModel):
+    channel: int
+    angle: int
+
+
+class ControlHubGpioPayload(BaseModel):
+    pin: int
+    value: int
+
+
+def _parse_control_hub_imu_response(response: str) -> dict:
+    parts = [part.strip() for part in str(response or "").split(",")]
+    if len(parts) != 10 or parts[0] != "IMU":
+        raise ValueError("unexpected control hub IMU response")
+    try:
+        numeric = [float(value) for value in parts[1:7]]
+        calibrated = int(parts[7]) == 1
+        calibrating = int(parts[8]) == 1
+        progress = max(0, min(100, int(parts[9])))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid control hub IMU response") from exc
+    if not all(math.isfinite(value) for value in numeric):
+        raise ValueError("invalid control hub IMU response")
+    return {
+        "roll_deg": numeric[0], "pitch_deg": numeric[1], "yaw_deg": numeric[2],
+        "gyro_x_dps": numeric[3], "gyro_y_dps": numeric[4], "gyro_z_dps": numeric[5],
+        "calibrated": calibrated, "calibrating": calibrating,
+        "calibration_progress": progress,
+    }
+
+
 class ColorConfigPayload(BaseModel):
     sensor_name: str | None = None
     palette_mode: int | None = None
@@ -455,10 +1198,26 @@ def create_webview_app(
 ) -> FastAPI:
     app = FastAPI(title="RDK Msg Relay Webview")
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_new")
-    broker = CommsStreamBroker(comms_log_path=comms_log_path) if enable_realtime_stream else None
+    control_hub_profiles_path = os.path.join(
+        os.path.dirname(os.path.abspath(db_path)), "control_hub_commands.json"
+    )
+    control_hub_scripts_path = os.path.join(
+        os.path.dirname(os.path.abspath(db_path)), "control_hub_scripts"
+    )
+    control_hub_executor = ControlHubExecutor(
+        db_path=db_path,
+        profiles_path=control_hub_profiles_path,
+        scripts_path=control_hub_scripts_path,
+    )
+    control_hub_script_store = control_hub_executor.script_store
+    broker = CommsStreamBroker(
+        comms_log_path=comms_log_path,
+        event_callback=control_hub_executor.handle_event,
+    ) if enable_realtime_stream else None
     color_command_locks: dict[str, asyncio.Lock] = {}
     line_sensor_command_locks: dict[str, asyncio.Lock] = {}
     distance_command_locks: dict[str, asyncio.Lock] = {}
+    control_hub_command_locks: dict[str, asyncio.Lock] = {}
 
     app.state.db_path = db_path
     app.state.comms_log_path = comms_log_path
@@ -848,6 +1607,90 @@ def create_webview_app(
                         )
 
             return results
+
+    def _control_hub_device_or_error(
+        serial_number: str,
+        *,
+        require_online: bool = True,
+    ) -> dict:
+        device = next(
+            (item for item in _load_devices(db_path)
+             if item.get("serial_number") == serial_number),
+            None,
+        )
+        if device is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        if str(device.get("module_type") or "").lower() != "control_hub_module":
+            raise HTTPException(status_code=400, detail="device is not a control hub module")
+        if require_online and str(device.get("status") or "").lower() != "online connected":
+            raise HTTPException(status_code=409, detail="device is not online")
+        return device
+
+    async def _send_control_hub_cmds(
+        serial_number: str,
+        commands: list[str],
+        timeout_sec: float = 2.0,
+    ) -> list[dict]:
+        _control_hub_device_or_error(serial_number)
+        lock = control_hub_command_locks.setdefault(serial_number, asyncio.Lock())
+        async with lock:
+            previous_type = get_device_message_type(
+                db_path=db_path, serial_number=serial_number,
+            ) or "CMD"
+            if previous_type != "CMD":
+                await asyncio.to_thread(
+                    set_device_message_type,
+                    db_path=db_path,
+                    serial_number=serial_number,
+                    message_type="CMD",
+                )
+                await asyncio.sleep(0.05)
+            results: list[dict] = []
+            try:
+                for command in commands:
+                    result = await asyncio.to_thread(
+                        send_device_cmd_once,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        command=command,
+                        timeout_sec=timeout_sec,
+                    )
+                    if result is None:
+                        raise HTTPException(status_code=404, detail="device not found")
+                    results.append(result)
+                    if not bool(result.get("ok")):
+                        detail = str(result.get("error_kind") or result.get("response") or "command failed")
+                        raise HTTPException(status_code=409, detail=f"{command}: {detail}")
+            finally:
+                if previous_type != "CMD":
+                    await asyncio.to_thread(
+                        set_device_message_type,
+                        db_path=db_path,
+                        serial_number=serial_number,
+                        message_type=previous_type,
+                    )
+            return results
+
+    def _hub_b64(value: str) -> str:
+        return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
+
+    def _hub_snapshot(serial_number: str) -> dict:
+        device = _control_hub_device_or_error(serial_number, require_online=False)
+        return {
+            "device": device,
+            "profile": control_hub_executor.get_profile(serial_number),
+            "execution": control_hub_executor.status(serial_number),
+        }
+
+    async def _hub_imu_snapshot(serial_number: str) -> dict:
+        results = await _send_control_hub_cmds(serial_number, ["GET IMU"])
+        response = str((results[-1] if results else {}).get("response") or "")
+        try:
+            imu = _parse_control_hub_imu_response(response)
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        imu["serial_number"] = serial_number
+        return imu
 
     def _distance_health(flags: int) -> dict:
         value = max(0, int(flags))
@@ -1637,6 +2480,109 @@ def create_webview_app(
     async def distance_sensor_snapshot(serial_number: str):
         return await _distance_snapshot(serial_number)
 
+    @app.get("/api/devices/{serial_number}/control-hub/snapshot")
+    async def control_hub_snapshot(serial_number: str):
+        return _hub_snapshot(serial_number)
+
+    @app.get("/api/devices/{serial_number}/control-hub/imu")
+    async def control_hub_imu(serial_number: str):
+        return await _hub_imu_snapshot(serial_number)
+
+    @app.post("/api/devices/{serial_number}/control-hub/imu/calibrate")
+    async def control_hub_imu_calibrate(serial_number: str):
+        await _send_control_hub_cmds(serial_number, ["CALIBRATE IMU"])
+        return await _hub_imu_snapshot(serial_number)
+
+    @app.get("/api/control-hub/scripts")
+    async def control_hub_scripts():
+        return {"scripts": control_hub_script_store.list()}
+
+    @app.post("/api/control-hub/scripts/upload")
+    async def control_hub_script_upload(payload: ControlHubScriptUploadPayload):
+        try:
+            saved = await asyncio.to_thread(
+                control_hub_script_store.save, payload.filename, payload.content,
+            )
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "script": saved, "scripts": control_hub_script_store.list()}
+
+    @app.post("/api/devices/{serial_number}/control-hub/refresh")
+    async def control_hub_refresh(serial_number: str):
+        commands = ["GET INFO", "GET CFG"] + [f"GET MENU {index}" for index in range(8)]
+        results = await _send_control_hub_cmds(serial_number, commands)
+        snapshot = _hub_snapshot(serial_number)
+        snapshot["results"] = results
+        return snapshot
+
+    @app.post("/api/devices/{serial_number}/control-hub/config")
+    async def control_hub_config(serial_number: str, payload: ControlHubConfigPayload):
+        current = control_hub_executor.get_profile(serial_number)
+        device_name = str(payload.device_name if payload.device_name is not None else current.get("device_name") or "Modulo de Controle").strip()
+        if not device_name or len(device_name.encode("utf-8")) > 31:
+            raise HTTPException(status_code=400, detail="device_name must contain 1 to 31 UTF-8 bytes")
+        source_menu = payload.menu if payload.menu is not None else current.get("menu", [])
+        if not isinstance(source_menu, list) or len(source_menu) > 8:
+            raise HTTPException(status_code=400, detail="menu must contain at most 8 entries")
+        menu: list[dict] = []
+        commands = [f"SET CFG NAME {device_name.replace(',', '-')}"]
+        for slot in range(8):
+            raw = source_menu[slot] if slot < len(source_menu) and isinstance(source_menu[slot], dict) else {}
+            name = str(raw.get("name") or "").strip()
+            command = str(raw.get("command") or "").strip()
+            script = str(raw.get("script") or "").strip()
+            kind = str(raw.get("kind") or "command").strip().lower()
+            terminal = str(raw.get("shell") or "auto").strip().lower()
+            selected_value = script if kind == "python" else command
+            enabled = bool(raw.get("enabled", bool(name and selected_value)))
+            if kind not in {"command", "python"}:
+                raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: type must be command or python")
+            if "\n" in command or "\r" in command or "\x00" in command:
+                raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: command contains an invalid character")
+            if len(name.encode("utf-8")) > 30:
+                raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: name is longer than 30 UTF-8 bytes")
+            if len(selected_value.encode("utf-8")) > 90:
+                raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: execution value is longer than 90 UTF-8 bytes")
+            if enabled and (not name or not selected_value):
+                raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: enabled entries require a name and execution target")
+            if kind == "python" and script:
+                try:
+                    control_hub_script_store.resolve(script)
+                except (ValueError, FileNotFoundError) as exc:
+                    raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: Python script is unavailable") from exc
+            if terminal not in {"auto", "cmd", "powershell", "sh"}:
+                raise HTTPException(status_code=400, detail=f"menu slot {slot + 1}: shell must be auto, cmd, powershell, or sh")
+            normalized = {"enabled": enabled, "name": name, "kind": kind,
+                          "command": command, "script": script, "shell": terminal}
+            menu.append(normalized)
+            if enabled:
+                mode = 1 if kind == "python" else 0
+                commands.append(f"SET MENU {slot} {mode} {_hub_b64(name)} {_hub_b64(selected_value)}")
+            else:
+                commands.append(f"CLEAR MENU {slot}")
+        if payload.save:
+            commands.append("SAVE CFG")
+        results = await _send_control_hub_cmds(serial_number, commands, timeout_sec=2.5)
+        profile = {"device_name": device_name, "menu": menu, "updated_at": time.time()}
+        control_hub_executor.set_profile(serial_number, profile)
+        snapshot = _hub_snapshot(serial_number)
+        snapshot["results"] = results
+        return snapshot
+
+    @app.post("/api/devices/{serial_number}/control-hub/servo")
+    async def control_hub_servo(serial_number: str, payload: ControlHubServoPayload):
+        if payload.channel < 0 or payload.channel >= 6 or payload.angle < 0 or payload.angle > 180:
+            raise HTTPException(status_code=400, detail="channel must be 0..5 and angle must be 0..180")
+        results = await _send_control_hub_cmds(serial_number, [f"SET SERVO {payload.channel} {payload.angle}"])
+        return {"ok": True, "results": results}
+
+    @app.post("/api/devices/{serial_number}/control-hub/gpio")
+    async def control_hub_gpio(serial_number: str, payload: ControlHubGpioPayload):
+        if payload.pin < 0 or payload.pin >= 9 or payload.value not in (0, 1):
+            raise HTTPException(status_code=400, detail="output pin must be 0..8 and value must be 0 or 1")
+        results = await _send_control_hub_cmds(serial_number, [f"SET GPIO {payload.pin} {payload.value}"])
+        return {"ok": True, "results": results}
+
     @app.post("/api/devices/{serial_number}/distance-sensor/refresh")
     async def distance_sensor_refresh(serial_number: str):
         results = await _send_distance_cmds(
@@ -1955,6 +2901,13 @@ def create_webview_app(
     async def distance_sensor_page():
         return FileResponse(
             os.path.join(static_dir, "distance-sensor.html"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/control-hub", include_in_schema=False)
+    async def control_hub_page():
+        return FileResponse(
+            os.path.join(static_dir, "control-hub.html"),
             headers={"Cache-Control": "no-store"},
         )
 

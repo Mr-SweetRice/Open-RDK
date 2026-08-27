@@ -493,6 +493,11 @@ class CommsRuntime:
 
             return DistanceSensorModule(self, serial_number=serial_number, snapshot=snapshot)
 
+        if module_type == "control_hub_module":
+            from .modules import ControlHubModule
+
+            return ControlHubModule(self, serial_number=serial_number, snapshot=snapshot)
+
         raise UnsupportedModuleTypeError(
             f"unsupported module_type '{module_type or 'unknown'}' for {serial_number}"
         )
@@ -579,6 +584,16 @@ class CommsRuntime:
         from .modules import ColorSensorModule
 
         return ColorSensorModule(
+            self,
+            serial_number=serial_number,
+            snapshot=self.require_device(serial_number),
+        )
+
+    def control_hub(self, serial_number: str):
+        self.ensure_running()
+        from .modules import ControlHubModule
+
+        return ControlHubModule(
             self,
             serial_number=serial_number,
             snapshot=self.require_device(serial_number),

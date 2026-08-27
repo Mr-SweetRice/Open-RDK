@@ -335,6 +335,7 @@ function renderDevices() {
       moduleType === "traction_module"    ? "kind-traction" :
       moduleType === "line_sensor_module" ? "kind-line" :
       moduleType === "distance_sensor_module" ? "kind-distance" :
+      moduleType === "control_hub_module" ? "kind-control-hub" :
       moduleType === "color_module"       ? "kind-color" : "kind-unknown";
     const initial = (() => {
       const name = (resolveName(device) || "?").trim();

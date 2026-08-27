@@ -88,6 +88,7 @@ Host source files:
 - `0x12` -> `line_sensor_module`
 - `0x13` -> `color_module`
 - `0x14` -> `distance_sensor_module`
+- `0x15` -> `control_hub_module`
 
 Note: module-name query (`0x04`) is the primary identity signal; module-id mapping is fallback.
 
@@ -474,6 +475,117 @@ SELFTEST,<ok>,<health_flags>,<distance_mm>
   are used.
 - `RESET CFG` restores defaults in RAM. Follow it with `SAVE CFG` to persist
   those defaults across a reboot.
+
+## 3.5 `control_hub_module` (`firmware/esp/modules/control_hub_module`)
+
+### Identity and hardware profile
+
+- Hello ACK module id: `0x15`
+- Module query name: `control_hub_module`
+- MCU target: ESP32
+- OLED/MPU6050 shared I2C: SDA GPIO21, SCL GPIO22
+- OLED SSD1306 address: `0x3C`
+- MPU6050 address: `0x68`
+- Servo channels 0..5: GPIO0, GPIO2, GPIO4, GPIO5, GPIO12, GPIO15
+- KY-040 encoder: CLK GPIO32, DT GPIO33, SW GPIO25
+- Output-capable digital pin indices 0..8: GPIO13, GPIO14, GPIO16, GPIO17, GPIO18, GPIO19, GPIO23, GPIO26, GPIO27
+- Input-only digital pin indices 9..11: GPIO34, GPIO35, GPIO39
+
+### `CMD` calls
+
+- `GET INFO`
+- `GET CFG`
+- `GET IMU`
+- `GET ENCODER`
+- `GET RUN`
+- `GET MODULES`
+- `GET MODULE <index_0_to_7>`
+- `GET MENU <slot_0_to_7>`
+- `GET GPIO <pin_index_0_to_11>`
+- `SET CFG NAME <text>`
+- `SET MENU <slot> <mode_0_command_or_1_python> <name_base64url> <payload_base64url>`
+- `CLEAR MENU <slot>`
+- `RUN STATE <slot> <RUNNING|DONE|FAILED|STOPPED>`
+- `CLEAR MODULES`
+- `SET MODULE <index_0_to_7> <kind_0_generic_or_1_traction> <name_base64url>`
+- `SET MODULE COUNT <count_0_to_8>`
+- `TRACT STATE <index> <POS|RPM|OUT|CLEAR> <DONE|FAILED>`
+- `SET SERVO <channel_0_to_5> <angle_0_to_180>`
+- `SET SERVO_US <channel_0_to_5> <pulse_500_to_2500>`
+- `SET GPIO <output_pin_index_0_to_8> <0|1>`
+- `SAVE CFG`
+- `RESET CFG`
+
+The hardware commands are also accepted under message type `CONTROL (0x04)`.
+
+### Responses and module events
+
+`GET INFO` returns:
+
+```text
+INFO,<device_name>,control_hub_module,control_hub_module,21,SSD1306,MPU6050,21,22,6,12
+```
+
+`GET CFG` returns:
+
+```text
+HUB,<device_name>,<selected_slot>,<oled_ok>,<mpu_ok>
+```
+
+`GET IMU` returns raw sensor units:
+
+```text
+IMU,<ax>,<ay>,<az>,<gx>,<gy>,<gz>
+```
+
+`GET MENU` and `GET GPIO` return:
+
+```text
+MENU,<slot>,<enabled>,<mode>,<name_base64url>,<payload_base64url>
+GPIO,<pin_index>,<physical_gpio>,<output_mode>,<value>
+```
+
+`GET ENCODER` returns:
+
+```text
+ENCODER,<signed_position>,<pressed>,<selected_slot>
+```
+
+Selecting an enabled OLED entry emits an unsolicited `CONTROL` stream frame:
+
+```text
+EXEC,<slot>,<mode_0_command_or_1_python>,<payload_base64url>
+STOP,<slot>
+TRACT,<module_index>,POS,<target_degrees_-3600_to_3600>
+TRACT,<module_index>,RPM,<target_rpm_-150_to_150>
+TRACT,<module_index>,OUT,<signed_force_percent_-100_to_100>
+TRACT,<module_index>,CLEAR,0
+```
+
+While a process is active, the OLED shows its type, item name, and `PARAR EXECUCAO`.
+Pressing the encoder emits `STOP`; the host terminates the tracked process and sends
+`RUN STATE` back so the OLED can show the terminal result.
+
+The host must not execute the payload solely because it came from firmware. The webview executor checks the serial number, module type, enabled slot, execution mode, and exact decoded payload against its host-owned `control_hub_commands.json` profile. Command slots select `auto`, `cmd`, `powershell`, or `sh`; `auto` resolves to `cmd.exe` on Windows and `sh` on POSIX. Python slots select a `.py` file uploaded to the controlled `control_hub_scripts` folder and run it with the Python interpreter used by Open-RDK. Execution has a 30 second timeout.
+
+Configuration, servo pulse positions, GPIO states, and the eight encoded menu entries are stored as an NVS blob by `SAVE CFG`.
+
+The OLED main menu is hierarchical: `MODULOS`, `SERVOS`, and `EXECUCAO`.
+The host automatically refreshes the volatile `MODULOS` list from devices currently
+registered as `online connected`. Entries are written first and committed with
+`SET MODULE COUNT`, so a refresh never exposes an empty intermediate list. `SERVOS` selects channels 1..6 and changes the
+angle in 5 degree steps with the encoder. `EXECUCAO` contains the eight configured
+command/Python slots. Each submenu includes a `VOLTAR` entry.
+
+Selecting an entry marked as `traction_module` opens `POSICAO`, `VELOCIDADE`,
+`FORCE OUTPUT`, and `LIBERAR FORCE`. Each encoder step immediately emits the updated
+`TRACT` value while the OLED remains on the control screen; pressing returns to the
+traction menu. The host coalesces rapid updates so only the newest pending value is
+applied, validates the synchronized module index and serial, and routes position/speed
+as `CMD` and force output as `CONTROL`. `LIBERAR FORCE` sends `CLR OUT`, returning
+output authority to the PID and switching the device back to `CMD`. Force-output
+updates also change the host's maintained CONTROL heartbeat value, preventing a
+subsequent heartbeat from overwriting the encoder-selected output with zero.
 
 ## 4. Legacy Line Fallback Policy
 

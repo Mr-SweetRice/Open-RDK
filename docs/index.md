@@ -34,5 +34,6 @@ runtime.stop()
 | [TractionModule](traction-module.md) | Motor control, PID, angle movement |
 | [LineSensorModule](line-sensor-module.md) | Sensor reads and telemetry |
 | [DistanceSensorModule](distance-sensor-module.md) | HC-SR04 distance reads, configuration, and telemetry |
+| [ControlHubModule](control-hub-module.md) | GPIO reads/writes, MPU6050 IMU, and servo control |
 | [Flashing](flashing.md) | Firmware flash via serial, BOOT button workflow |
 | [Errors](errors.md) | All exception types and when they are raised |

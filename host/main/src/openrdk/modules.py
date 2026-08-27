@@ -1504,6 +1504,231 @@ class DistanceSensorModule(BaseModule):
         return self._distance_from_data(data, unit)
 
 
+class ControlHubModule(BaseModule):
+    """SDK wrapper for the ESP32 OLED/MPU/servo/GPIO control hub."""
+
+    EXPECTED_MODULE_TYPE = "control_hub_module"
+
+    # Physical ESP32 GPIOs used by the current control-hub firmware.
+    SERVO_PINS = (13, 12, 23, 5, 2, 15)
+    GPIO_PINS = (0, 21, 16, 17, 18, 19, 4, 22, 25, 34, 35, 39)
+    OUTPUT_GPIO_PINS = GPIO_PINS[:9]
+    INPUT_ONLY_GPIO_PINS = GPIO_PINS[9:]
+
+    def __init__(self, runtime: "CommsRuntime", serial_number: str, snapshot: dict | None = None):
+        super().__init__(runtime, serial_number, snapshot, MESSAGE_TYPE_CMD)
+
+    def info(self, timeout_sec: float = 1.5) -> str:
+        return str(self.send_raw_cmd("GET INFO", timeout_sec=timeout_sec).get("response") or "")
+
+    def set_servo(self, channel: int, angle: int, timeout_sec: float = 1.5) -> dict:
+        """Set a servo by its zero-based firmware channel (0..5)."""
+        channel, angle = int(channel), int(angle)
+        if channel not in range(6) or angle not in range(181):
+            raise ValueError("channel must be 0..5 and angle must be 0..180")
+        return self.send_raw_cmd(f"SET SERVO {channel} {angle}", timeout_sec=timeout_sec)
+
+    def set_servo_us(self, channel: int, pulse_us: int, timeout_sec: float = 1.5) -> dict:
+        """Set a servo pulse by its zero-based firmware channel (0..5)."""
+        channel, pulse_us = int(channel), int(pulse_us)
+        if channel not in range(6):
+            raise ValueError("channel must be 0..5")
+        if pulse_us not in range(500, 2501):
+            raise ValueError("pulse_us must be 500..2500")
+        return self.send_raw_cmd(f"SET SERVO_US {channel} {pulse_us}", timeout_sec=timeout_sec)
+
+    def set_servo_angle(self, servo: int, angle: int, timeout_sec: float = 1.5) -> dict:
+        """Set servo 1..6 to an angle from 0 to 180 degrees."""
+        servo = int(servo)
+        if servo not in range(1, 7):
+            raise ValueError("servo must be 1..6")
+        return self.set_servo(servo - 1, angle, timeout_sec=timeout_sec)
+
+    def set_servo_pulse_us(self, servo: int, pulse_us: int, timeout_sec: float = 1.5) -> dict:
+        """Set the pulse width of servo 1..6, in microseconds."""
+        servo = int(servo)
+        if servo not in range(1, 7):
+            raise ValueError("servo must be 1..6")
+        return self.set_servo_us(servo - 1, pulse_us, timeout_sec=timeout_sec)
+
+    def center_servo(self, servo: int, timeout_sec: float = 1.5) -> dict:
+        """Move servo 1..6 to its central 90-degree position."""
+        return self.set_servo_angle(servo, 90, timeout_sec=timeout_sec)
+
+    def set_gpio(self, pin: int, value: bool | int, timeout_sec: float = 1.5) -> dict:
+        """Set an output by its zero-based firmware pin index (0..8)."""
+        pin = int(pin)
+        if pin not in range(9):
+            raise ValueError("output pin must be an exposed pin index from 0..8")
+        return self.send_raw_cmd(f"SET GPIO {pin} {1 if bool(value) else 0}", timeout_sec=timeout_sec)
+
+    def get_gpio(self, pin: int, timeout_sec: float = 1.5) -> dict:
+        """Read an exposed GPIO by its zero-based firmware pin index (0..11)."""
+        pin = int(pin)
+        if pin not in range(len(self.GPIO_PINS)):
+            raise ValueError("pin must be an exposed pin index from 0..11")
+        raw = self.send_raw_cmd(f"GET GPIO {pin}", timeout_sec=timeout_sec)
+        response = str(raw.get("response") or "")
+        parts = [part.strip() for part in response.split(",")]
+        if len(parts) != 5 or parts[0] != "GPIO":
+            raise CommandFailedError(f"unexpected GET GPIO response: {response}")
+        try:
+            response_pin, gpio, mode, level = (int(value) for value in parts[1:])
+        except ValueError as exc:
+            raise CommandFailedError(f"unexpected GET GPIO response: {response}") from exc
+        if response_pin != pin or gpio != self.GPIO_PINS[pin] or mode not in (0, 1) or level not in (0, 1):
+            raise CommandFailedError(f"unexpected GET GPIO response: {response}")
+        return {
+            "index": response_pin,
+            "gpio": gpio,
+            "mode": "output" if mode == 1 else "input",
+            "is_output": mode == 1,
+            "value": level,
+            "high": level == 1,
+            "raw": raw,
+        }
+
+    @classmethod
+    def _gpio_index(cls, gpio: int) -> int:
+        gpio = int(gpio)
+        try:
+            return cls.GPIO_PINS.index(gpio)
+        except ValueError as exc:
+            exposed = ", ".join(str(pin) for pin in cls.GPIO_PINS)
+            raise ValueError(f"GPIO {gpio} is not exposed by the control hub; use one of: {exposed}") from exc
+
+    def write_pin(self, gpio: int, value: bool | int, timeout_sec: float = 1.5) -> dict:
+        """Write LOW/HIGH to a physical ESP32 GPIO exposed as an output."""
+        pin = self._gpio_index(gpio)
+        if pin >= len(self.OUTPUT_GPIO_PINS):
+            raise ValueError(f"GPIO {int(gpio)} is input-only on the ESP32")
+        return self.set_gpio(pin, value, timeout_sec=timeout_sec)
+
+    def read_pin(self, gpio: int, timeout_sec: float = 1.5) -> dict:
+        """Read a physical ESP32 GPIO and return its level and configured mode."""
+        return self.get_gpio(self._gpio_index(gpio), timeout_sec=timeout_sec)
+
+    def digital_write(self, gpio: int, value: bool | int, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`write_pin`."""
+        return self.write_pin(gpio, value, timeout_sec=timeout_sec)
+
+    def digital_read(self, gpio: int, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`read_pin`."""
+        return self.read_pin(gpio, timeout_sec=timeout_sec)
+
+    def get_encoder(self, timeout_sec: float = 1.5) -> dict:
+        response = str(self.send_raw_cmd("GET ENCODER", timeout_sec=timeout_sec).get("response") or "")
+        parts = response.split(",")
+        if len(parts) != 4 or parts[0] != "ENCODER":
+            raise CommandFailedError(f"unexpected GET ENCODER response: {response}")
+        return {
+            "position": int(parts[1]),
+            "pressed": int(parts[2]) == 1,
+            "selected_slot": int(parts[3]),
+        }
+
+    def get_imu(self, timeout_sec: float = 1.5) -> dict:
+        """Read Euler angles, gyroscope speed, and IMU calibration state."""
+        raw = self.send_raw_cmd("GET IMU", timeout_sec=timeout_sec)
+        response = str(raw.get("response") or "")
+        parts = [part.strip() for part in response.split(",")]
+        if len(parts) != 10 or parts[0] != "IMU":
+            raise CommandFailedError(f"unexpected GET IMU response: {response}")
+        try:
+            roll, pitch, yaw, gx, gy, gz = (float(value) for value in parts[1:7])
+            calibrated, calibrating, progress = (int(value) for value in parts[7:10])
+        except ValueError as exc:
+            raise CommandFailedError(f"unexpected GET IMU response: {response}") from exc
+        if (
+            not all(math.isfinite(value) for value in (roll, pitch, yaw, gx, gy, gz))
+            or calibrated not in (0, 1)
+            or calibrating not in (0, 1)
+            or progress not in range(101)
+        ):
+            raise CommandFailedError(f"unexpected GET IMU response: {response}")
+        return {
+            "roll_deg": roll,
+            "pitch_deg": pitch,
+            "yaw_deg": yaw,
+            "gyro_x_dps": gx,
+            "gyro_y_dps": gy,
+            "gyro_z_dps": gz,
+            "euler": {"roll": roll, "pitch": pitch, "yaw": yaw},
+            "gyro_dps": {"x": gx, "y": gy, "z": gz},
+            "calibrated": calibrated == 1,
+            "calibrating": calibrating == 1,
+            "calibration_progress": progress,
+            "raw": raw,
+        }
+
+    def read_imu(self, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`get_imu`."""
+        return self.get_imu(timeout_sec=timeout_sec)
+
+    def get_imu_raw(self, timeout_sec: float = 1.5) -> dict:
+        """Read the six raw MPU6050 accelerometer and gyroscope registers."""
+        raw = self.send_raw_cmd("GET IMU RAW", timeout_sec=timeout_sec)
+        response = str(raw.get("response") or "")
+        parts = [part.strip() for part in response.split(",")]
+        if len(parts) != 7 or parts[0] != "IMU_RAW":
+            raise CommandFailedError(f"unexpected GET IMU RAW response: {response}")
+        try:
+            values = [int(value) for value in parts[1:]]
+        except ValueError as exc:
+            raise CommandFailedError(f"unexpected GET IMU RAW response: {response}") from exc
+        result = dict(zip(("ax", "ay", "az", "gx", "gy", "gz"), values))
+        result["raw"] = raw
+        return result
+
+    def read_imu_raw(self, timeout_sec: float = 1.5) -> dict:
+        """Alias for :meth:`get_imu_raw`."""
+        return self.get_imu_raw(timeout_sec=timeout_sec)
+
+    def wait_for_imu_calibration(
+        self,
+        calibration_timeout_sec: float = 8.0,
+        poll_interval_sec: float = 0.1,
+        command_timeout_sec: float = 1.5,
+    ) -> dict:
+        """Wait until the in-progress IMU calibration finishes and return its state."""
+        if calibration_timeout_sec <= 0:
+            raise ValueError("calibration_timeout_sec must be greater than zero")
+        if poll_interval_sec <= 0:
+            raise ValueError("poll_interval_sec must be greater than zero")
+        deadline = time.monotonic() + float(calibration_timeout_sec)
+        while True:
+            state = self.get_imu(timeout_sec=command_timeout_sec)
+            if not state["calibrating"]:
+                if state["calibrated"]:
+                    return state
+                raise CommandFailedError("IMU calibration stopped without completing")
+            if time.monotonic() >= deadline:
+                raise CommandFailedError(
+                    f"IMU calibration timed out at {state['calibration_progress']}%"
+                )
+            time.sleep(min(float(poll_interval_sec), max(0.0, deadline - time.monotonic())))
+
+    def calibrate_imu(
+        self,
+        wait: bool = True,
+        timeout_sec: float = 1.5,
+        calibration_timeout_sec: float = 8.0,
+        poll_interval_sec: float = 0.1,
+    ) -> dict:
+        """Start stationary IMU calibration and optionally wait for completion."""
+        command_result = self.send_raw_cmd("CALIBRATE IMU", timeout_sec=timeout_sec)
+        if not wait:
+            return command_result
+        return self.wait_for_imu_calibration(
+            calibration_timeout_sec=calibration_timeout_sec,
+            poll_interval_sec=poll_interval_sec,
+            command_timeout_sec=timeout_sec,
+        )
+
+    def save_config(self, timeout_sec: float = 1.5) -> dict:
+        return self.send_raw_cmd("SAVE CFG", timeout_sec=timeout_sec)
+
+
 def run_together(*callables) -> list:
     """
     Run callables concurrently in threads, wait for all to finish.

@@ -625,20 +625,28 @@ class ControlHubExecutor:
     """Validates firmware EXEC events against host-owned menu profiles."""
 
     EVENT_DEDUP_TTL_SEC = 2.0
+    EXECUTION_HISTORY_LIMIT = 200
     MODULE_SYNC_REFRESH_SEC = 30.0
     MODULE_SYNC_TRACTION_QUIET_SEC = 3.0
 
     def __init__(
         self, db_path: str, profiles_path: str, scripts_path: str | None = None,
         enable_module_sync: bool = True, script_directories_path: str | None = None,
+        execution_log_path: str | None = None,
     ):
         self.db_path = os.path.abspath(db_path)
         self.profiles_path = os.path.abspath(profiles_path)
+        self.execution_log_path = os.path.abspath(
+            execution_log_path
+            or os.path.join(os.path.dirname(self.profiles_path), "control_hub_execution_log.json")
+        )
         self.script_store = ControlHubScriptStore(
             scripts_path or os.path.join(os.path.dirname(self.profiles_path), "control_hub_scripts"),
             directories_path=script_directories_path,
         )
         self._lock = threading.Lock()
+        self._history_lock = threading.Lock()
+        self._history: dict[str, list[dict]] = self._load_execution_history()
         self._seen_lock = threading.Lock()
         self._seen: deque[tuple[tuple[str, int, str], float]] = deque(maxlen=256)
         self._status: dict[str, dict] = {}
@@ -688,6 +696,71 @@ class ControlHubExecutor:
         with self._lock:
             value = self._status.get(str(serial))
             return dict(value) if isinstance(value, dict) else None
+
+    def _load_execution_history(self) -> dict[str, list[dict]]:
+        try:
+            with open(self.execution_log_path, "r", encoding="utf-8") as fp:
+                payload = json.load(fp)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        devices = payload.get("devices", {}) if isinstance(payload, dict) else {}
+        if not isinstance(devices, dict):
+            return {}
+        history: dict[str, list[dict]] = {}
+        for serial, entries in devices.items():
+            if not isinstance(serial, str) or not isinstance(entries, list):
+                continue
+            cleaned = [dict(item) for item in entries if isinstance(item, dict)]
+            if cleaned:
+                history[serial] = cleaned[-self.EXECUTION_HISTORY_LIMIT:]
+        return history
+
+    def _save_execution_history_locked(self) -> None:
+        os.makedirs(os.path.dirname(self.execution_log_path) or ".", exist_ok=True)
+        temp_path = self.execution_log_path + ".tmp"
+        with open(temp_path, "w", encoding="utf-8") as fp:
+            json.dump(
+                {"version": 1, "devices": self._history},
+                fp, ensure_ascii=False, indent=2,
+            )
+        os.replace(temp_path, self.execution_log_path)
+
+    def _append_execution_history(self, serial: str, status: dict) -> dict:
+        entry = dict(status)
+        entry["log_id"] = str(time.time_ns())
+        entry["logged_at"] = float(
+            entry.get("finished_at") or entry.get("started_at") or time.time()
+        )
+        started_at = entry.get("started_at")
+        finished_at = entry.get("finished_at")
+        if isinstance(started_at, (int, float)) and isinstance(finished_at, (int, float)):
+            entry["duration_ms"] = max(0, round((finished_at - started_at) * 1000))
+        key = str(serial)
+        with self._history_lock:
+            entries = self._history.setdefault(key, [])
+            entries.append(entry)
+            del entries[:-self.EXECUTION_HISTORY_LIMIT]
+            try:
+                self._save_execution_history_locked()
+            except (OSError, TypeError, ValueError) as exc:
+                print(f"[control-hub] execution log save failed: {exc}", flush=True)
+        return dict(entry)
+
+    def execution_history(self, serial: str, limit: int = 50) -> list[dict]:
+        keep = max(1, min(int(limit), self.EXECUTION_HISTORY_LIMIT))
+        with self._history_lock:
+            entries = self._history.get(str(serial), [])[-keep:]
+            return [dict(item) for item in reversed(entries)]
+
+    def execution_history_revision(self, serial: str) -> str:
+        with self._history_lock:
+            entries = self._history.get(str(serial), [])
+            return str(entries[-1].get("log_id") or "0") if entries else "0"
+
+    def clear_execution_history(self, serial: str) -> None:
+        with self._history_lock:
+            self._history.pop(str(serial), None)
+            self._save_execution_history_locked()
 
     @staticmethod
     def _oled_label(value: str) -> str:
@@ -842,12 +915,16 @@ class ControlHubExecutor:
         ).strip()
         if (not configured.get("enabled") or mode != expected_mode
                 or expected_value != requested_value):
+            rejected_status = {
+                "state": "rejected", "slot": slot,
+                "name": configured.get("name", ""), "kind": kind,
+                "target": requested_value,
+                "error": "execution request does not match the host profile",
+                "finished_at": time.time(),
+            }
             with self._lock:
-                self._status[serial] = {
-                    "state": "rejected", "slot": slot,
-                    "error": "execution request does not match the host profile",
-                    "finished_at": time.time(),
-                }
+                self._status[serial] = rejected_status
+            self._append_execution_history(serial, rejected_status)
             self._notify_firmware(serial, slot, "FAILED")
             return
         script_path = None
@@ -855,33 +932,46 @@ class ControlHubExecutor:
             try:
                 script_path = self.script_store.resolve(requested_value)
             except (ValueError, FileNotFoundError) as exc:
+                rejected_status = {
+                    "state": "rejected", "slot": slot,
+                    "name": configured.get("name", ""), "kind": kind,
+                    "target": requested_value,
+                    "error": f"Python script is unavailable: {exc}",
+                    "finished_at": time.time(),
+                }
                 with self._lock:
-                    self._status[serial] = {
-                        "state": "rejected", "slot": slot, "name": configured.get("name", ""),
-                        "error": f"Python script is unavailable: {exc}", "finished_at": time.time(),
-                    }
+                    self._status[serial] = rejected_status
+                self._append_execution_history(serial, rejected_status)
                 self._notify_firmware(serial, slot, "FAILED")
                 return
         if self._is_duplicate_event(serial, sequence, message):
             return
+        rejected_status = None
         with self._lock:
             if serial in self._active:
-                self._status[serial] = {
+                rejected_status = {
                     "state": "rejected", "slot": slot,
+                    "name": configured.get("name", ""), "kind": kind,
+                    "target": requested_value,
                     "error": "another slot is already running", "finished_at": time.time(),
                 }
-                threading.Thread(
-                    target=self._notify_firmware, args=(serial, slot, "FAILED"), daemon=True,
-                ).start()
-                return
-            terminal = str(configured.get("shell") or "auto").strip().lower()
-            self._status[serial] = {
-                "state": "running", "slot": slot,
-                "name": configured.get("name", ""), "kind": kind,
-                "shell": "python" if mode == 1 else terminal,
-                "started_at": time.time(),
-            }
-            self._active[serial] = {"slot": slot, "process": None, "stop_requested": False}
+                self._status[serial] = rejected_status
+            else:
+                terminal = str(configured.get("shell") or "auto").strip().lower()
+                self._status[serial] = {
+                    "state": "running", "slot": slot,
+                    "name": configured.get("name", ""), "kind": kind,
+                    "target": requested_value,
+                    "shell": "python" if mode == 1 else terminal,
+                    "started_at": time.time(),
+                }
+                self._active[serial] = {"slot": slot, "process": None, "stop_requested": False}
+        if rejected_status is not None:
+            self._append_execution_history(serial, rejected_status)
+            threading.Thread(
+                target=self._notify_firmware, args=(serial, slot, "FAILED"), daemon=True,
+            ).start()
+            return
         threading.Thread(
             target=self._run,
             args=(serial, slot, str(configured.get("name") or ""), kind,
@@ -1086,14 +1176,17 @@ class ControlHubExecutor:
     def _request_stop(self, serial: str, slot: int) -> None:
         process = None
         notify_without_active = False
+        stopped_status = None
         with self._lock:
             active = self._active.get(serial)
             if not active or active.get("slot") != slot:
-                self._status[serial] = {
+                stopped_status = {
                     "state": "stopped", "slot": slot,
+                    "kind": "stop", "target": "STOP",
                     "error": "stop acknowledged without an active host process",
                     "finished_at": time.time(),
                 }
+                self._status[serial] = stopped_status
                 notify_without_active = True
             else:
                 active["stop_requested"] = True
@@ -1102,6 +1195,7 @@ class ControlHubExecutor:
                 current["state"] = "stopping"
                 self._status[serial] = current
         if notify_without_active:
+            self._append_execution_history(serial, stopped_status or {})
             threading.Thread(
                 target=self._notify_firmware, args=(serial, slot, "STOPPED"), daemon=True,
             ).start()
@@ -1185,6 +1279,7 @@ class ControlHubExecutor:
     ) -> None:
         process = None
         stop_requested = False
+        started_at = time.time()
         resolved_terminal = "python" if kind == "python" else terminal
         try:
             if kind == "python":
@@ -1216,6 +1311,7 @@ class ControlHubExecutor:
             status = {
                 "state": "stopped" if stopped else ("completed" if process.returncode == 0 else "failed"),
                 "slot": slot, "name": name, "kind": kind, "shell": resolved_terminal,
+                "target": value, "started_at": started_at,
                 "returncode": process.returncode,
                 "stdout": (stdout or "")[-4000:],
                 "stderr": (stderr or "")[-4000:],
@@ -1230,20 +1326,22 @@ class ControlHubExecutor:
                     stdout, stderr = exc.stdout, exc.stderr
             status = {
                 "state": "timeout", "slot": slot, "name": name, "kind": kind,
-                "shell": resolved_terminal, "stdout": str(stdout or "")[-4000:],
+                "shell": resolved_terminal, "target": value, "started_at": started_at,
+                "stdout": str(stdout or "")[-4000:],
                 "stderr": str(stderr or "")[-4000:],
                 "finished_at": time.time(),
             }
         except Exception as exc:
             status = {
                 "state": "failed", "slot": slot, "name": name, "kind": kind,
-                "shell": resolved_terminal,
+                "shell": resolved_terminal, "target": value, "started_at": started_at,
                 "error": str(exc), "finished_at": time.time(),
             }
         status["motor_stop"] = self._stop_all_traction_motors()
         with self._lock:
             self._status[serial] = status
             self._active.pop(serial, None)
+        self._append_execution_history(serial, status)
         firmware_state = "STOPPED" if status["state"] == "stopped" else (
             "DONE" if status["state"] == "completed" else "FAILED"
         )
@@ -1399,11 +1497,15 @@ def create_webview_app(
     control_hub_script_directories_path = os.path.join(
         os.path.dirname(os.path.abspath(db_path)), "control_hub_script_directories.json"
     )
+    control_hub_execution_log_path = os.path.join(
+        os.path.dirname(os.path.abspath(db_path)), "control_hub_execution_log.json"
+    )
     control_hub_executor = ControlHubExecutor(
         db_path=db_path,
         profiles_path=control_hub_profiles_path,
         scripts_path=control_hub_scripts_path,
         script_directories_path=control_hub_script_directories_path,
+        execution_log_path=control_hub_execution_log_path,
     )
     control_hub_script_store = control_hub_executor.script_store
     broker = CommsStreamBroker(
@@ -1876,6 +1978,9 @@ def create_webview_app(
             "device": device,
             "profile": control_hub_executor.get_profile(serial_number),
             "execution": control_hub_executor.status(serial_number),
+            "execution_log_revision": control_hub_executor.execution_history_revision(
+                serial_number
+            ),
         }
 
     async def _hub_imu_snapshot(serial_number: str) -> dict:
@@ -2679,6 +2784,22 @@ def create_webview_app(
     @app.get("/api/devices/{serial_number}/control-hub/snapshot")
     async def control_hub_snapshot(serial_number: str):
         return _hub_snapshot(serial_number)
+
+    @app.get("/api/devices/{serial_number}/control-hub/executions")
+    async def control_hub_executions(
+        serial_number: str, limit: int = Query(default=50, ge=1, le=200),
+    ):
+        _control_hub_device_or_error(serial_number, require_online=False)
+        return {
+            "entries": control_hub_executor.execution_history(serial_number, limit),
+            "revision": control_hub_executor.execution_history_revision(serial_number),
+        }
+
+    @app.post("/api/devices/{serial_number}/control-hub/executions/clear")
+    async def control_hub_executions_clear(serial_number: str):
+        _control_hub_device_or_error(serial_number, require_online=False)
+        await asyncio.to_thread(control_hub_executor.clear_execution_history, serial_number)
+        return {"ok": True, "entries": [], "revision": "0"}
 
     @app.get("/api/devices/{serial_number}/control-hub/imu")
     async def control_hub_imu(serial_number: str):

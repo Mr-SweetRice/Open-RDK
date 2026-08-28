@@ -6,7 +6,7 @@
     <title>Open-RDK · Control Hub</title>
     <link rel="stylesheet" href="static/theme.css" />
     <link rel="stylesheet" href="static/styles.css" />
-    <link rel="stylesheet" href="static/control-hub.css?v=20260828-script-dirs1" />
+    <link rel="stylesheet" href="static/control-hub.css?v=20260828-execution-log1" />
   </head>
   <body>
     <main class="hub-shell">
@@ -61,6 +61,12 @@
           <dl><dt>Estado</dt><dd id="execState">—</dd><dt>Item</dt><dd id="execName">—</dd><dt>Tipo</dt><dd id="execKind">—</dd><dt>Código</dt><dd id="execCode">—</dd></dl>
           <label class="field"><span>Saída</span><textarea id="execOutput" rows="8" readonly></textarea></label>
         </article>
+
+        <article class="panel hub-card execution-log-card">
+          <div class="card-heading"><div><div class="eyebrow">Histórico do módulo</div><h2>Log de comandos e scripts</h2></div><button id="clearExecutionLogBtn" class="action-btn" type="button">Limpar log</button></div>
+          <p class="hint">Registra as últimas 200 execuções, incluindo alvo, horário, duração, estado, código de saída, stdout e stderr.</p>
+          <div id="executionLog" class="execution-log" aria-live="polite">Nenhuma execução registrada.</div>
+        </article>
       </section>
 
       <section id="imuTab" class="hub-tab-panel imu-page" hidden>
@@ -95,6 +101,6 @@
         </div>
       </section>
     </main>
-    <script src="static/control-hub.js?v=20260828-script-dirs1"></script>
+    <script src="static/control-hub.js?v=20260828-execution-log1"></script>
   </body>
 </html>

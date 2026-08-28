@@ -102,3 +102,10 @@ to the device registry. Removing a registration does not delete the directory
 or any script. If two directories contain the same filename, the selector keeps
 both entries grouped by directory and the host stores a unique reference so the
 correct file is executed.
+
+The same page shows a per-module execution log for shell commands and Python
+scripts. The newest entries include the selected target, terminal, start/end
+times, duration, result, return code, stdout, stderr, and host-side errors. Up to
+200 entries per module persist in `control_hub_execution_log.json`; the WebView
+loads the newest 50 and provides a clear action without affecting scripts or
+menu configuration.

@@ -138,6 +138,10 @@ class ControlHubTests(unittest.TestCase):
                 })
                 run.assert_not_called()
             self.assertEqual(executor.status("hub-1")["state"], "rejected")
+            history = executor.execution_history("hub-1")
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["state"], "rejected")
+            self.assertEqual(history[0]["target"], "echo different")
 
     def test_python_store_and_executor(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -177,6 +181,45 @@ class ControlHubTests(unittest.TestCase):
             self.assertIn("PYTHON_OK", status["stdout"])
             self.assertEqual(status["motor_stop"]["stopped"], ["traction-1"])
             stop_motors.assert_called_once_with()
+
+    def test_python_execution_log_persists_output_duration_and_clear(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            executor = ControlHubExecutor(
+                str(root / "devices.json"), str(root / "profiles.json"),
+                str(root / "scripts"), enable_module_sync=False,
+            )
+            executor.script_store.save(
+                "logged.py",
+                "import sys\nprint('LOG_STDOUT')\nprint('LOG_STDERR', file=sys.stderr)\n",
+            )
+            executor._active["hub-1"] = {
+                "slot": 2, "process": None, "stop_requested": False,
+            }
+            with patch.object(executor, "_notify_firmware"), patch.object(
+                executor, "_stop_all_traction_motors",
+                return_value={"stopped": [], "failed": []},
+            ):
+                executor._run(
+                    "hub-1", 2, "Logged Python", "python", "logged.py", "auto",
+                )
+            history = executor.execution_history("hub-1")
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["state"], "completed")
+            self.assertEqual(history[0]["target"], "logged.py")
+            self.assertEqual(history[0]["returncode"], 0)
+            self.assertIn("LOG_STDOUT", history[0]["stdout"])
+            self.assertIn("LOG_STDERR", history[0]["stderr"])
+            self.assertGreaterEqual(history[0]["duration_ms"], 0)
+
+            reloaded = ControlHubExecutor(
+                str(root / "devices.json"), str(root / "profiles.json"),
+                str(root / "scripts"), enable_module_sync=False,
+            )
+            self.assertEqual(reloaded.execution_history("hub-1")[0]["log_id"], history[0]["log_id"])
+            reloaded.clear_execution_history("hub-1")
+            self.assertEqual(reloaded.execution_history("hub-1"), [])
+            self.assertEqual(reloaded.execution_history_revision("hub-1"), "0")
 
     def test_executor_allows_same_sequence_for_different_execution_payloads(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -377,6 +420,40 @@ class ControlHubTests(unittest.TestCase):
             self.assertEqual(listed["scripts"], [])
             self.assertEqual(len(listed["directories"]), 1)
             self.assertTrue((external / "api.py").is_file())
+
+    def test_execution_log_api_lists_and_clears_module_history(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            db = root / "devices.json"
+            comms = root / "comms.log"
+            db.write_text(json.dumps({"devices": [{
+                "serial_number": "hub-1", "module_type": "control_hub_module",
+                "status": "offline disconnected",
+            }]}), encoding="utf-8")
+            comms.write_text("", encoding="utf-8")
+            (root / "control_hub_execution_log.json").write_text(json.dumps({
+                "version": 1,
+                "devices": {"hub-1": [{
+                    "log_id": "log-1", "state": "completed", "kind": "command",
+                    "target": "echo API", "logged_at": 123.0,
+                }]},
+            }), encoding="utf-8")
+            app = create_webview_app(
+                str(db), str(comms), enable_realtime_stream=False,
+            )
+            list_log = self._route_endpoint(
+                app, "/api/devices/{serial_number}/control-hub/executions", "GET",
+            )
+            clear_log = self._route_endpoint(
+                app, "/api/devices/{serial_number}/control-hub/executions/clear", "POST",
+            )
+
+            listed = asyncio.run(list_log("hub-1", 50))
+            self.assertEqual(listed["revision"], "log-1")
+            self.assertEqual(listed["entries"][0]["target"], "echo API")
+            cleared = asyncio.run(clear_log("hub-1"))
+            self.assertEqual(cleared, {"ok": True, "entries": [], "revision": "0"})
+            self.assertEqual(asyncio.run(list_log("hub-1", 50))["entries"], [])
 
     def test_script_store_uses_50_mb_limit(self):
         self.assertEqual(ControlHubScriptStore.MAX_BYTES, 50 * 1024 * 1024)

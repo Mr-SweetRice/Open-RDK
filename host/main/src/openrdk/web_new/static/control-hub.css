@@ -55,6 +55,23 @@ body { min-height: 100vh; overflow-y: auto; overflow-x: hidden; }
 .execution-card dt { color: var(--text-dim); }
 .execution-card dd { margin: 0; }
 .execution-card textarea { width: 100%; font-family: ui-monospace, monospace; }
+.execution-log-card { grid-column: 1 / -1; }
+.execution-log { display: grid; gap: 8px; margin-top: 14px; color: var(--text-dim); }
+.execution-log-entry { border: 1px solid var(--border); border-radius: 11px; overflow: hidden; background: var(--surface); }
+.execution-log-entry summary { display: grid; grid-template-columns: 105px minmax(140px, 1fr) 90px auto; gap: 10px; align-items: center; padding: 11px 13px; cursor: pointer; list-style-position: inside; }
+.execution-log-entry summary strong { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-log-entry summary time { font-size: 11px; white-space: nowrap; }
+.execution-log-state { font-weight: 600; }
+.execution-log-entry.state-completed .execution-log-state { color: #74d99f; }
+.execution-log-entry.state-failed .execution-log-state,
+.execution-log-entry.state-timeout .execution-log-state,
+.execution-log-entry.state-rejected .execution-log-state { color: #ff8d8d; }
+.execution-log-entry.state-stopped .execution-log-state { color: #f2c66d; }
+.execution-log-details { padding: 0 13px 13px; border-top: 1px solid var(--border); }
+.execution-log-details dl { display: grid; grid-template-columns: 70px minmax(0, 1fr) 70px minmax(80px, .35fr); gap: 7px 10px; margin: 12px 0; }
+.execution-log-details dt { color: var(--text-dim); }
+.execution-log-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.execution-log-details pre { max-height: 320px; margin: 0; padding: 12px; overflow: auto; border-radius: 8px; background: var(--surface-2); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; }
 .field input, .field textarea, .field select { box-sizing: border-box; }
 .imu-page { display: grid; gap: 16px; }
 .imu-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
@@ -85,6 +102,9 @@ body { min-height: 100vh; overflow-y: auto; overflow-x: hidden; }
   .menu-head span:nth-child(n+3), .menu-row > select, .menu-row .execution-input { grid-column: 2; }
   .command-box { grid-template-columns: 1fr; }
   .directory-add-row { grid-template-columns: 1fr; }
+  .execution-log-entry summary { grid-template-columns: 90px 1fr; }
+  .execution-log-entry summary time { grid-column: 2; }
+  .execution-log-details dl { grid-template-columns: 65px 1fr; }
   .gpio-grid { grid-template-columns: repeat(2, 1fr); }
   .imu-hero { align-items: flex-start; flex-direction: column; }
   .imu-angle-grid, .imu-detail-grid { grid-template-columns: 1fr; }

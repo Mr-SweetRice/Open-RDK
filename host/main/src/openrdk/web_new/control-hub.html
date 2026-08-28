@@ -6,7 +6,7 @@
     <title>Open-RDK · Control Hub</title>
     <link rel="stylesheet" href="static/theme.css" />
     <link rel="stylesheet" href="static/styles.css" />
-    <link rel="stylesheet" href="static/control-hub.css?v=20260827-imu1" />
+    <link rel="stylesheet" href="static/control-hub.css?v=20260828-script-dirs1" />
   </head>
   <body>
     <main class="hub-shell">
@@ -36,6 +36,12 @@
           <div class="eyebrow">Arquivos no host</div><h2>Biblioteca Python</h2>
           <p class="hint">Carregue arquivos <code>.py</code> de até 50 MB. Eles ficam na pasta controlada do Open-RDK e aparecem nos slots do tipo Python.</p>
           <div class="upload-row"><input id="scriptFile" type="file" accept=".py,text/x-python" /><button id="uploadBtn" class="action-btn accent">Carregar</button></div>
+          <div class="script-directories">
+            <div class="eyebrow">Diretórios simultâneos</div>
+            <p class="hint">Adicione caminhos absolutos existentes no computador do host. Todos os arquivos <code>.py</code> desses diretórios aparecerão juntos no seletor do módulo.</p>
+            <div class="directory-add-row"><input id="scriptDirectoryPath" type="text" placeholder="C:\meus-scripts ou /home/pi/scripts" aria-label="Caminho absoluto do diretório de scripts" /><button id="addScriptDirectoryBtn" class="action-btn" type="button">Adicionar diretório</button></div>
+            <div id="scriptDirectoryList" class="directory-list" aria-live="polite"></div>
+          </div>
           <div id="scriptList" class="script-list">Nenhum código carregado.</div>
         </article>
 
@@ -89,6 +95,6 @@
         </div>
       </section>
     </main>
-    <script src="static/control-hub.js?v=20260827-imu1"></script>
+    <script src="static/control-hub.js?v=20260828-script-dirs1"></script>
   </body>
 </html>

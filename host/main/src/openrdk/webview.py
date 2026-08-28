@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import math
 import os
@@ -382,25 +383,160 @@ class CommsStreamBroker:
 
 
 class ControlHubScriptStore:
-    """Stores user-uploaded Python files in one controlled host directory."""
+    """Discovers Python scripts across one managed and many external directories."""
 
     MAX_BYTES = 50 * 1024 * 1024
     _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. -]{0,99}\.py$", re.IGNORECASE)
+    _HASHED_REFERENCE = re.compile(r"^(?:managed|external):([0-9a-f]{20})$")
 
-    def __init__(self, folder: str):
+    def __init__(self, folder: str, directories_path: str | None = None):
         self.folder = os.path.abspath(folder)
-        self._lock = threading.Lock()
+        self.directories_path = os.path.abspath(
+            directories_path
+            or os.path.join(os.path.dirname(self.folder), "control_hub_script_directories.json")
+        )
+        self._lock = threading.RLock()
         os.makedirs(self.folder, exist_ok=True)
 
-    def resolve(self, filename: str, *, require_exists: bool = True) -> str:
-        name = str(filename or "").strip()
-        if not self._SAFE_NAME.fullmatch(name) or os.path.basename(name) != name:
-            raise ValueError("invalid Python filename")
-        path = os.path.abspath(os.path.join(self.folder, name))
-        if os.path.dirname(path) != self.folder:
-            raise ValueError("invalid Python filename")
+    @staticmethod
+    def _canonical_folder(path: str) -> str:
+        return os.path.realpath(os.path.abspath(path))
+
+    @staticmethod
+    def _path_key(path: str) -> str:
+        return os.path.normcase(ControlHubScriptStore._canonical_folder(path))
+
+    @staticmethod
+    def _directory_id(path: str) -> str:
+        digest = hashlib.sha256(
+            ControlHubScriptStore._path_key(path).encode("utf-8")
+        ).hexdigest()[:12]
+        return f"directory:{digest}"
+
+    @staticmethod
+    def _hashed_reference(path: str, *, managed: bool) -> str:
+        digest = hashlib.sha256(
+            os.path.normcase(os.path.realpath(path)).encode("utf-8")
+        ).hexdigest()[:20]
+        return f"{'managed' if managed else 'external'}:{digest}"
+
+    def _load_external_folders(self) -> list[str]:
+        try:
+            with open(self.directories_path, "r", encoding="utf-8") as fp:
+                payload = json.load(fp)
+        except (OSError, json.JSONDecodeError):
+            return []
+        raw_paths = payload.get("directories", []) if isinstance(payload, dict) else []
+        if not isinstance(raw_paths, list):
+            return []
+        managed_key = self._path_key(self.folder)
+        seen = {managed_key}
+        folders: list[str] = []
+        for raw_path in raw_paths:
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                continue
+            folder = self._canonical_folder(raw_path.strip())
+            key = self._path_key(folder)
+            if key in seen:
+                continue
+            seen.add(key)
+            folders.append(folder)
+        return folders
+
+    def _save_external_folders(self, folders: list[str]) -> None:
+        os.makedirs(os.path.dirname(self.directories_path) or ".", exist_ok=True)
+        temp_path = self.directories_path + ".tmp"
+        with open(temp_path, "w", encoding="utf-8") as fp:
+            json.dump({"version": 1, "directories": folders}, fp, ensure_ascii=False, indent=2)
+        os.replace(temp_path, self.directories_path)
+
+    def _directory_records(self) -> list[dict]:
+        records = [{
+            "id": "managed",
+            "path": self._canonical_folder(self.folder),
+            "label": "Diretório gerenciado",
+            "managed": True,
+        }]
+        for folder in self._load_external_folders():
+            records.append({
+                "id": self._directory_id(folder),
+                "path": folder,
+                "label": os.path.basename(folder.rstrip(os.sep)) or folder,
+                "managed": False,
+            })
+        return records
+
+    def directories(self) -> list[dict]:
+        with self._lock:
+            records = self._directory_records()
+            scripts = self._scan(records)
+        counts: dict[str, int] = {}
+        for script in scripts:
+            directory_id = str(script["directory_id"])
+            counts[directory_id] = counts.get(directory_id, 0) + 1
+        return [{
+            **record,
+            "available": os.path.isdir(record["path"]),
+            "script_count": counts.get(record["id"], 0),
+        } for record in records]
+
+    def add_directory(self, path: str) -> dict:
+        raw_path = str(path or "").strip()
+        if not raw_path or "\x00" in raw_path:
+            raise ValueError("directory path is required")
+        expanded = os.path.expandvars(os.path.expanduser(raw_path))
+        if not os.path.isabs(expanded):
+            raise ValueError("directory path must be absolute")
+        folder = self._canonical_folder(expanded)
+        if not os.path.isdir(folder):
+            raise ValueError("script directory does not exist")
+        try:
+            os.listdir(folder)
+        except OSError as exc:
+            raise ValueError("script directory is not readable") from exc
+        with self._lock:
+            managed_key = self._path_key(self.folder)
+            if self._path_key(folder) == managed_key:
+                return next(record for record in self.directories() if record["managed"])
+            folders = self._load_external_folders()
+            existing = next(
+                (item for item in folders if self._path_key(item) == self._path_key(folder)),
+                None,
+            )
+            if existing is None:
+                folders.append(folder)
+                self._save_external_folders(folders)
+            directory_id = self._directory_id(folder)
+            return next(record for record in self.directories() if record["id"] == directory_id)
+
+    def remove_directory(self, directory_id: str) -> None:
+        requested = str(directory_id or "").strip()
+        if requested == "managed":
+            raise ValueError("the managed script directory cannot be removed")
+        with self._lock:
+            folders = self._load_external_folders()
+            remaining = [folder for folder in folders if self._directory_id(folder) != requested]
+            if len(remaining) == len(folders):
+                raise KeyError(requested)
+            self._save_external_folders(remaining)
+
+    def resolve(self, reference: str, *, require_exists: bool = True) -> str:
+        value = str(reference or "").strip()
+        if self._SAFE_NAME.fullmatch(value) and os.path.basename(value) == value:
+            path = os.path.abspath(os.path.join(self.folder, value))
+            if os.path.dirname(path) != self.folder:
+                raise ValueError("invalid Python filename")
+        elif self._HASHED_REFERENCE.fullmatch(value):
+            matches = [item for item in self.list() if item["reference"] == value]
+            if len(matches) != 1:
+                if not matches:
+                    raise FileNotFoundError(value)
+                raise ValueError("ambiguous Python script reference")
+            path = str(matches[0]["path"])
+        else:
+            raise ValueError("invalid Python script reference")
         if require_exists and not os.path.isfile(path):
-            raise FileNotFoundError(name)
+            raise FileNotFoundError(value)
         return path
 
     def save(self, filename: str, content: str) -> dict:
@@ -419,23 +555,70 @@ class ControlHubScriptStore:
         return self.describe(path)
 
     @staticmethod
-    def describe(path: str) -> dict:
+    def describe(
+        path: str, *, directory_id: str = "managed", directory_path: str = "",
+        directory_label: str = "Diretório gerenciado", managed: bool = True,
+    ) -> dict:
         stat = os.stat(path)
+        name = os.path.basename(path)
         return {
-            "name": os.path.basename(path),
+            "name": name,
+            "reference": (
+                name if managed and ControlHubScriptStore._SAFE_NAME.fullmatch(name)
+                else ControlHubScriptStore._hashed_reference(path, managed=managed)
+            ),
             "size": stat.st_size,
             "updated_at": stat.st_mtime,
+            "directory_id": directory_id,
+            "directory_path": directory_path,
+            "directory_label": directory_label,
+            "managed": managed,
+            "path": os.path.realpath(path),
         }
+
+    def _scan(self, records: list[dict]) -> list[dict]:
+        scripts: list[dict] = []
+        seen_files: set[str] = set()
+        for record in records:
+            folder = str(record["path"])
+            if not os.path.isdir(folder):
+                continue
+            try:
+                names = os.listdir(folder)
+            except OSError:
+                continue
+            for name in names:
+                if not name.lower().endswith(".py") or os.path.basename(name) != name:
+                    continue
+                path = os.path.realpath(os.path.join(folder, name))
+                if not os.path.isfile(path):
+                    continue
+                file_key = os.path.normcase(path)
+                if file_key in seen_files:
+                    continue
+                seen_files.add(file_key)
+                try:
+                    scripts.append(self.describe(
+                        path,
+                        directory_id=str(record["id"]),
+                        directory_path=folder,
+                        directory_label=str(record["label"]),
+                        managed=bool(record["managed"]),
+                    ))
+                except OSError:
+                    continue
+        return sorted(
+            scripts,
+            key=lambda item: (
+                0 if item["managed"] else 1,
+                str(item["directory_label"]).lower(),
+                str(item["name"]).lower(),
+            ),
+        )
 
     def list(self) -> list[dict]:
         with self._lock:
-            paths = [
-                os.path.join(self.folder, name)
-                for name in os.listdir(self.folder)
-                if name.lower().endswith(".py")
-                and os.path.isfile(os.path.join(self.folder, name))
-            ]
-        return [self.describe(path) for path in sorted(paths, key=lambda value: os.path.basename(value).lower())]
+            return self._scan(self._directory_records())
 
 
 class ControlHubExecutor:
@@ -447,12 +630,13 @@ class ControlHubExecutor:
 
     def __init__(
         self, db_path: str, profiles_path: str, scripts_path: str | None = None,
-        enable_module_sync: bool = True,
+        enable_module_sync: bool = True, script_directories_path: str | None = None,
     ):
         self.db_path = os.path.abspath(db_path)
         self.profiles_path = os.path.abspath(profiles_path)
         self.script_store = ControlHubScriptStore(
-            scripts_path or os.path.join(os.path.dirname(self.profiles_path), "control_hub_scripts")
+            scripts_path or os.path.join(os.path.dirname(self.profiles_path), "control_hub_scripts"),
+            directories_path=script_directories_path,
         )
         self._lock = threading.Lock()
         self._seen_lock = threading.Lock()
@@ -1131,6 +1315,14 @@ class ControlHubScriptUploadPayload(BaseModel):
     content: str
 
 
+class ControlHubScriptDirectoryPayload(BaseModel):
+    path: str = ""
+
+
+class ControlHubScriptDirectoryRemovePayload(BaseModel):
+    directory_id: str = ""
+
+
 class ControlHubServoPayload(BaseModel):
     channel: int
     angle: int
@@ -1204,10 +1396,14 @@ def create_webview_app(
     control_hub_scripts_path = os.path.join(
         os.path.dirname(os.path.abspath(db_path)), "control_hub_scripts"
     )
+    control_hub_script_directories_path = os.path.join(
+        os.path.dirname(os.path.abspath(db_path)), "control_hub_script_directories.json"
+    )
     control_hub_executor = ControlHubExecutor(
         db_path=db_path,
         profiles_path=control_hub_profiles_path,
         scripts_path=control_hub_scripts_path,
+        script_directories_path=control_hub_script_directories_path,
     )
     control_hub_script_store = control_hub_executor.script_store
     broker = CommsStreamBroker(
@@ -2495,7 +2691,47 @@ def create_webview_app(
 
     @app.get("/api/control-hub/scripts")
     async def control_hub_scripts():
-        return {"scripts": control_hub_script_store.list()}
+        return {
+            "scripts": control_hub_script_store.list(),
+            "directories": control_hub_script_store.directories(),
+        }
+
+    @app.get("/api/control-hub/script-directories")
+    async def control_hub_script_directories():
+        return {"directories": control_hub_script_store.directories()}
+
+    @app.post("/api/control-hub/script-directories")
+    async def control_hub_script_directory_add(payload: ControlHubScriptDirectoryPayload):
+        try:
+            directory = await asyncio.to_thread(
+                control_hub_script_store.add_directory, payload.path,
+            )
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "directory": directory,
+            "directories": control_hub_script_store.directories(),
+            "scripts": control_hub_script_store.list(),
+        }
+
+    @app.post("/api/control-hub/script-directories/remove")
+    async def control_hub_script_directory_remove(
+        payload: ControlHubScriptDirectoryRemovePayload,
+    ):
+        try:
+            await asyncio.to_thread(
+                control_hub_script_store.remove_directory, payload.directory_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="script directory not found") from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "directories": control_hub_script_store.directories(),
+            "scripts": control_hub_script_store.list(),
+        }
 
     @app.post("/api/control-hub/scripts/upload")
     async def control_hub_script_upload(payload: ControlHubScriptUploadPayload):
@@ -2505,7 +2741,12 @@ def create_webview_app(
             )
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"ok": True, "script": saved, "scripts": control_hub_script_store.list()}
+        return {
+            "ok": True,
+            "script": saved,
+            "scripts": control_hub_script_store.list(),
+            "directories": control_hub_script_store.directories(),
+        }
 
     @app.post("/api/devices/{serial_number}/control-hub/refresh")
     async def control_hub_refresh(serial_number: str):

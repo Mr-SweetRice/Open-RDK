@@ -89,3 +89,16 @@ To move Servo 1 progressively from 0 to 180 degrees in three seconds, use:
 ```bash
 python examples/servo1_0_a_180.py
 ```
+
+## Script directories in the WebView
+
+The Control Hub page always includes the Open-RDK managed script directory.
+Additional absolute host paths can be registered under **Biblioteca Python →
+Diretórios simultâneos**. Every direct child ending in `.py` from every
+available registered directory is shown in the module's Python script selector.
+
+Directory registrations persist in `control_hub_script_directories.json` next
+to the device registry. Removing a registration does not delete the directory
+or any script. If two directories contain the same filename, the selector keeps
+both entries grouped by directory and the host stores a unique reference so the
+correct file is executed.

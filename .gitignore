@@ -38,6 +38,7 @@ host/main/certs/
 **/.runpy-access.state
 **/espressif_devices.json
 **/control_hub_commands.json
+**/control_hub_script_directories.json
 **/control_hub_scripts/
 #hardware
 /hardware/

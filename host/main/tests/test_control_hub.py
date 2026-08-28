@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import json
 import os
 import tempfile
@@ -12,13 +13,25 @@ from openrdk.constants import CONTROL_HUB_MODULE_ID, MODULE_ID_TO_TYPE
 from openrdk.functions.flasher import SUPPORTED_FIRMWARE_TYPES
 from openrdk.webview import (
     ControlHubExecutor,
+    ControlHubScriptDirectoryPayload,
+    ControlHubScriptDirectoryRemovePayload,
     ControlHubScriptStore,
     _parse_control_hub_imu_response,
+    create_webview_app,
 )
 from openrdk.functions.udev import _WindowsSerialDevice, matches
 
 
 class ControlHubTests(unittest.TestCase):
+    @staticmethod
+    def _route_endpoint(app, path: str, method: str):
+        for route in app.routes:
+            if getattr(route, "path", None) != path:
+                continue
+            if method.upper() in getattr(route, "methods", set()):
+                return route.endpoint
+        raise AssertionError(f"route not found: {method} {path}")
+
     def test_control_hub_imu_response_returns_euler_and_calibration_state(self):
         parsed = _parse_control_hub_imu_response(
             "IMU,12.50,-3.25,47.75,0.010,-0.020,0.030,1,0,100"
@@ -263,6 +276,107 @@ class ControlHubTests(unittest.TestCase):
             store = ControlHubScriptStore(folder)
             with self.assertRaises(ValueError):
                 store.save("../outside.py", "print('bad')")
+
+    def test_script_store_combines_persisted_directories_and_resolves_duplicates(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            managed = root / "managed"
+            external_a = root / "external-a"
+            external_b = root / "external-b"
+            external_a.mkdir()
+            external_b.mkdir()
+            (external_a / "duplicate.py").write_text("print('A')\n", encoding="utf-8")
+            (external_b / "duplicate.py").write_text("print('B')\n", encoding="utf-8")
+            (external_b / "ação longa.py").write_text("print('unicode')\n", encoding="utf-8")
+            config = root / "directories.json"
+            store = ControlHubScriptStore(str(managed), str(config))
+            store.save("managed.py", "print('managed')\n")
+            store.add_directory(str(external_a))
+            store.add_directory(str(external_b))
+
+            scripts = store.list()
+            self.assertEqual(
+                sorted(item["name"] for item in scripts),
+                ["ação longa.py", "duplicate.py", "duplicate.py", "managed.py"],
+            )
+            duplicate_references = [
+                item["reference"] for item in scripts if item["name"] == "duplicate.py"
+            ]
+            self.assertEqual(len(set(duplicate_references)), 2)
+            self.assertTrue(all(value.startswith("external:") for value in duplicate_references))
+            self.assertEqual(Path(store.resolve("managed.py")), managed / "managed.py")
+            self.assertEqual(
+                {Path(store.resolve(value)).read_text(encoding="utf-8").strip()
+                 for value in duplicate_references},
+                {"print('A')", "print('B')"},
+            )
+
+            reloaded = ControlHubScriptStore(str(managed), str(config))
+            self.assertEqual(len(reloaded.directories()), 3)
+            self.assertEqual(len(reloaded.list()), 4)
+
+    def test_script_store_removes_only_directory_registration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            external = root / "external"
+            external.mkdir()
+            script = external / "kept.py"
+            script.write_text("print('kept')\n", encoding="utf-8")
+            store = ControlHubScriptStore(
+                str(root / "managed"), str(root / "directories.json")
+            )
+            directory = store.add_directory(str(external))
+            self.assertEqual([item["name"] for item in store.list()], ["kept.py"])
+            store.remove_directory(directory["id"])
+            self.assertEqual(store.list(), [])
+            self.assertTrue(script.is_file())
+            with self.assertRaises(KeyError):
+                store.remove_directory(directory["id"])
+
+    def test_script_store_rejects_relative_or_missing_directories(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = ControlHubScriptStore(str(Path(folder) / "managed"))
+            with self.assertRaisesRegex(ValueError, "absolute"):
+                store.add_directory("relative/scripts")
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                store.add_directory(str(Path(folder) / "missing"))
+
+    def test_script_directory_api_adds_lists_and_removes_external_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            db = root / "devices.json"
+            comms = root / "comms.log"
+            external = root / "external"
+            db.write_text('{"devices": []}', encoding="utf-8")
+            comms.write_text("", encoding="utf-8")
+            external.mkdir()
+            (external / "api.py").write_text("print('API')\n", encoding="utf-8")
+            app = create_webview_app(
+                str(db), str(comms), enable_realtime_stream=False,
+            )
+            add = self._route_endpoint(
+                app, "/api/control-hub/script-directories", "POST",
+            )
+            list_scripts = self._route_endpoint(
+                app, "/api/control-hub/scripts", "GET",
+            )
+            remove = self._route_endpoint(
+                app, "/api/control-hub/script-directories/remove", "POST",
+            )
+
+            added = asyncio.run(add(ControlHubScriptDirectoryPayload(path=str(external))))
+            directory_id = added["directory"]["id"]
+            listed = asyncio.run(list_scripts())
+            self.assertEqual([item["name"] for item in listed["scripts"]], ["api.py"])
+            self.assertEqual(len(listed["directories"]), 2)
+
+            asyncio.run(remove(ControlHubScriptDirectoryRemovePayload(
+                directory_id=directory_id,
+            )))
+            listed = asyncio.run(list_scripts())
+            self.assertEqual(listed["scripts"], [])
+            self.assertEqual(len(listed["directories"]), 1)
+            self.assertTrue((external / "api.py").is_file())
 
     def test_script_store_uses_50_mb_limit(self):
         self.assertEqual(ControlHubScriptStore.MAX_BYTES, 50 * 1024 * 1024)

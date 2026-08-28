@@ -135,11 +135,6 @@
       tools = [
         ['/color' + serialQuery, 'Color Studio', ICON_COLOR],
       ];
-    } else if (cls.includes("kind-control-hub")) {
-      title = "Control Hub Tools";
-      tools = [
-        ['/control-hub' + serialQuery, 'Control Hub Config', ICON_GEAR],
-      ];
     } else {
       railTools.hidden = true;
       toolsTitle.hidden = true;

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Modulo de controle</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">SERVICO INDEPENDENTE</span><h1>Modulo de controle</h1></div>
+    <div class="connection"><span id="statusDot" class="dot"></span><strong id="statusText">Desconectado</strong></div>
+  </header>
+  <main>
+    <div id="notice" role="status"></div>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Scripts e comandos</h2><p>Configure as oito opcoes executadas pelo modulo.</p></div><button id="saveConfig">Salvar</button></div>
+      <div id="menuRows" class="menu-grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Diretorios de scripts</h2><p>Todos ficam ativos simultaneamente e seus scripts aparecem nos seletores acima.</p></div></div>
+      <div class="inline"><input id="directoryPath" placeholder="C:\robot\scripts ou /opt/robot/scripts"><button id="selectDirectory" class="secondary">Selecionar</button><button id="addDirectory">Adicionar</button></div>
+      <div id="directories" class="directory-list"></div>
+      <details><summary>Enviar script ao diretorio gerenciado</summary><div class="upload"><input id="scriptFile" type="file" accept=".py"><button id="uploadScript">Enviar</button></div></details>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Execucao manual</h2><p>Executa no sistema operacional e aplica a mesma parada de seguranca ao terminar.</p></div><button id="stopExecution" class="danger">Interromper</button></div>
+      <div class="inline"><select id="manualShell"><option value="auto">Automatico</option><option value="cmd">CMD</option><option value="powershell">PowerShell</option><option value="sh">sh</option></select><input id="manualCommand" placeholder="Digite um comando"><button id="runCommand">Executar</button></div>
+    </section>
+
+    <section class="card logs">
+      <div class="section-head"><div><h2>Comandos e execucoes</h2><p>Saida, erros, retorno da parada de motores e comandos enviados ao firmware.</p></div><button id="clearLogs" class="secondary">Limpar</button></div>
+      <div id="currentExecution" class="current-execution">Nenhuma execucao ativa.</div>
+      <div id="logs"></div>
+    </section>
+  </main>
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>

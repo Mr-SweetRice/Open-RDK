@@ -483,12 +483,12 @@ SELFTEST,<ok>,<health_flags>,<distance_mm>
 - Hello ACK module id: `0x15`
 - Module query name: `control_hub_module`
 - MCU target: ESP32
-- OLED/MPU6050 shared I2C: SDA GPIO21, SCL GPIO22
+- OLED/MPU6050 shared I2C: SDA GPIO33, SCL GPIO32
 - OLED SSD1306 address: `0x3C`
 - MPU6050 address: `0x68`
-- Servo channels 0..5: GPIO0, GPIO2, GPIO4, GPIO5, GPIO12, GPIO15
-- KY-040 encoder: CLK GPIO32, DT GPIO33, SW GPIO25
-- Output-capable digital pin indices 0..8: GPIO13, GPIO14, GPIO16, GPIO17, GPIO18, GPIO19, GPIO23, GPIO26, GPIO27
+- Servo channels 0..5: GPIO13, GPIO12, GPIO23, GPIO5, GPIO2, GPIO15
+- KY-040 encoder: CLK GPIO14, DT GPIO27, SW GPIO26
+- Output-capable digital pin indices 0..8: GPIO0, GPIO21, GPIO16, GPIO17, GPIO18, GPIO19, GPIO4, GPIO22, GPIO25
 - Input-only digital pin indices 9..11: GPIO34, GPIO35, GPIO39
 
 ### `CMD` calls
@@ -496,6 +496,8 @@ SELFTEST,<ok>,<health_flags>,<distance_mm>
 - `GET INFO`
 - `GET CFG`
 - `GET IMU`
+- `GET IMU RAW`
+- `CALIBRATE IMU`
 - `GET ENCODER`
 - `GET RUN`
 - `GET MODULES`
@@ -523,7 +525,7 @@ The hardware commands are also accepted under message type `CONTROL (0x04)`.
 `GET INFO` returns:
 
 ```text
-INFO,<device_name>,control_hub_module,control_hub_module,21,SSD1306,MPU6050,21,22,6,12
+INFO,<device_name>,control_hub_module,control_hub_module,21,SSD1306,MPU6050,33,32,6,12,14,27,26
 ```
 
 `GET CFG` returns:
@@ -532,10 +534,16 @@ INFO,<device_name>,control_hub_module,control_hub_module,21,SSD1306,MPU6050,21,2
 HUB,<device_name>,<selected_slot>,<oled_ok>,<mpu_ok>
 ```
 
-`GET IMU` returns raw sensor units:
+`GET IMU` returns Euler angles, compensated gyroscope speed, and calibration state:
 
 ```text
-IMU,<ax>,<ay>,<az>,<gx>,<gy>,<gz>
+IMU,<roll_deg>,<pitch_deg>,<yaw_deg>,<gx_dps>,<gy_dps>,<gz_dps>,<calibrated>,<calibrating>,<progress_percent>
+```
+
+`GET IMU RAW` returns the raw sensor registers:
+
+```text
+IMU_RAW,<ax>,<ay>,<az>,<gx>,<gy>,<gz>
 ```
 
 `GET MENU` and `GET GPIO` return:
@@ -563,29 +571,31 @@ TRACT,<module_index>,CLEAR,0
 ```
 
 While a process is active, the OLED shows its type, item name, and `PARAR EXECUCAO`.
-Pressing the encoder emits `STOP`; the host terminates the tracked process and sends
+Pressing the encoder emits `STOP`; the standalone service terminates the tracked process and sends
 `RUN STATE` back so the OLED can show the terminal result.
 
-The host must not execute the payload solely because it came from firmware. The webview executor checks the serial number, module type, enabled slot, execution mode, and exact decoded payload against its host-owned `control_hub_commands.json` profile. Command slots select `auto`, `cmd`, `powershell`, or `sh`; `auto` resolves to `cmd.exe` on Windows and `sh` on POSIX. Python slots select a `.py` file uploaded to the controlled `control_hub_scripts` folder and run it with the Python interpreter used by Open-RDK. Execution has a 30 second timeout.
+The Open-RDK host deliberately excludes this module from discovery, its SDK,
+its flasher, and its WebView. `services/control_hub` owns the port only while
+connected. Its executor checks the enabled slot, execution mode, and exact
+decoded payload against the service-owned profile before starting anything.
+Command slots select `auto`, `cmd`, `powershell`, or `sh`; `auto` resolves to
+`cmd.exe` on Windows and `sh` on POSIX. Python slots select a `.py` file from
+any registered service script directory.
+
+After every selected process exits, including failure, timeout, or explicit
+stop, the service executes the configured motor-stop command or Python script.
+The main result and motor-stop result are persisted separately in the service
+execution log.
 
 Configuration, servo pulse positions, GPIO states, and the eight encoded menu entries are stored as an NVS blob by `SAVE CFG`.
 
-The OLED main menu is hierarchical: `MODULOS`, `SERVOS`, and `EXECUCAO`.
-The host automatically refreshes the volatile `MODULOS` list from devices currently
-registered as `online connected`. Entries are written first and committed with
-`SET MODULE COUNT`, so a refresh never exposes an empty intermediate list. `SERVOS` selects channels 1..6 and changes the
+The OLED main menu is hierarchical: `MODULOS`, `SERVOS`, `IMU`, and `EXECUCAO`.
+The legacy `MODULOS` commands and `TRACT` events remain in the firmware protocol,
+but the independent service does not route them back through Open-RDK. This
+prevents the control module from reacquiring access to Open-RDK motor ports.
+`SERVOS` selects channels 1..6 and changes the
 angle in 5 degree steps with the encoder. `EXECUCAO` contains the eight configured
 command/Python slots. Each submenu includes a `VOLTAR` entry.
-
-Selecting an entry marked as `traction_module` opens `POSICAO`, `VELOCIDADE`,
-`FORCE OUTPUT`, and `LIBERAR FORCE`. Each encoder step immediately emits the updated
-`TRACT` value while the OLED remains on the control screen; pressing returns to the
-traction menu. The host coalesces rapid updates so only the newest pending value is
-applied, validates the synchronized module index and serial, and routes position/speed
-as `CMD` and force output as `CONTROL`. `LIBERAR FORCE` sends `CLR OUT`, returning
-output authority to the PID and switching the device back to `CMD`. Force-output
-updates also change the host's maintained CONTROL heartbeat value, preventing a
-subsequent heartbeat from overwriting the encoder-selected output with zero.
 
 ## 4. Legacy Line Fallback Policy
 

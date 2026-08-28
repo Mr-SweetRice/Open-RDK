@@ -8,6 +8,7 @@ HC-SR04-based `distance_sensor_module`.
 ## Layout
 
 - `host/main/`: Python host relay, SDK entrypoint, mDNS/HTTPS web UI, and module tools.
+- `services/control_hub/`: independent control-module serial service and web UI.
 - `host/main/src/openrdk/web_new/`: current browser interface served by the host relay.
 - `firmware/esp/modules/`: active ESP-IDF firmware projects, one directory per module.
 - `firmware/legacy_firmware/`: preserved legacy firmware sources.
@@ -31,6 +32,12 @@ http://rdk.local:8765
 ```
 
 If HTTP redirect is enabled and port 80 is available, `http://rdk.local` redirects to the relay UI.
+
+The control module is deliberately excluded from the relay and SDK. Run its
+standalone service from `services/control_hub` and open
+`http://127.0.0.1:8770`. The service owns the module port only while connected;
+disconnecting it releases the port for other programs. See
+[`docs/control-hub-module.md`](docs/control-hub-module.md).
 
 ## Firmware
 

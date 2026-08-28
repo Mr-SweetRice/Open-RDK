@@ -1,6 +1,8 @@
 # Módulo de Controle
 
-Firmware ESP-IDF para um ESP32 DevKit clássico integrado ao Open-RDK. O módulo reúne:
+Firmware ESP-IDF para um ESP32 DevKit clássico operado pelo serviço independente
+`services/control_hub`. O módulo não é descoberto nem controlado pelo host
+Open-RDK. Ele reúne:
 
 - OLED SSD1306 I2C 128x64 (`0x3C`)
 - MPU6050 I2C (`0x68`, AD0 em GND) com ângulos de Euler e calibração de drift
@@ -47,26 +49,30 @@ Não alimente o KY-040 com 5 V: suas saídas chegariam aos GPIO do ESP32 acima d
 ## Uso do menu
 
 - o menu principal do OLED contém `MODULOS`, `SERVOS`, `IMU` e `EXECUCAO`;
-- `MODULOS` mostra até oito módulos conectados, sincronizados automaticamente pelo host;
-- ao selecionar um `traction_module`, use `POSICAO` (-3600..3600 graus), `VELOCIDADE`
-  (-150..150 RPM) ou `FORCE OUTPUT` (-100..100%);
-- cada passo do encoder aplica imediatamente o valor de tração e pressionar volta ao menu;
+- `MODULOS` é uma tela legada e não é sincronizada pelo serviço independente;
 - `SERVOS` seleciona um dos seis canais e ajusta o ângulo em passos de 5 graus;
 - `IMU` mostra roll, pitch e yaw em graus e o estado da calibração;
-- `EXECUCAO` contém os oito slots configurados pela WebView;
+- `EXECUCAO` contém os oito slots configurados em `http://127.0.0.1:8770`;
 - gire o KY-040 para mudar o item e pressione para selecionar ou voltar;
-- cada slot pode executar um comando de terminal ou um arquivo Python carregado pela página `/control-hub`;
+- cada slot pode executar um comando de terminal ou um arquivo Python configurado no serviço;
 - o ESP32 envia `EXEC,<slot>,<modo>,<payload_base64url>`;
-- o host só executa a solicitação quando modo e payload coincidem com o perfil salvo;
+- o serviço só executa a solicitação quando modo e payload coincidem com o perfil salvo;
 - durante a execução, pressione novamente o encoder em `PARAR EXECUCAO` para enviar `STOP,<slot>`.
 
-Os comandos têm limite de 30 segundos. Na página web, cada item permite selecionar `Automático`, `CMD`, `PowerShell` ou `sh`. O modo automático usa `cmd.exe` no Windows e `sh` no Linux. Portanto, use caminhos absolutos e execute o serviço com uma conta de usuário com permissões mínimas.
+O timeout é configurável por item. Na página web, cada item permite selecionar
+`Automático`, `CMD`, `PowerShell` ou `sh`. O modo automático usa `cmd.exe` no
+Windows e `sh` no Linux. A rotina interna e imutável de parada do Open-RDK é
+chamada depois de toda execução, inclusive falha, timeout ou interrupção. Use caminhos
+absolutos e execute o serviço com uma conta de usuário com permissões mínimas.
 
 ## IMU e calibração
 
 O filtro complementar combina a inclinação absoluta do acelerômetro com a velocidade angular do giroscópio. Roll e pitch são estabilizados pela gravidade. Como o MPU6050 não possui magnetômetro, yaw é um ângulo relativo integrado pelo giroscópio.
 
-Na aba `IMU` da página `/control-hub`, mantenha o módulo completamente parado e pressione `Calibrar IMU`. O firmware coleta 250 amostras durante aproximadamente 5 segundos, calcula a média do drift dos três eixos — incluindo o drift de yaw no eixo Z —, zera o yaw e grava o bias na NVS.
+Na seção `IMU` da página do serviço, mantenha o módulo completamente parado e
+pressione `Calibrar`. O firmware coleta 250 amostras durante aproximadamente 5
+segundos, calcula a média do drift dos três eixos — incluindo o drift de yaw no
+eixo Z —, zera o yaw e grava o bias na NVS.
 
 Comandos disponíveis:
 
@@ -84,4 +90,5 @@ idf.py build
 idf.py -p COM5 flash
 ```
 
-Depois de empacotado pelo script `tools/scripts/package_firmware.ps1`, ele também aparece como `control_hub_module` no flasher do Open-RDK.
+O flasher do Open-RDK não oferece este firmware. Faça build e flash diretamente
+com ESP-IDF para manter a separação do serviço.

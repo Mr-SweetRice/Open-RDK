@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openrdk-control-hub-service"
+version = "1.0.0"
+description = "Standalone Control Hub serial and web service"
+requires-python = ">=3.11"
+dependencies = [
+  "pyserial==3.5",
+  "fastapi==0.115.6",
+  "uvicorn==0.32.1",
+]
+
+[project.scripts]
+control-hub-service = "control_hub_service.app:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+control_hub_service = ["web/**/*"]

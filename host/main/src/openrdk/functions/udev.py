@@ -27,6 +27,11 @@ from ..constants import (
 )
 from . import _state
 from .comms_log import _now_iso
+from .control_hub_reservation import (
+    CONTROL_HUB_MODULE_TYPE,
+    is_reserved_control_hub,
+    reserve_control_hub,
+)
 from .keepalive import _start_keepalive_monitor, _stop_keepalive_monitor
 from .registry import (
     _find_device_by_serial,
@@ -100,7 +105,15 @@ def _list_windows_serial_devices() -> list[_WindowsSerialDevice]:
 def _mark_all_devices_offline(db_path: str):
     data = _load_db(db_path)
     now = _now_iso()
+    retained = []
     for item in data["devices"]:
+        module_type = _normalize_module_type(
+            item.get("module_type") or item.get("firmware_module")
+        )
+        if module_type == CONTROL_HUB_MODULE_TYPE:
+            reserve_control_hub(item.get("serial_number"), item.get("device_node"))
+            _stop_keepalive_monitor(item.get("serial_number"))
+            continue
         item["status"] = STATUS_OFFLINE_DISCONNECTED
         item["last_event_at"] = now
         item["link_live"] = False
@@ -115,7 +128,45 @@ def _mark_all_devices_offline(db_path: str):
         item["name"] = _normalize_device_name(
             item.get("name"), item.get("module_type") or item.get("firmware_module"),
         )
+        retained.append(item)
+    data["devices"] = retained
     _save_db(db_path, data)
+
+
+def _remove_control_hub_from_registry(db_path: str, serial_number: str | None, node: str | None):
+    stopped_serials = []
+    with _state._DB_LOCK:
+        data = _load_db(db_path)
+        retained = []
+        for item in data["devices"]:
+            same_serial = bool(serial_number) and item.get("serial_number") == serial_number
+            same_node = bool(node) and item.get("device_node") == node
+            module_type = _normalize_module_type(
+                item.get("module_type") or item.get("firmware_module")
+            )
+            if module_type == CONTROL_HUB_MODULE_TYPE or same_serial or same_node:
+                if item.get("serial_number"):
+                    stopped_serials.append(item.get("serial_number"))
+                continue
+            retained.append(item)
+        data["devices"] = retained
+        _save_db(db_path, data)
+    for stopped_serial in stopped_serials:
+        _stop_keepalive_monitor(stopped_serial)
+
+
+def _purge_reserved_control_hubs(db_path: str):
+    data = _load_db(db_path)
+    for item in list(data["devices"]):
+        serial_number = item.get("serial_number")
+        node = item.get("device_node")
+        module_type = _normalize_module_type(
+            item.get("module_type") or item.get("firmware_module")
+        )
+        if module_type == CONTROL_HUB_MODULE_TYPE:
+            reserve_control_hub(serial_number, node)
+        if module_type == CONTROL_HUB_MODULE_TYPE or is_reserved_control_hub(serial_number, node):
+            _remove_control_hub_from_registry(db_path, serial_number, node)
 
 
 def _device_node(dev: Any) -> str | None:
@@ -405,6 +456,9 @@ def matches(dev: Any) -> bool:
 def on_attach(dev: Any, db_path: str):
     serial_number = _extract_serial(dev)
     node = dev.device_node
+    if is_reserved_control_hub(serial_number, node):
+        _remove_control_hub_from_registry(db_path, serial_number, node)
+        return
     with _state._FLASH_LOCK:
         if serial_number and serial_number in _state._FLASH_LOCKED_SERIALS:
             return
@@ -448,6 +502,10 @@ def on_attach(dev: Any, db_path: str):
             link_live=link_live, link_status=link_status,
             module_type=reported_module_type, module_id=module_id,
         )
+        if _normalize_module_type(module_type) == CONTROL_HUB_MODULE_TYPE:
+            reserve_control_hub(serial_number, node)
+            _remove_control_hub_from_registry(db_path, serial_number, node)
+            return
 
     resolved_serial = serial_number or (result or {}).get("serial_number")
     _stop_keepalive_monitor(resolved_serial)
@@ -455,6 +513,9 @@ def on_attach(dev: Any, db_path: str):
 
 
 def on_detach(dev: Any, db_path: str):
+    if is_reserved_control_hub(_extract_serial(dev), dev.device_node):
+        _remove_control_hub_from_registry(db_path, _extract_serial(dev), dev.device_node)
+        return
     result = _update_registry(dev, STATUS_OFFLINE_DISCONNECTED, db_path, link_live=False, link_status=LINK_STATUS_NOT_LIVE)
     if (result or {}).get("serial_number"):
         _update_registry_by_serial(
@@ -470,12 +531,15 @@ def bootstrap_connected_devices(context: Any, db_path: str):
     boot_count = 0
     for dev in context.list_devices(subsystem="tty"):
         if matches(dev):
+            node = _device_node(dev)
+            serial_number = _extract_serial(dev)
+            if is_reserved_control_hub(serial_number, node):
+                _remove_control_hub_from_registry(db_path, serial_number, node)
+                continue
             _update_registry(dev, STATUS_ONLINE_CONNECTED, db_path, link_live=False, link_status=LINK_STATUS_NOT_LIVE)
             link_live = False
             module_type = DEFAULT_MODULE_TYPE
             module_id = None
-            node = _device_node(dev)
-            serial_number = _extract_serial(dev)
             known_message_type = None
             known_module_type = None
             if serial_number:
@@ -502,6 +566,10 @@ def bootstrap_connected_devices(context: Any, db_path: str):
                     baud=get_active_serial_baud(),
                 )
             reported_module_type = module_type
+            if _normalize_module_type(module_type) == CONTROL_HUB_MODULE_TYPE:
+                reserve_control_hub(serial_number, node)
+                _remove_control_hub_from_registry(db_path, serial_number, node)
+                continue
             if not link_live and module_id is None and _normalize_module_type(module_type) == DEFAULT_MODULE_TYPE:
                 reported_module_type = None
             link_status = LINK_STATUS_LIVE if link_live else LINK_STATUS_NOT_LIVE
@@ -537,6 +605,7 @@ def _run_windows_serial_loop(
             dev.device_node: dev
             for dev in _list_windows_serial_devices()
             if dev.device_node
+            and not is_reserved_control_hub(_extract_serial(dev), dev.device_node)
         }
 
         for node, dev in current_by_node.items():
@@ -558,6 +627,9 @@ def _handle_monitor_device(dev: Any, db_path: str):
     if action not in ("add", "remove"):
         return
     if not matches(dev):
+        return
+    if is_reserved_control_hub(_extract_serial(dev), dev.device_node):
+        _remove_control_hub_from_registry(db_path, _extract_serial(dev), dev.device_node)
         return
     if action == "add":
         on_attach(dev, db_path)
@@ -594,6 +666,7 @@ def run_conex_loop(
     while True:
         if stop_event is not None and stop_event.is_set():
             break
+        _purge_reserved_control_hubs(db_path)
         timeout = max(0.05, float(poll_timeout_sec))
         dev = monitor.poll(timeout)
         if dev is None:

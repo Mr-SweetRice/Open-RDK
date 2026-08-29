@@ -1,10 +1,9 @@
 # Servico independente do modulo de controle
 
-O modulo de controle nao pertence mais ao runtime, SDK, descoberta ou WebView
-do Open-RDK. Ele usa o servico independente em `services/control_hub`, que e o
-unico processo autorizado a abrir sua porta serial enquanto estiver conectado.
-Ao clicar em **Desconectar**, ou ao encerrar o servico, a porta e fechada e fica
-livre para qualquer outro programa.
+O modulo de controle nao pertence ao runtime, SDK, descoberta ou WebView do
+host Open-RDK. Ele usa o servico independente em `services/control_hub`. O
+servico encontra e reconecta o modulo automaticamente e registra sua porta como
+reservada para impedir que o host Open-RDK tente abri-la.
 
 ## Inicio rapido
 
@@ -22,8 +21,8 @@ cd services/control_hub
 ./start.sh
 ```
 
-Abra `http://127.0.0.1:8770`, selecione a porta e clique em **Conectar**. A
-configuracao e persistida no perfil do usuario:
+Abra `http://127.0.0.1:8770`. Nao existe selecao manual de porta; o estado da
+conexao aparece no cabecalho. A configuracao e persistida no perfil do usuario:
 
 - Windows: `%LOCALAPPDATA%\openrdk\control-hub-service`
 - Linux: `$XDG_STATE_HOME/openrdk/control-hub-service` ou
@@ -50,19 +49,30 @@ Se ela falhar depois de uma execucao, o conjunto e
 registrado como falha de seguranca. O log guarda stdout, stderr, codigo de
 retorno e o resultado separado da parada.
 
+Quando o script encerra sua propria instancia Open-RDK, a rotina fixa usa o
+mesmo ambiente Python do slot para abrir temporariamente um runtime sem WebView
+e repetir a parada. Scripts que criam `CommsRuntime` devem ainda parar os
+motores em seu `finally`, antes de chamar `openrdk.stop()`.
+
 ## Scripts e comandos
 
 O diretorio gerenciado pelo servico esta sempre ativo. Outros diretorios
 absolutos podem ser adicionados pela pagina e funcionam simultaneamente. Todos
-os arquivos `.py` diretamente dentro deles aparecem nos oito seletores do menu
-do menu. Remover um diretorio da lista nao apaga seus arquivos.
+os arquivos `.py` diretamente dentro deles aparecem nos oito seletores do menu.
+Remover um diretorio da lista nao apaga seus arquivos.
+
+Cada slot Python possui o campo **Ambiente Python**, que aceita a pasta do venv
+ou o interpretador. O executor usa `Scripts/python.exe` no Windows ou
+`bin/python` no Linux, configura `VIRTUAL_ENV` e `PATH` e usa o diretorio do
+script como diretorio de trabalho. Com o campo vazio, procura `.venv` e `venv`
+automaticamente nos diretorios pais.
 
 Comandos usam `cmd` no Windows e `sh` no Linux quando o terminal esta em
 `auto`. Tambem e possivel selecionar PowerShell, `cmd` ou `sh` explicitamente.
 O servico inicia subprocessos sem `shell=True`, limita o tempo de execucao e
 encerra a arvore do processo ao receber uma solicitacao de parada.
 
-## Hardware mantido
+## Hardware do firmware
 
 | Funcao | GPIOs fisicos do ESP32 |
 |---|---|
@@ -72,22 +82,25 @@ encerra a arvore do processo ao receber uma solicitacao de parada.
 | MPU6050/OLED I2C | SDA 33, SCL 32 |
 | Encoder | CLK 14, DT 27, SW 26 |
 
-A pagina preserva leitura/calibracao da IMU, controle dos seis servos, GPIO,
-comando bruto do firmware e sincronizacao das oito entradas do display.
+A pagina atual e dedicada aos scripts/comandos, diretorios e logs. Os recursos
+de IMU, servo e GPIO permanecem no firmware e em suas APIs, mas nao ocupam a
+tela principal de configuracao.
 
-## Execucao como servico do usuario
+## Inicializacao automatica
 
-Para iniciar automaticamente no login:
-
-```powershell
-# Windows, PowerShell
-.\install-windows-service.ps1
-```
+Raspberry Pi:
 
 ```bash
-# Linux, systemd do usuario
-./install-linux-service.sh
+cd services/control_hub
+sudo python3 install_raspberry_pi.py
 ```
 
-No Linux, o usuario precisa ter permissao para a porta serial (normalmente pelo
-grupo `dialout`). O servidor web escuta apenas em `127.0.0.1:8770` por padrao.
+O instalador cria a venv, configura `dialout`, grava a unidade systemd, habilita
+o boot e inicia o servico. Consulte
+[`services/control_hub/README_RASPBERRY_PI.md`](../services/control_hub/README_RASPBERRY_PI.md).
+
+Windows:
+
+```powershell
+.\install-windows-service.ps1
+```

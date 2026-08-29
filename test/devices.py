@@ -11,6 +11,29 @@ import time
 from openrdk import CommsRuntime
 
 
+def stop_online_motors(openrdk: CommsRuntime) -> None:
+    """Stop every online traction module before shutting down the runtime."""
+    stopped = []
+    failures = []
+    for device in openrdk.list_devices():
+        if (
+            str(device.get("module_type") or "").lower() != "traction_module"
+            or str(device.get("status") or "").lower() != "online connected"
+        ):
+            continue
+        serial = str(device.get("serial_number") or "").strip()
+        if not serial:
+            continue
+        try:
+            openrdk.traction(serial).stop()
+            stopped.append(serial)
+        except Exception as exc:
+            failures.append(f"{serial}: {exc}")
+    print(f"motor stop before shutdown: stopped={stopped} failures={failures}")
+    if failures:
+        raise RuntimeError("failed to stop traction modules: " + "; ".join(failures))
+
+
 def webview():
     openrdk = CommsRuntime(
         auto_start=True,
@@ -24,13 +47,22 @@ def webview():
         openrdk.list_devices(verbose="full")
         
 
-        input("\npress Enter to quit\n")
+        try:
+            input("\npress Enter to quit\n")
+        except EOFError:
+            # Services started by systemd or a hidden Windows process do not
+            # have an interactive stdin. Listing devices is still a complete
+            # and valid execution in that environment.
+            print("stdin is not interactive; shutting down")
 
     except KeyboardInterrupt:
         print("\nshutdown requested")
 
     finally:
-        openrdk.stop()
+        try:
+            stop_online_motors(openrdk)
+        finally:
+            openrdk.stop()
 
 if __name__ == "__main__":
     webview()

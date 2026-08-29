@@ -4,6 +4,8 @@ import tempfile
 import time
 import unittest
 import json
+import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -107,6 +109,42 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(saved["stop_action"]["kind"], "builtin_openrdk")
             self.assertTrue(saved["stop_action"]["enabled"])
             self.assertTrue(saved["stop_action"]["readonly"])
+
+    def test_python_action_uses_selected_environment_and_script_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            scripts = ScriptStore(state)
+            script = scripts.save(
+                "runtime.py",
+                "import os,sys\nprint(sys.executable)\nprint(os.environ.get('VIRTUAL_ENV',''))\nprint(os.getcwd())\n",
+            )
+            manager = ExecutionManager(state, scripts)
+            result = manager._execute_action({
+                "kind": "python", "script": script["reference"],
+                "python_env": sys.executable, "timeout_sec": 5,
+            })
+            self.assertEqual(result["state"], "completed")
+            self.assertEqual(Path(result["python_interpreter"]), Path(sys.executable).resolve())
+            executable = Path(sys.executable).resolve()
+            expected_env = executable.parent.parent if executable.parent.name.lower() in ("bin", "scripts") else executable.parent
+            self.assertEqual(Path(result["python_env"]), expected_env)
+            self.assertIn(str(scripts.managed), result["stdout"])
+            self.assertEqual(os.path.normcase(result["python_interpreter"]), os.path.normcase(str(Path(sys.executable).resolve())))
+
+    def test_python_environment_is_discovered_next_to_script(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp)
+            script = project / "task.py"
+            script.write_text("", encoding="utf-8")
+            interpreter = project / ".venv" / ("Scripts" if os.name == "nt" else "bin") / (
+                "python.exe" if os.name == "nt" else "python"
+            )
+            interpreter.parent.mkdir(parents=True)
+            interpreter.touch()
+            selected, environment, root = ExecutionManager.python_runtime(script)
+            self.assertEqual(selected, interpreter)
+            self.assertEqual(root, project / ".venv")
+            self.assertEqual(environment["VIRTUAL_ENV"], str(project / ".venv"))
 
 
 class MigrationTests(unittest.TestCase):

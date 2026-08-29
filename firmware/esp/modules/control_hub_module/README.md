@@ -55,6 +55,7 @@ Não alimente o KY-040 com 5 V: suas saídas chegariam aos GPIO do ESP32 acima d
 - `EXECUCAO` contém os oito slots configurados em `http://127.0.0.1:8770`;
 - gire o KY-040 para mudar o item e pressione para selecionar ou voltar;
 - cada slot pode executar um comando de terminal ou um arquivo Python configurado no serviço;
+- cada script pode usar sua própria venv configurada no slot;
 - o ESP32 envia `EXEC,<slot>,<modo>,<payload_base64url>`;
 - o serviço só executa a solicitação quando modo e payload coincidem com o perfil salvo;
 - durante a execução, pressione novamente o encoder em `PARAR EXECUCAO` para enviar `STOP,<slot>`.
@@ -65,14 +66,18 @@ Windows e `sh` no Linux. A rotina interna e imutável de parada do Open-RDK é
 chamada depois de toda execução, inclusive falha, timeout ou interrupção. Use caminhos
 absolutos e execute o serviço com uma conta de usuário com permissões mínimas.
 
+O serviço conecta e reconecta o módulo automaticamente; a página não possui
+seleção manual de porta. Ela mostra apenas scripts/comandos, diretórios,
+execução manual e logs.
+
 ## IMU e calibração
 
 O filtro complementar combina a inclinação absoluta do acelerômetro com a velocidade angular do giroscópio. Roll e pitch são estabilizados pela gravidade. Como o MPU6050 não possui magnetômetro, yaw é um ângulo relativo integrado pelo giroscópio.
 
-Na seção `IMU` da página do serviço, mantenha o módulo completamente parado e
-pressione `Calibrar`. O firmware coleta 250 amostras durante aproximadamente 5
-segundos, calcula a média do drift dos três eixos — incluindo o drift de yaw no
-eixo Z —, zera o yaw e grava o bias na NVS.
+Ao enviar `CALIBRATE IMU`, mantenha o módulo completamente parado. O firmware
+coleta 250 amostras durante aproximadamente 5 segundos, calcula a média do
+drift dos três eixos — incluindo o drift de yaw no eixo Z —, zera o yaw e grava
+o bias na NVS.
 
 Comandos disponíveis:
 

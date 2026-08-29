@@ -22,7 +22,8 @@ def default_config() -> dict:
         "device_name": "Modulo de controle",
         "menu": [{
             "enabled": False, "name": f"Opcao {index + 1}", "kind": "command",
-            "command": "", "script": "", "shell": "auto", "timeout_sec": 30,
+            "command": "", "script": "", "python_env": "", "shell": "auto",
+            "timeout_sec": 30,
         } for index in range(8)],
         "stop_action": {"enabled": True, "kind": "builtin_openrdk", "readonly": True,
                         "timeout_sec": 15},
@@ -51,6 +52,13 @@ class ExecutionManager:
         for key in ("device_name", "connection", "menu"):
             if key in stored:
                 current[key] = stored[key]
+        stored_menu = current["menu"] if isinstance(current.get("menu"), list) else []
+        defaults = default_config()["menu"]
+        current["menu"] = [
+            {**defaults[index], **(stored_menu[index] if index < len(stored_menu) and isinstance(stored_menu[index], dict) else {})}
+            for index in range(8)
+        ]
+        current["connection"]["auto_connect"] = True
         current["stop_action"] = dict(default_config()["stop_action"])
         return current
 
@@ -99,6 +107,7 @@ class ExecutionManager:
             "enabled": bool(raw.get("enabled")), "kind": kind,
             "command": str(raw.get("command") or "").strip(),
             "script": str(raw.get("script") or "").strip(),
+            "python_env": str(raw.get("python_env") or "").strip(),
             "shell": shell, "timeout_sec": timeout,
         }
         if menu:
@@ -108,6 +117,10 @@ class ExecutionManager:
             raise ValueError("every enabled action needs a command or script")
         if any(character in target for character in ("\x00", "\r", "\n")):
             raise ValueError("an action target contains an invalid character")
+        if any(character in action["python_env"] for character in ("\x00", "\r", "\n")):
+            raise ValueError("the Python environment path contains an invalid character")
+        if len(action["python_env"].encode("utf-8")) > 2048:
+            raise ValueError("the Python environment path is too long")
         if menu and len(action["name"].encode("utf-8")) > 30:
             raise ValueError("menu names are limited to 30 UTF-8 bytes")
         if menu and action["enabled"] and not action["name"]:
@@ -281,6 +294,51 @@ class ExecutionManager:
             except ProcessLookupError:
                 pass
 
+    @staticmethod
+    def _venv_interpreter(root: Path) -> Path | None:
+        candidates = (
+            root / "Scripts" / "python.exe",
+            root / "bin" / "python",
+            root / "bin" / "python3",
+        )
+        return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+    @classmethod
+    def python_runtime(cls, script: Path, configured: str = "") -> tuple[Path, dict[str, str], Path | None]:
+        interpreter: Path | None = None
+        venv_root: Path | None = None
+        value = os.path.expandvars(os.path.expanduser(str(configured or "").strip()))
+        if value:
+            selected = Path(value).resolve()
+            if selected.is_dir():
+                interpreter = cls._venv_interpreter(selected)
+                venv_root = selected
+                if interpreter is None:
+                    raise FileNotFoundError(f"Python interpreter was not found in virtual environment: {selected}")
+            elif selected.is_file():
+                interpreter = selected
+                venv_root = selected.parent.parent if selected.parent.name.lower() in ("bin", "scripts") else selected.parent
+            else:
+                raise FileNotFoundError(f"Python environment does not exist: {selected}")
+        else:
+            for parent in (script.parent, *script.parents):
+                for name in (".venv", "venv"):
+                    candidate = parent / name
+                    found = cls._venv_interpreter(candidate)
+                    if found is not None:
+                        interpreter, venv_root = found, candidate
+                        break
+                if interpreter is not None:
+                    break
+        interpreter = interpreter or Path(sys.executable).resolve()
+        environment = os.environ.copy()
+        if venv_root is not None:
+            environment["VIRTUAL_ENV"] = str(venv_root)
+            environment.pop("PYTHONHOME", None)
+            executable_dir = str(interpreter.parent)
+            environment["PATH"] = executable_dir + os.pathsep + environment.get("PATH", "")
+        return interpreter, environment, venv_root
+
     def _execute_action(self, action: dict, stop_event: threading.Event | None = None) -> dict:
         started = time.time()
         kind = action["kind"]
@@ -289,18 +347,36 @@ class ExecutionManager:
             action["script"] if kind == "python" else action["command"]
         )
         resolved_shell = "python" if kind in ("python", "builtin_openrdk") else action["shell"]
+        working_directory = Path.cwd()
+        process_environment = None
+        python_interpreter = ""
+        python_environment = ""
         process = None
         try:
             if builtin:
                 path = Path(__file__).with_name("builtin_motor_stop.py")
-                argv = [sys.executable, "-u", str(path)]
+                interpreter, process_environment, venv_root = self.python_runtime(
+                    path, action.get("python_env", ""),
+                )
+                argv = [str(interpreter), "-u", str(path)]
+                python_interpreter = str(interpreter)
+                python_environment = str(venv_root or "")
             elif kind == "python":
                 path = self.scripts.resolve(target)
-                argv = [sys.executable, "-u", str(path)]
+                interpreter, process_environment, venv_root = self.python_runtime(
+                    path, action.get("python_env", ""),
+                )
+                argv = [str(interpreter), "-u", str(path)]
+                working_directory = path.parent
+                python_interpreter = str(interpreter)
+                python_environment = str(venv_root or "")
             else:
                 argv, resolved_shell = self.command_argv(target, action["shell"])
-            options = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
-                       "shell": False, "cwd": str(Path.cwd())}
+            options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE,
+                       "stderr": subprocess.PIPE, "text": True, "shell": False,
+                       "cwd": str(working_directory)}
+            if process_environment is not None:
+                options["env"] = process_environment
             if os.name == "nt":
                 options["creationflags"] = subprocess.CREATE_NO_WINDOW
             else:
@@ -318,7 +394,8 @@ class ExecutionManager:
                     "kind": kind, "target": target, "shell": resolved_shell,
                     "returncode": process.returncode, "stdout": (stdout or "")[-self.OUTPUT_LIMIT:],
                     "stderr": (stderr or "")[-self.OUTPUT_LIMIT:], "started_at": started,
-                    "finished_at": time.time()}
+                    "finished_at": time.time(), "python_interpreter": python_interpreter,
+                    "python_env": python_environment}
         except subprocess.TimeoutExpired as exc:
             if process is not None:
                 self.terminate_process(process)
@@ -331,10 +408,12 @@ class ExecutionManager:
             return {"state": "timeout", "kind": kind, "target": target, "shell": resolved_shell,
                     "stdout": str(stdout or "")[-self.OUTPUT_LIMIT:],
                     "stderr": str(stderr or "")[-self.OUTPUT_LIMIT:], "started_at": started,
-                    "finished_at": time.time(), "error": "execution timeout"}
+                    "finished_at": time.time(), "error": "execution timeout",
+                    "python_interpreter": python_interpreter, "python_env": python_environment}
         except Exception as exc:
             return {"state": "failed", "kind": kind, "target": target, "shell": resolved_shell,
-                    "started_at": started, "finished_at": time.time(), "error": str(exc)}
+                    "started_at": started, "finished_at": time.time(), "error": str(exc),
+                    "python_interpreter": python_interpreter, "python_env": python_environment}
 
     def _run(
         self, slot: int, action: dict, source: str, stop_event: threading.Event,
@@ -345,7 +424,10 @@ class ExecutionManager:
         result = self._execute_action(action, stop_event)
 
         # Safety invariant: this action runs in a finally-equivalent path after every exit.
-        motor_stop = self._execute_action(stop_action)
+        stop_runtime = dict(stop_action)
+        if action.get("kind") == "python" and action.get("python_env"):
+            stop_runtime["python_env"] = action["python_env"]
+        motor_stop = self._execute_action(stop_runtime)
         status = {
             **result, "slot": slot, "name": action.get("name", ""), "source": source,
             "motor_stop": motor_stop,

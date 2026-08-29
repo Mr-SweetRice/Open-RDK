@@ -1,6 +1,6 @@
 # Open-RDK
 
-Host relay, web UI, SDK, and ESP32-C3 firmware modules for the RDK platform.
+Host relay, web UI, SDK, services, and ESP32 firmware modules for the RDK platform.
 
 The current Python SDK release is `openrdk` 0.2.0 and includes the
 HC-SR04-based `distance_sensor_module`.
@@ -35,9 +35,21 @@ If HTTP redirect is enabled and port 80 is available, `http://rdk.local` redirec
 
 The control module is deliberately excluded from the relay and SDK. Run its
 standalone service from `services/control_hub` and open
-`http://127.0.0.1:8770`. The service owns the module port only while connected;
-disconnecting it releases the port for other programs. See
+`http://127.0.0.1:8770`. The service finds the module automatically, reconnects
+after USB interruptions, and reserves its port so the host relay does not open
+it. See
 [`docs/control-hub-module.md`](docs/control-hub-module.md).
+
+On a Raspberry Pi with this repository already downloaded, install and enable
+the control-module service at boot with:
+
+```bash
+cd services/control_hub
+sudo python3 install_raspberry_pi.py
+```
+
+See [`services/control_hub/README_RASPBERRY_PI.md`](services/control_hub/README_RASPBERRY_PI.md)
+for status, logs, updates, and manual recovery instructions.
 
 ## Firmware
 
